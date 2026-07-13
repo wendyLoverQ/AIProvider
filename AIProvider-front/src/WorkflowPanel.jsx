@@ -36,8 +36,9 @@ function displayLabel(fieldKey, fieldSpec) {
 function NumberField({ fieldKey, fieldSpec, value, onChange }) {
   const decimal = ["cfg", "denoise", "secondPassDenoise"].includes(fieldKey);
   const max = ["denoise", "secondPassDenoise"].includes(fieldKey) ? 1 : undefined;
+  const dimension = ["width", "height"].includes(fieldKey);
   const label = displayLabel(fieldKey, fieldSpec);
-  return <label>{label}<input aria-label={label} type="number" min="0" max={max} step={decimal ? "0.01" : "1"} value={value ?? ""} onChange={(event) => onChange(fieldKey, event.target.value === "" ? "" : Number(event.target.value))} /></label>;
+  return <label>{label}<input aria-label={label} type="number" min={dimension ? "4" : "0"} max={max} step={dimension ? "4" : decimal ? "0.01" : "1"} value={value ?? ""} onChange={(event) => onChange(fieldKey, event.target.value === "" ? "" : Number(event.target.value))} /></label>;
 }
 
 function SelectField({ fieldKey, value, onChange }) {
@@ -57,7 +58,7 @@ function SizeField({ width, height, onChange }) {
     onChange("width", nextWidth); onChange("height", nextHeight);
   };
   return <div className="workflow-panel__size">
-    <label>画面尺寸<select aria-label="画面尺寸" value={preset} onChange={(event) => choose(event.target.value)}>
+    <label>最终输出尺寸<select aria-label="最终输出尺寸" value={preset} onChange={(event) => choose(event.target.value)}>
       {SIZE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       <option value="custom">自定义</option>
     </select></label>
@@ -69,8 +70,8 @@ function SeedField({ value, random, onChange }) {
   return <div className="workflow-panel__seed">
     <span>种子模式</span>
     <div className="workflow-panel__segments">
-      <button type="button" className={random ? "active" : ""} onClick={() => onChange("randomSeed", true)}>随机种子</button>
-      <button type="button" className={!random ? "active" : ""} onClick={() => onChange("randomSeed", false)}>固定种子</button>
+      <button type="button" aria-label="随机种子" className={random ? "active" : ""} onClick={() => onChange("randomSeed", true)}>随机</button>
+      <button type="button" aria-label="固定种子" className={!random ? "active" : ""} onClick={() => onChange("randomSeed", false)}>固定</button>
     </div>
     {!random && <NumberField fieldKey="seed" value={value} onChange={onChange} />}
   </div>;
@@ -79,7 +80,7 @@ function SeedField({ value, random, onChange }) {
 function WorkflowField({ fieldKey, fieldSpec, value, workflow, referenceFile, onReference, onChange }) {
   const label = displayLabel(fieldKey, fieldSpec);
   if (fieldKey === "sourceImage") return <label className="workflow-panel__file">待处理原图<input aria-label="待处理原图" type="file" accept="image/*" onChange={(event) => onReference("sourceImage", event)} /><span><UploadSimple />{referenceFile?.name || "选择图片"}</span></label>;
-  if (["positivePrompt", "negativePrompt", "loras"].includes(fieldKey)) return <label>{LABELS[fieldKey]}<textarea aria-label={LABELS[fieldKey]} rows={fieldKey === "positivePrompt" ? 5 : 3} value={value ?? ""} onChange={(event) => onChange(fieldKey, event.target.value)} /></label>;
+  if (["positivePrompt", "negativePrompt", "loras"].includes(fieldKey)) return <label className={fieldKey === "positivePrompt" || fieldKey === "negativePrompt" ? "workflow-panel__prompt-field" : undefined}>{LABELS[fieldKey]}<textarea aria-label={LABELS[fieldKey]} rows={fieldKey === "positivePrompt" ? 9 : fieldKey === "negativePrompt" ? 7 : 3} value={value ?? ""} onChange={(event) => onChange(fieldKey, event.target.value)} /></label>;
   if (fieldKey === "checkpoint" && workflow.models?.length) return <label>{LABELS.checkpoint}<select aria-label={LABELS.checkpoint} value={value || workflow.models[0]} onChange={(event) => onChange(fieldKey, event.target.value)}>{workflow.models.map((model) => <option key={model} value={model}>{model}</option>)}</select></label>;
   if (SELECT_OPTIONS[fieldKey]) return <SelectField fieldKey={fieldKey} value={value} onChange={onChange} />;
   if (typeof value === "number" || ["width", "height", "batchSize", "seed", "steps", "cfg", "denoise", "secondPassSteps", "secondPassDenoise", "secondPassSeed"].includes(fieldKey)) return <NumberField fieldKey={fieldKey} fieldSpec={fieldSpec} value={value} onChange={onChange} />;
@@ -87,8 +88,7 @@ function WorkflowField({ fieldKey, fieldSpec, value, workflow, referenceFile, on
   return <label>{label}<input aria-label={label} value={value ?? ""} onChange={(event) => onChange(fieldKey, event.target.value)} /></label>;
 }
 
-export default function WorkflowPanel({ workflows, loading, workflow, fieldKeys, fieldSpecs, values, onWorkflowChange, onFieldChange, referenceFiles, onReference, presets, presetQuery, onPresetChange, appliedPresetTitle, presetTitle, onPresetTitleChange, onSavePreset, onGenerate, disabled }) {
-  const compatiblePresets = workflow ? presets.filter((preset) => preset.workflowId === workflow.id) : [];
+export default function WorkflowPanel({ workflows, loading, workflow, fieldKeys, fieldSpecs, values, onWorkflowChange, onFieldChange, referenceFiles, onReference, presets, presetQuery, onPresetChange, appliedPresetTitle, onGenerate, disabled }) {
   const supportsPrompt = fieldKeys.includes("positivePrompt") || fieldKeys.includes("negativePrompt");
   const editorKey = fieldKeys.find((fieldKey) => fieldSpecs[fieldKey]?.nodeType === "MaskEditMEC" && fieldSpecs[fieldKey]?.input === "editor_data");
   const editorNodeId = editorKey ? fieldSpecs[editorKey]?.nodeId : null;
@@ -122,14 +122,13 @@ export default function WorkflowPanel({ workflows, loading, workflow, fieldKeys,
     </section> : <section className="workflow-panel__empty">请先启动 ComfyUI 并读取工作流。</section>}
 
     {supportsPrompt && <section className="workflow-panel__presets">
-      <header><strong>Prompt 方案</strong><small>只回填当前工作流已有参数</small></header>
+      <header><strong>Prompt 方案</strong><small>方案全局可用，只回填正向和反向 Prompt</small></header>
       <select aria-label="Prompt 方案" value={presetQuery} onChange={(event) => onPresetChange(event.target.value)}>
         <option value="">请选择 Prompt 方案</option>
-        {compatiblePresets.map((preset) => <option key={preset.id} value={String(preset.id)}>{preset.title}</option>)}
+        {presets.map((preset) => <option key={preset.id} value={String(preset.id)}>{preset.title}</option>)}
       </select>
-      {!compatiblePresets.length && <small>当前工作流还没有 Prompt 方案。</small>}
+      {!presets.length && <small>还没有 Prompt 方案。</small>}
       {appliedPresetTitle && <div>已应用：{appliedPresetTitle}</div>}
-      <footer><input aria-label="新方案名称" value={presetTitle} onChange={(event) => onPresetTitleChange(event.target.value)} placeholder="新方案名称" /><button type="button" onClick={onSavePreset}>保存当前配置</button></footer>
     </section>}
 
     {workflow && advancedFieldKeys.length > 0 && <details className="workflow-panel__advanced workflow-panel__advanced--bottom"><summary><span>高级选项</span><small>{advancedFieldKeys.length} 项</small></summary><div className="workflow-panel__fields">{advancedFieldKeys.map(renderField)}</div></details>}

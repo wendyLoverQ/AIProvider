@@ -28,6 +28,12 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context => {
     var error = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
     if (error != null) app.Logger.LogError(error, "Local ComfyUI bridge request failed: {Path}", context.Request.Path);
     await AppendAgentLog("error", "request.exception", error?.Message ?? "Unknown exception", new { path = context.Request.Path.Value, exception = error?.ToString() });
+    var origin = context.Request.Headers.Origin.ToString();
+    if (!string.IsNullOrEmpty(origin) && settings.AllowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase)) {
+        context.Response.Headers.AccessControlAllowOrigin = origin;
+        context.Response.Headers["Access-Control-Allow-Private-Network"] = "true";
+        context.Response.Headers.Vary = "Origin";
+    }
     context.Response.StatusCode = StatusCodes.Status502BadGateway;
     context.Response.ContentType = "application/json";
     await context.Response.WriteAsJsonAsync(new { success = false, message = error?.Message ?? "Local ComfyUI bridge request failed" });
@@ -56,6 +62,7 @@ app.Use(async (context, next) => {
                         context.Request.Path.StartsWithSegments("/api/comfy/start") ||
                         context.Request.Path.StartsWithSegments("/api/comfy/stop") ||
                         context.Request.Path.StartsWithSegments("/api/history") ||
+                        context.Request.Path.StartsWithSegments("/api/tasks") ||
                         context.Request.Path.StartsWithSegments("/api/gallery") ||
                         context.Request.Path.StartsWithSegments("/api/assets") ||
                         context.Request.Path.StartsWithSegments("/api/migration") ||
@@ -130,6 +137,47 @@ app.MapPost("/api/comfy/stop", async (IHttpClientFactory factory) => {
     for (var i = 0; i < 15; i++) { if (!await IsComfyRunning(factory)) return Results.Ok(new { success = true, running = false, message = "ComfyUI stopped" }); await Task.Delay(500); }
     return Results.Problem("ComfyUI process was stopped but the API is still reachable", statusCode: 500);
 });
+
+app.MapPost("/api/tasks/{promptId}/cancel", async (string promptId, IHttpClientFactory factory) => {
+    promptId = (promptId ?? "").Trim();
+    if (promptId.Length == 0 || promptId.Length > 200)
+        return Results.BadRequest(new { success = false, message = "任务 ID 不合法" });
+    var client = factory.CreateClient("comfy");
+    async Task<(bool Pending, bool Running)> FindTask() {
+        using var response = await client.GetAsync("queue");
+        response.EnsureSuccessStatusCode();
+        var queue = JsonNode.Parse(await response.Content.ReadAsStringAsync()) as JsonObject
+            ?? throw new InvalidOperationException("ComfyUI queue 返回格式无效");
+        bool Contains(string key) => queue[key] is JsonArray rows && rows.Any(row =>
+            row is JsonArray cells && cells.Count > 1 && string.Equals(cells[1]?.ToString(), promptId, StringComparison.Ordinal));
+        return (Contains("queue_pending"), Contains("queue_running"));
+    }
+    var initial = await FindTask();
+    var pending = initial.Pending;
+    var runningTask = initial.Running;
+    if (!pending && !runningTask)
+        return Results.Ok(new { success = true, promptId, cancelled = false, wasPending = false, wasRunning = false });
+    if (pending) {
+        using var deleteResponse = await client.PostAsJsonAsync("queue", new { delete = new[] { promptId } });
+        deleteResponse.EnsureSuccessStatusCode();
+    }
+    if (runningTask) {
+        using var interruptResponse = await client.PostAsJsonAsync("interrupt", new { prompt_id = promptId });
+        interruptResponse.EnsureSuccessStatusCode();
+    }
+    for (var attempt = 0; attempt < 120; attempt++) {
+        await Task.Delay(250);
+        var current = await FindTask();
+        if (!current.Pending && !current.Running)
+            return Results.Ok(new { success = true, promptId, cancelled = true, wasPending = pending, wasRunning = runningTask });
+        if (current.Running && attempt % 8 == 7) {
+            using var retryResponse = await client.PostAsJsonAsync("interrupt", new { prompt_id = promptId });
+            retryResponse.EnsureSuccessStatusCode();
+        }
+    }
+    return Results.Json(new { success = false, promptId, cancelled = false, wasPending = pending, wasRunning = runningTask,
+        message = "任务已收到中断请求，但当前节点在 30 秒内没有停止，请稍后重试" }, statusCode: StatusCodes.Status409Conflict);
+}).DisableAntiforgery();
 
 app.MapGet("/api/twitter/status", (TwitterLocalPublisher twitter) => Results.Ok(new { success = true, data = twitter.Status() }));
 app.MapPost("/api/twitter/connect", async (TwitterLocalLoginRequest request, TwitterLocalPublisher twitter) => {
@@ -271,11 +319,34 @@ app.MapPost("/api/generate", async (HttpRequest request, IHttpClientFactory fact
     if (Has("positivePrompt")) Write("positivePrompt", Required("positivePrompt"));
     if (Has("negativePrompt")) Write("negativePrompt", Required("negativePrompt"));
     if (Has("loras")) Write("loras", form["loras"].ToString());
-    if (Has("width")) Write("width", int.Parse(Required("width")));
-    if (Has("height")) Write("height", int.Parse(Required("height")));
+    var outputWidth = Has("width") ? int.Parse(Required("width")) : 0;
+    var outputHeight = Has("height") ? int.Parse(Required("height")) : 0;
+    var tileUpscaleNodeIds = prompt
+        .Where(entry => entry.Value?["class_type"]?.GetValue<string>()?.Contains("UltimateSDUpscale", StringComparison.OrdinalIgnoreCase) == true &&
+                        entry.Value?["inputs"]?["upscale_by"] != null)
+        .Select(entry => entry.Key)
+        .ToHashSet(StringComparer.Ordinal);
+    var usesTileUpscale = tileUpscaleNodeIds.Count > 0 && Has("width") && Has("height");
+    if (usesTileUpscale && (outputWidth <= 0 || outputHeight <= 0 || outputWidth % 4 != 0 || outputHeight % 4 != 0))
+        throw new InvalidOperationException("最终输出宽高必须是大于 0 且能被 4 整除的整数");
+    if (Has("width")) Write("width", usesTileUpscale ? outputWidth * 3 / 4 : outputWidth);
+    if (Has("height")) Write("height", usesTileUpscale ? outputHeight * 3 / 4 : outputHeight);
     if (Has("batchSize")) Write("batchSize", int.Parse(Required("batchSize")));
-    if (Has("width")) WriteIf("finalWidth", int.Parse(Required("width")) * 2);
-    if (Has("height")) WriteIf("finalHeight", int.Parse(Required("height")) * 2);
+    if (usesTileUpscale) {
+        foreach (var entry in prompt.Where(entry => tileUpscaleNodeIds.Contains(entry.Key)))
+            if (entry.Value?["inputs"] is JsonObject tileInputs) tileInputs["upscale_by"] = 4.0 / 3.0;
+        foreach (var entry in prompt) {
+            if (entry.Value?["class_type"]?.GetValue<string>()?.Equals("ImageScale", StringComparison.OrdinalIgnoreCase) != true ||
+                entry.Value?["inputs"] is not JsonObject scaleInputs ||
+                scaleInputs["image"] is not JsonArray imageLink || imageLink.Count == 0 ||
+                imageLink[0] is not JsonValue sourceValue || !sourceValue.TryGetValue<string>(out var sourceId) ||
+                !tileUpscaleNodeIds.Contains(sourceId)) continue;
+            if (scaleInputs.ContainsKey("width")) scaleInputs["width"] = outputWidth;
+            if (scaleInputs.ContainsKey("height")) scaleInputs["height"] = outputHeight;
+        }
+    }
+    if (Has("width")) WriteIf("finalWidth", outputWidth);
+    if (Has("height")) WriteIf("finalHeight", outputHeight);
     var actualSeed = Has("seed")
         ? (string.Equals(form["randomSeed"], "true", StringComparison.OrdinalIgnoreCase)
             ? Random.Shared.NextInt64(0, long.MaxValue) : long.Parse(Required("seed")))
@@ -852,6 +923,19 @@ JsonObject BuildLocalWorkflow(string relative, DateTime modifiedAtUtc, JsonObjec
     var sourceImage = Find(node => node["class_type"]?.GetValue<string>() == "LoadImage" && node["inputs"]?["image"] != null);
     if (sourceImage != null) Bind("sourceImage", sourceImage, "image");
     var secondPass = Find(node => node["class_type"]?.GetValue<string>()?.Contains("UltimateSDUpscale", StringComparison.OrdinalIgnoreCase) == true);
+    KeyValuePair<string, JsonObject>? exactOutputScale = null;
+    if (secondPass != null) {
+        var tileNodeId = secondPass.Value.Key;
+        exactOutputScale = Find(node =>
+            node["class_type"]?.GetValue<string>()?.Equals("ImageScale", StringComparison.OrdinalIgnoreCase) == true &&
+            node["inputs"]?["width"] != null && node["inputs"]?["height"] != null &&
+            node["inputs"]?["image"] is JsonArray imageLink && imageLink.Count > 0 &&
+            imageLink[0] is JsonValue sourceValue && sourceValue.TryGetValue<string>(out var sourceId) && sourceId == tileNodeId);
+        if (exactOutputScale?.Value["inputs"] is JsonObject exactInputs) {
+            defaults["width"] = exactInputs["width"]?.DeepClone();
+            defaults["height"] = exactInputs["height"]?.DeepClone();
+        }
+    }
     if (secondPass != null) {
         Bind("secondPassSteps", secondPass, "steps");
         Bind("secondPassDenoise", secondPass, "denoise");
@@ -874,6 +958,8 @@ JsonObject BuildLocalWorkflow(string relative, DateTime modifiedAtUtc, JsonObjec
         foreach (var input in inputs) {
             if (input.Value is not JsonValue) continue;
             if (boundInputs.Contains($"{entry.Key}::{input.Key}")) continue;
+            if (secondPass != null && entry.Key == secondPass.Value.Key && input.Key == "upscale_by") continue;
+            if (exactOutputScale != null && entry.Key == exactOutputScale.Value.Key && (input.Key == "width" || input.Key == "height")) continue;
             var nodeType = entry.Value["class_type"]?.GetValue<string>() ?? "Node";
             var key = $"node_{SafeKeyPart(entry.Key)}_{SafeKeyPart(input.Key)}";
             Bind(key, entry, input.Key, $"{nodeType} {entry.Key} · {input.Key}");

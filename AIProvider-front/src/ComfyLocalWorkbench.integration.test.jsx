@@ -59,9 +59,10 @@ describe("Comfy image generation flow", () => {
   let externalRun;
   let externalQueuePoll;
   let externalGalleryReady;
-  let savedPreset;
   let submittedEditorData;
   let savedTwitterTask;
+  let presetIsDefault;
+  let cancelledTask;
 
   beforeEach(() => {
     submitted = false;
@@ -70,9 +71,10 @@ describe("Comfy image generation flow", () => {
     externalRun = false;
     externalQueuePoll = 0;
     externalGalleryReady = false;
-    savedPreset = null;
     submittedEditorData = null;
     savedTwitterTask = null;
+    presetIsDefault = false;
+    cancelledTask = null;
     vi.stubGlobal("confirm", vi.fn(() => true));
     vi.stubGlobal("fetch", vi.fn(async (input, options = {}) => {
       const url = String(input);
@@ -80,11 +82,7 @@ describe("Comfy image generation flow", () => {
       if (url.endsWith("/api/comfy/status")) return json({ running: true, platform: "Windows", configured: true });
       if (url.endsWith("/api/local-workflows/settings")) return json({ directory: "F:\\ComfyUI\\user\\default\\workflows", exists: true });
       if (url.endsWith("/api/local-workflows")) return json({ directory: "F:\\ComfyUI\\user\\default\\workflows", workflows: [workflow, workflow2, cutoutWorkflow, interactiveWorkflow], rejected: [] });
-      if (url.includes("/api/comfy-presets") && options.method === "POST") {
-        savedPreset = JSON.parse(options.body);
-        return json({ code: 200, data: savedPreset });
-      }
-      if (url.includes("/api/comfy-presets")) return json({ code: 200, data: [{ id: 2, title: "扶她0", workflowId: "futa01", outputFolder: "aimaid", parameters: { positivePrompt: "preset prompt", width: 1080, height: 1920 } }] });
+      if (url.includes("/api/comfy-presets")) return json({ code: 200, data: [{ id: 2, title: "扶她0", defaultPreset: presetIsDefault, outputFolder: "aimaid", parameters: { positivePrompt: "preset prompt", width: 1080, height: 1920 } }] });
       if (url.startsWith("/api/assets?")) return json({ code: 200, data: { page: 1, pages: 1, total: 1, items: [{ id: 12, platform: "Windows", localPath: "C:\\assets\\saved.png", localUrl: "http://127.0.0.1:32145/api/assets/file?path=saved.png", fileName: "saved.png", fileSize: 8 }] } });
       if (url.endsWith("/api/twitter/accounts")) return json({ code: 200, data: [{ id: 2, username: "tester", sessionStatus: "CONNECTED" }] });
       if (url.endsWith("/api/twitter/posts/local-scheduled") && options.method === "POST") {
@@ -94,12 +92,18 @@ describe("Comfy image generation flow", () => {
       if (url === "blob:done") return new Response(new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], { type: "image/png" }));
       if (url.endsWith("/api/folders")) return json({ folders: ["aimaid", "favorites"] });
       if (url.endsWith("/api/migration/settings")) return json({ directory: "C:\\Users\\49213\\Desktop\\A\\ai成品" });
+      if (url.includes("/api/tasks/") && url.endsWith("/cancel") && options.method === "POST") {
+        cancelledTask = decodeURIComponent(url.split("/api/tasks/")[1].replace("/cancel", ""));
+        return json({ success: true, cancelled: true, promptId: cancelledTask });
+      }
       if (url.endsWith("/comfy/queue")) {
-        if (externalRun && externalQueuePoll++ === 0) return json({ queue_running: [[0, "external-prompt"]], queue_pending: [] });
+        if (externalRun && externalQueuePoll++ === 0) return json({ queue_running: [[0, "external-prompt", workflow.definition, {}, ["7"]]], queue_pending: [] });
         if (externalRun) externalGalleryReady = true;
         return json({ queue_running: [], queue_pending: [] });
       }
-      if (url.endsWith("/comfy/aiprovider/progress")) return json({ promptId: "", nodes: {} });
+      if (url.endsWith("/comfy/aiprovider/progress")) return externalRun
+        ? json({ promptId: "external-prompt", nodes: { "5": { state: "finished" }, "4": { state: "running", value: 5, max: 10 } } })
+        : json({ promptId: "", nodes: {} });
       if (url.endsWith("/api/gallery/move") && options.method === "POST") {
         const body = JSON.parse(options.body);
         expect(body).toEqual({ paths: ["aimaid/done.png"] });
@@ -146,12 +150,23 @@ describe("Comfy image generation flow", () => {
     expect(screen.getByText("1 张")).toBeTruthy();
   }, 8000);
 
+  it("cancels a queued generation from its compact close button", async () => {
+    render(<ComfyLocalWorkbench />);
+    const generate = await screen.findByRole("button", { name: "开始生成" });
+    await waitFor(() => expect(generate.disabled).toBe(false));
+    fireEvent.click(generate);
+    const cancel = await screen.findByRole("button", { name: `取消任务 ${PROMPT_ID}` });
+    fireEvent.click(cancel);
+    await waitFor(() => expect(cancelledTask).toBe(PROMPT_ID));
+    expect(screen.queryByRole("button", { name: `取消任务 ${PROMPT_ID}` })).toBeNull();
+  });
+
   it("edits workflow dimensions and cuts selected results into a chosen folder", async () => {
     render(<ComfyLocalWorkbench />);
     const generate = await screen.findByRole("button", { name: "开始生成" });
     await waitFor(() => expect(generate.disabled).toBe(false));
 
-    fireEvent.change(screen.getByRole("combobox", { name: "画面尺寸" }), { target: { value: "custom" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "最终输出尺寸" }), { target: { value: "custom" } });
     fireEvent.change(screen.getByRole("spinbutton", { name: "宽度" }), { target: { value: "960" } });
     fireEvent.change(screen.getByRole("spinbutton", { name: "高度" }), { target: { value: "1600" } });
 
@@ -190,12 +205,8 @@ describe("Comfy image generation flow", () => {
     expect(screen.getByRole("spinbutton", { name: "secondPassSteps" }).value).toBe("22");
     expect(screen.getByRole("spinbutton", { name: "secondPassDenoise" }).value).toBe("0.28");
     expect(screen.getByRole("spinbutton", { name: "secondPassSeed" }).value).toBe("12");
-    const dynamic = screen.getByRole("checkbox", { name: "KSampler 4 · control_after_generate" });
-    fireEvent.click(dynamic);
-    fireEvent.change(screen.getByRole("textbox", { name: "新方案名称" }), { target: { value: "updated workflow config" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存当前配置" }));
-    await waitFor(() => expect(savedPreset?.parameters?.node_4_control_after_generate).toBe(true));
-    expect(savedPreset.workflowId).toBe("futa02");
+    expect(screen.queryByRole("textbox", { name: "新方案名称" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "保存当前配置" })).toBeNull();
     expect(galleryRequests).toBe(requestsBeforeSwitch);
   });
 
@@ -207,6 +218,22 @@ describe("Comfy image generation flow", () => {
     expect(screen.getByRole("textbox", { name: "正向提示词" }).value).toBe("preset prompt");
   });
 
+  it("keeps every Prompt scheme available after switching workflows", async () => {
+    render(<ComfyLocalWorkbench />);
+    let schemes = await screen.findByRole("combobox", { name: "Prompt 方案" });
+    expect(Array.from(schemes.options).some((option) => option.text === "扶她0")).toBe(true);
+    fireEvent.change(screen.getByRole("combobox", { name: "当前生成工作流" }), { target: { value: "futa02" } });
+    schemes = screen.getByRole("combobox", { name: "Prompt 方案" });
+    expect(Array.from(schemes.options).some((option) => option.text === "扶她0")).toBe(true);
+  });
+
+  it("automatically applies the scheme marked as default", async () => {
+    presetIsDefault = true;
+    render(<ComfyLocalWorkbench />);
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Prompt 方案" }).value).toBe("2"));
+    expect(screen.getByRole("textbox", { name: "正向提示词" }).value).toBe("preset prompt");
+  });
+
   it("refreshes the gallery when an external ComfyUI task leaves the queue", async () => {
     externalRun = true;
     render(<ComfyLocalWorkbench />);
@@ -214,6 +241,16 @@ describe("Comfy image generation flow", () => {
     expect(image.getAttribute("src")).toBe("blob:done");
     expect(galleryRequests).toBeGreaterThan(1);
   }, 8000);
+
+  it("shows node details to the right of the local and asset tabs", async () => {
+    externalRun = true;
+    render(<ComfyLocalWorkbench />);
+    const progress = await screen.findByRole("status");
+    expect(progress.textContent).toContain("节点 4");
+    expect(progress.textContent).toContain("节点 5/10");
+    expect(progress.textContent).toContain("总进度");
+    expect(progress.closest(".gallery-source-row")?.querySelector(".gallery-source-tabs")).not.toBeNull();
+  });
 
   it("uploads an asset-backed Twitter task with its asset id", async () => {
     render(<ComfyLocalWorkbench />);

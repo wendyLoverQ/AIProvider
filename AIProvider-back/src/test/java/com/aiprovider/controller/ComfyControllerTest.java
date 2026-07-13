@@ -15,7 +15,7 @@ class ComfyControllerTest {
     @Test void presetEndpointsDelegateToService() {
         ComfyPresetService service = mock(ComfyPresetService.class);
         ComfyPresetController controller = new ComfyPresetController(service);
-        ComfyPresetVO preset = new ComfyPresetVO(1L, "A", "futa01", "aimaid", Collections.emptyMap());
+        ComfyPresetVO preset = new ComfyPresetVO(1L, "A", "aimaid", Collections.emptyMap());
         when(service.list()).thenReturn(Collections.singletonList(preset)); when(service.create(any())).thenReturn(5L);
         assertThat(controller.list().getData()).containsExactly(preset);
         ComfyPresetDTO dto = new ComfyPresetDTO();

@@ -64,9 +64,12 @@ export function refreshWorkflowForm(form, workflow, previousRevision) {
 }
 
 export function applySchemeToWorkflow(form, scheme, workflow) {
-  if (!scheme || !workflow || scheme.workflowId !== workflow.id) return form;
-  const allowed = new Set([...getWorkflowFieldKeys(workflow), "randomSeed", "generateTransparent"]);
-  const parameters = Object.fromEntries(Object.entries(scheme.parameters || {}).filter(([key]) => allowed.has(key)));
+  if (!scheme || !workflow) return form;
+  const workflowFields = new Set(getWorkflowFieldKeys(workflow));
+  const allowed = new Set(["positivePrompt", "negativePrompt"].filter((key) => workflowFields.has(key)));
+  const parameters = Object.fromEntries(Object.entries(scheme.parameters || {}).filter(([key, value]) =>
+    allowed.has(key) && !(value === "" && form[key] !== undefined && form[key] !== ""),
+  ));
   return { ...form, ...parameters, workflowId: workflow.id };
 }
 
@@ -86,13 +89,44 @@ export function normalizeFolder(folder) {
   return value || "aimaid";
 }
 
-export function calculateComfyProgress(payload, promptId) {
+export function createComfyProgressPlan(definition, outputNodeIds = []) {
+  const graph = definition && typeof definition === "object" && !Array.isArray(definition) ? definition : {};
+  const requestedOutputs = (Array.isArray(outputNodeIds) ? outputNodeIds : [outputNodeIds])
+    .map(String)
+    .filter((nodeId) => graph[nodeId]);
+  const roots = requestedOutputs.length ? requestedOutputs : Object.keys(graph);
+  const planned = new Set();
+  const visit = (nodeId) => {
+    const id = String(nodeId);
+    const node = graph[id];
+    if (!node || planned.has(id)) return;
+    planned.add(id);
+    Object.values(node.inputs || {}).forEach((input) => {
+      if (Array.isArray(input) && input.length >= 2 && graph[String(input[0])]) visit(input[0]);
+    });
+  };
+  roots.forEach(visit);
+  return {
+    nodeIds: [...planned],
+    labels: Object.fromEntries([...planned].map((nodeId) => [
+      nodeId,
+      graph[nodeId]?._meta?.title || graph[nodeId]?.class_type || `节点 ${nodeId}`,
+    ])),
+  };
+}
+
+export function describeComfyProgress(payload, promptId, progressPlan) {
   if (!payload || String(payload.promptId || "") !== String(promptId)) return null;
-  const nodes = Object.values(payload.nodes || {});
-  if (!nodes.length) return null;
+  const nodes = payload.nodes || {};
+  const liveNodeIds = Object.keys(nodes);
+  if (!liveNodeIds.length) return null;
+  const plannedNodeIds = progressPlan?.nodeIds?.length
+    ? progressPlan.nodeIds.map(String)
+    : liveNodeIds;
   let completed = 0;
   let runningFraction = 0;
-  for (const node of nodes) {
+  for (const nodeId of plannedNodeIds) {
+    const node = nodes[nodeId];
     if (node?.state === "finished") completed += 1;
     else if (node?.state === "running") {
       const value = Number(node.value);
@@ -102,5 +136,28 @@ export function calculateComfyProgress(payload, promptId) {
       }
     }
   }
-  return Math.max(0, Math.min(99, Math.round(((completed + runningFraction) / nodes.length) * 100)));
+  const runningEntry = Object.entries(nodes).find(([, node]) => node?.state === "running");
+  const currentNode = runningEntry ? (() => {
+    const [nodeId, node] = runningEntry;
+    const value = Number(node.value);
+    const max = Number(node.max);
+    const hasSteps = Number.isFinite(value) && Number.isFinite(max) && max > 0;
+    return {
+      id: nodeId,
+      name: progressPlan?.labels?.[nodeId] || `节点 ${nodeId}`,
+      value: hasSteps ? value : null,
+      max: hasSteps ? max : null,
+    };
+  })() : null;
+  const totalNodes = plannedNodeIds.length;
+  return {
+    totalPercent: Math.max(0, Math.min(99, Math.round(((completed + runningFraction) / totalNodes) * 100))),
+    completedNodes: completed,
+    totalNodes,
+    currentNode,
+  };
+}
+
+export function calculateComfyProgress(payload, promptId, progressPlan) {
+  return describeComfyProgress(payload, promptId, progressPlan)?.totalPercent ?? null;
 }

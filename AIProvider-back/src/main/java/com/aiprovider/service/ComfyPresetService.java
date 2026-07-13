@@ -4,7 +4,6 @@ import com.aiprovider.mapper.ComfyPresetMapper;
 import com.aiprovider.model.dto.ComfyPresetDTO;
 import com.aiprovider.model.vo.ComfyPresetVO;
 import com.aiprovider.repository.ComfyPresetRepository;
-import com.aiprovider.repository.ComfyWorkflowRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,17 +14,16 @@ import java.util.*;
 @Service
 public class ComfyPresetService {
     private final ComfyPresetRepository presets;
-    private final ComfyWorkflowRepository workflows;
     private final ObjectMapper json;
 
-    public ComfyPresetService(ComfyPresetRepository presets, ComfyWorkflowRepository workflows, ObjectMapper json) {
-        this.presets = presets; this.workflows = workflows; this.json = json;
+    public ComfyPresetService(ComfyPresetRepository presets, ObjectMapper json) {
+        this.presets = presets; this.json = json;
     }
 
     public List<ComfyPresetVO> list() {
         List<ComfyPresetVO> result = new ArrayList<>();
         for (Map<String, Object> row : presets.findAll()) {
-            result.add(new ComfyPresetVO(number(row.get("id")), text(row.get("title")), text(row.get("workflowId")),
+            result.add(new ComfyPresetVO(number(row.get("id")), text(row.get("title")),
                     text(row.get("outputFolder")), parse(text(row.get("parametersJson"))), text(row.get("notes")), truth(row.get("isDefault"))));
         }
         return result;
@@ -54,10 +52,11 @@ public class ComfyPresetService {
     private ComfyPresetMapper.PresetInsert record(ComfyPresetDTO dto) {
         ComfyPresetMapper.PresetInsert record = new ComfyPresetMapper.PresetInsert();
         record.setTitle(dto.getTitle().trim());
-        record.setWorkflowId(dto.getWorkflowId());
         record.setOutputFolder(normalizeFolder(dto.getOutputFolder()));
         record.setNotes(dto.getNotes() == null || dto.getNotes().trim().isEmpty() ? null : dto.getNotes().trim());
-        try { record.setParametersJson(json.writeValueAsString(dto.getParameters())); }
+        Map<String, Object> parameters = new LinkedHashMap<>(dto.getParameters());
+        parameters.keySet().retainAll(Arrays.asList("positivePrompt", "negativePrompt"));
+        try { record.setParametersJson(json.writeValueAsString(parameters)); }
         catch (JsonProcessingException e) { throw new IllegalArgumentException("参数方案不是有效 JSON", e); }
         return record;
     }
@@ -72,9 +71,7 @@ public class ComfyPresetService {
         String title = dto.getTitle();
         if (title == null || title.trim().isEmpty() || title.trim().length() > 100)
             throw new IllegalArgumentException("标题长度应为 1-100");
-        if (dto.getWorkflowId() == null || (!dto.getWorkflowId().startsWith("local-") && !workflows.existsActive(dto.getWorkflowId())))
-            throw new IllegalArgumentException("工作流不存在或已停用");
-        if (dto.getParameters() == null || dto.getParameters().isEmpty())
+        if (dto.getParameters() == null)
             throw new IllegalArgumentException("参数不能为空");
         if (dto.getNotes() != null && dto.getNotes().trim().length() > 1000)
             throw new IllegalArgumentException("备注不能超过 1000 字");

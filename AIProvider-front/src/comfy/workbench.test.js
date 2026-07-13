@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applySchemeToWorkflow, calculateComfyProgress, createWorkflowForm, FALLBACK_FORM, findFinalOutput, getWorkflowFieldKeys, getWorkflowRevision, normalizeFolder, refreshWorkflowForm } from "./workbench";
+import { applySchemeToWorkflow, calculateComfyProgress, createComfyProgressPlan, createWorkflowForm, describeComfyProgress, FALLBACK_FORM, findFinalOutput, getWorkflowFieldKeys, getWorkflowRevision, normalizeFolder, refreshWorkflowForm } from "./workbench";
 
 describe("workbench workflow state", () => {
   it("rebuilds state from the selected workflow instead of retaining the previous workflow", () => {
@@ -22,15 +22,24 @@ describe("workbench workflow state", () => {
       .toEqual(["width", "cfg"]);
   });
 
-  it("only applies scheme values that belong to the current workflow", () => {
-    const workflow = { id: "futa01", binding: { fields: { width: {} } } };
-    expect(applySchemeToWorkflow({ workflowId: "futa01", width: 1 }, { workflowId: "futa01", parameters: { width: 1080, stale: true } }, workflow))
-      .toEqual({ workflowId: "futa01", width: 1080 });
-    expect(applySchemeToWorkflow({ workflowId: "futa01", width: 1 }, { workflowId: "other", parameters: { width: 2 } }, workflow))
+  it("only applies Prompt fields that belong to the current workflow", () => {
+    const workflow = { id: "futa01", binding: { fields: { positivePrompt: {}, width: {} } } };
+    expect(applySchemeToWorkflow({ workflowId: "futa01", positivePrompt: "old", width: 1 }, { parameters: { positivePrompt: "new", width: 1080 } }, workflow))
+      .toEqual({ workflowId: "futa01", positivePrompt: "new", width: 1 });
+    expect(applySchemeToWorkflow({ workflowId: "futa01", width: 1 }, { parameters: { width: 2 } }, workflow))
       .toEqual({ workflowId: "futa01", width: 1 });
     expect(applySchemeToWorkflow({ workflowId: "futa01", width: 1 }, null, workflow)).toEqual({ workflowId: "futa01", width: 1 });
-    expect(applySchemeToWorkflow({ workflowId: "futa01", width: 1 }, { workflowId: "futa01" }, workflow)).toEqual({ workflowId: "futa01", width: 1 });
-    expect(applySchemeToWorkflow({ workflowId: "futa01" }, { workflowId: "futa01", parameters: {} }, null)).toEqual({ workflowId: "futa01" });
+    expect(applySchemeToWorkflow({ workflowId: "futa01", width: 1 }, {}, workflow)).toEqual({ workflowId: "futa01", width: 1 });
+    expect(applySchemeToWorkflow({ workflowId: "futa01" }, { parameters: {} }, null)).toEqual({ workflowId: "futa01" });
+  });
+
+  it("does not let an empty global scheme value erase a workflow Prompt", () => {
+    const workflow = { id: "futa01", binding: { fields: { positivePrompt: {} } } };
+    expect(applySchemeToWorkflow(
+      { workflowId: "futa01", positivePrompt: "old" },
+      { parameters: { positivePrompt: "" } },
+      workflow,
+    )).toEqual({ workflowId: "futa01", positivePrompt: "old" });
   });
 
   it("keeps edits when the JSON is unchanged and reloads defaults when modifiedAt changes", () => {
@@ -52,17 +61,47 @@ describe("workbench workflow state", () => {
 });
 
 describe("ComfyUI progress", () => {
-  it("calculates whole-workflow progress from finished and running nodes", () => {
-    expect(calculateComfyProgress({ promptId: "p1", nodes: {
+  it("calculates total progress against every reachable workflow node", () => {
+    const definition = {
+      a: { class_type: "LoadImage", inputs: {}, _meta: { title: "加载图片" } },
+      b: { class_type: "Encode", inputs: { image: ["a", 0] } },
+      c: { class_type: "Sampler", inputs: { latent: ["b", 0] }, _meta: { title: "KSampler" } },
+      d: { class_type: "SaveImage", inputs: { images: ["c", 0] } },
+      unused: { class_type: "PreviewImage", inputs: {} },
+    };
+    const plan = createComfyProgressPlan(definition, ["d"]);
+    expect(plan.nodeIds).toEqual(["d", "c", "b", "a"]);
+    expect(plan.labels.c).toBe("KSampler");
+    const detail = describeComfyProgress({ promptId: "p1", nodes: {
       a: { state: "finished", value: 1, max: 1 },
-      b: { state: "running", value: 5, max: 10 },
-      c: { state: "pending", value: 0, max: 0 },
-    } }, "p1")).toBe(50);
+      b: { state: "finished", value: 1, max: 1 },
+      c: { state: "running", value: 5, max: 10 },
+    } }, "p1", plan);
+    expect(detail).toEqual({
+      totalPercent: 63,
+      completedNodes: 2,
+      totalNodes: 4,
+      currentNode: { id: "c", name: "KSampler", value: 5, max: 10 },
+    });
+    expect(calculateComfyProgress({ promptId: "p1", nodes: {
+      a: { state: "finished" }, b: { state: "finished" }, c: { state: "running", value: 5, max: 10 },
+    } }, "p1", plan)).toBe(63);
     expect(calculateComfyProgress({ promptId: "p1", nodes: { a: { state: "finished" } } }, "p1")).toBe(99);
+  });
+
+  it("falls back to all graph nodes when no output node is known", () => {
+    expect(createComfyProgressPlan({ a: { inputs: {} }, b: {} }).nodeIds).toEqual(["a", "b"]);
+    expect(createComfyProgressPlan(null, "missing")).toEqual({ nodeIds: [], labels: {} });
+    expect(createComfyProgressPlan([], [])).toEqual({ nodeIds: [], labels: {} });
+    expect(createComfyProgressPlan({
+      a: { inputs: { cycle: ["b", 0], literal: "text", short: ["b"] } },
+      b: { inputs: { cycle: ["a", 0], missing: ["missing", 0] } },
+    }, "a").nodeIds).toEqual(["a", "b"]);
   });
 
   it("does not invent progress when live data is absent or belongs to another task", () => {
     expect(calculateComfyProgress(null, "p1")).toBeNull();
+    expect(calculateComfyProgress({}, "p1")).toBeNull();
     expect(calculateComfyProgress({ promptId: "p2", nodes: {} }, "p1")).toBeNull();
     expect(calculateComfyProgress({ promptId: "p1", nodes: {} }, "p1")).toBeNull();
     expect(calculateComfyProgress({ promptId: "p1" }, "p1")).toBeNull();

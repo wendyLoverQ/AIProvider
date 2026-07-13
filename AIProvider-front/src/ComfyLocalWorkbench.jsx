@@ -20,7 +20,7 @@ import { TransformComponent, TransformWrapper } from "react-zoom-pan-pinch";
 import "./ComfyLocalWorkbench.css";
 import WorkflowPanel from "./WorkflowPanel";
 import { generateId } from "./utils/generateId";
-import { applySchemeToWorkflow, calculateComfyProgress, createWorkflowForm, FALLBACK_FORM, findFinalOutput, getWorkflowFieldKeys, getWorkflowRevision, normalizeFolder, refreshWorkflowForm } from "./comfy/workbench";
+import { applySchemeToWorkflow, createComfyProgressPlan, createWorkflowForm, describeComfyProgress, FALLBACK_FORM, findFinalOutput, getWorkflowFieldKeys, getWorkflowRevision, normalizeFolder, refreshWorkflowForm } from "./comfy/workbench";
 
 const BRIDGE = "http://127.0.0.1:32145";
 const initial = FALLBACK_FORM;
@@ -69,7 +69,8 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     [notice, setNotice] = useState(""),
     [controlAction, setControlAction] = useState("");
   const [tasks, setTasks] = useState([]),
-    [results, setResults] = useState([]);
+    [results, setResults] = useState([]),
+    [cancelingTask, setCancelingTask] = useState("");
   const [history, setHistory] = useState([]);
   const [galleryMode, setGalleryMode] = useState("output");
   const [assetPage, setAssetPage] = useState({ page: 1, pages: 0, total: 0 });
@@ -78,7 +79,6 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedTasks, setSelectedTasks] = useState(() => new Set());
   const [presets, setPresets] = useState([]),
-    [presetTitle, setPresetTitle] = useState(""),
     [selectedPresetId, setSelectedPresetId] = useState(""),
     [appliedPresetTitle, setAppliedPresetTitle] = useState("");
   const [presetQuery, setPresetQuery] = useState("");
@@ -108,6 +108,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     workflowRefreshInFlight = useRef(false),
     taskSyncInFlight = useRef(false),
     loadWorkflowsRef = useRef(null),
+    defaultPresetApplied = useRef(""),
     viewerTransform = useRef(null);
   useEffect(() => {
     if (!notice) return undefined;
@@ -145,6 +146,23 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       localStorage.setItem("comfy_active_tasks", JSON.stringify(next));
       return next;
     });
+  };
+  const cancelTask = async (task) => {
+    const promptId = String(task.id);
+    setCancelingTask(promptId);
+    setError("");
+    try {
+      const response = await call(`/api/tasks/${encodeURIComponent(promptId)}/cancel`, { method: "POST" }, 45000);
+      const data = await readJson(response, "取消本机任务接口");
+      if (!response.ok || !data.success) throw new Error(data.message || `取消任务失败（HTTP ${response.status}）`);
+      removeActiveTask(promptId);
+      externalTaskIds.current.delete(promptId);
+      setNotice(data.cancelled ? "任务已取消" : "任务已结束，已从列表移除");
+    } catch (e) {
+      setError(`取消任务失败：${e.message}`);
+    } finally {
+      setCancelingTask("");
+    }
   };
 
   const check = async () => {
@@ -259,34 +277,20 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   useEffect(() => {
     if (mode === "workbench" && active) loadPresets();
   }, [active, mode]);
-  const savePreset = async () => {
-    if (!presetTitle.trim()) {
-      setError("请先填写参数方案标题");
-      return;
-    }
-    setBusy(true);
-    try {
-      const response = await fetch("/api/comfy-presets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: presetTitle.trim(),
-          workflowId: form.workflowId,
-          outputFolder: normalizeFolder(folder),
-          parameters: form,
-        }),
-      });
-      const data = await readJson(response, "保存参数方案接口");
-      if (!response.ok || data.code !== 200)
-        throw new Error(data.message || `HTTP ${response.status}`);
-      setPresetTitle("");
-      await loadPresets();
-    } catch (e) {
-      setError(`保存参数方案失败：${e.message}`);
-    } finally {
-      setBusy(false);
-    }
-  };
+  useEffect(() => {
+    if (mode !== "workbench" || !active) return;
+    const preset = presets.find((item) => item.defaultPreset);
+    const workflow = workflows.find((item) => item.id === form.workflowId);
+    if (!preset || !workflow) return;
+    const applicationKey = `${preset.id}:${workflow.id}`;
+    if (defaultPresetApplied.current === applicationKey) return;
+    defaultPresetApplied.current = applicationKey;
+    setForm((current) => applySchemeToWorkflow(current, preset, workflow));
+    setFolder(normalizeFolder(preset.outputFolder));
+    setPresetQuery(String(preset.id));
+    setSelectedPresetId(String(preset.id));
+    setAppliedPresetTitle(preset.title);
+  }, [active, form.workflowId, mode, presets, workflows]);
   const applyPreset = (preset) => {
     setForm((current) => {
       const workflow = workflows.find((item) => item.id === current.workflowId);
@@ -434,7 +438,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         progress: null,
       })),
     );
-    saved.forEach((item) => poll(item.id, authToken, item.finalOutputNodeId));
+    saved.forEach((item) => poll(item.id, authToken, item.finalOutputNodeId, item.progressPlan));
     localStorage.removeItem("comfy_active_task");
   };
   const loadHistory = async (authToken, mode = galleryMode, page = 1) => {
@@ -519,8 +523,9 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         .filter(({ row }) => Array.isArray(row) && row[1] && !ownIds.has(String(row[1])))
         .map(({ row, state }) => {
           const promptId = String(row[1]);
-          const progress = state === "QUEUED" ? 0 : calculateComfyProgress(liveProgress, promptId);
-          return { id: promptId, state, progress, external: true, createdAt: new Date().toISOString() };
+          const progressPlan = createComfyProgressPlan(row[2], row[4]);
+          const progressDetail = state === "QUEUED" ? null : describeComfyProgress(liveProgress, promptId, progressPlan);
+          return { id: promptId, state, progress: progressDetail?.totalPercent ?? 0, progressDetail, progressPlan, external: true, createdAt: new Date().toISOString() };
         });
       return [...ownTasks, ...externalTasks].slice(0, 12);
     });
@@ -590,12 +595,15 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
             data.message ||
             `ComfyUI 提交失败（HTTP ${response.status}）`,
         );
+      const progressPlan = createComfyProgressPlan(active.definition, [data.finalOutputNodeId]);
       const nextTask = {
         id: data.promptId,
         state: "QUEUED",
         progress: 0,
         form,
         finalOutputNodeId: data.finalOutputNodeId,
+        progressPlan,
+        progressDetail: null,
         actualSeed: data.actualSeed,
         folder,
         createdAt: new Date().toISOString(),
@@ -612,7 +620,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         );
         return next;
       });
-      poll(data.promptId, token, data.finalOutputNodeId);
+      poll(data.promptId, token, data.finalOutputNodeId, progressPlan);
     } catch (e) {
       reportLocalError("generate", e, { path: "/api/generate" });
       setError(e.message);
@@ -620,7 +628,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       setBusy(false);
     }
   };
-  const poll = (promptId, authToken = token, finalOutputNodeId) => {
+  const poll = (promptId, authToken = token, finalOutputNodeId, progressPlan) => {
     if (polling.current.has(promptId)) return;
     const timer = setInterval(async () => {
       try {
@@ -647,11 +655,13 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
             return;
           }
           let progress = 0;
+          let progressDetail = null;
           if (executing) {
             const progressResponse = await call("/comfy/aiprovider/progress", {}, 5000, authToken);
             const liveProgress = await readJson(progressResponse, "ComfyUI 实时进度接口");
             if (!progressResponse.ok) throw new Error(liveProgress.message || `ComfyUI 实时进度接口失败（HTTP ${progressResponse.status}）`);
-            progress = calculateComfyProgress(liveProgress, promptId);
+            progressDetail = describeComfyProgress(liveProgress, promptId, progressPlan);
+            progress = progressDetail?.totalPercent ?? null;
             if (progress === null) throw new Error(`实时进度未包含当前任务 ${promptId}`);
           }
           setTasks((current) =>
@@ -661,6 +671,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
                     ...task,
                     state: executing ? "RUNNING" : "QUEUED",
                     progress,
+                    progressDetail,
                   }
                 : task,
             ),
@@ -689,7 +700,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         setTasks((current) => {
           const next = current.map((task) =>
             task.id === promptId
-              ? { ...task, state: "SUCCEEDED", progress: 100 }
+              ? { ...task, state: "SUCCEEDED", progress: 100, progressDetail: null }
               : task,
           );
           localStorage.setItem(
@@ -1050,6 +1061,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   };
 
   const allHistorySelected = history.length > 0 && history.every((item) => selectedTasks.has(item.id));
+  const activeTask = tasks.find((task) => task.state === "RUNNING") || tasks.find((task) => task.state === "QUEUED") || null;
 
   if (mode === "settings") {
     return (
@@ -1167,16 +1179,27 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
             fieldKeys={activeWorkflowFields} fieldSpecs={activeWorkflow?.binding?.fields || {}} values={form} onFieldChange={set}
             onWorkflowChange={selectWorkflow} referenceFiles={referenceFiles} onReference={chooseReference}
             presets={presets} presetQuery={presetQuery} onPresetChange={choosePreset}
-            appliedPresetTitle={appliedPresetTitle} presetTitle={presetTitle}
-            onPresetTitleChange={setPresetTitle} onSavePreset={savePreset} onGenerate={generate}
+            appliedPresetTitle={appliedPresetTitle} onGenerate={generate}
             disabled={{ blocked: busy || !running || !token || !activeWorkflow, busy }}
           />
         </section>
         <section className="comfy-history">
           <div className="gallery-head">
-            <div className="gallery-source-tabs">
-              <button className={galleryMode === "output" ? "active" : ""} onClick={() => switchGallery("output").catch((e) => setError(e.message))}>本机图片</button>
-              <button className={galleryMode === "assets" ? "active" : ""} onClick={() => switchGallery("assets").catch((e) => setError(e.message))}>我的资产</button>
+            <div className="gallery-source-row">
+              <div className="gallery-source-tabs">
+                <button className={galleryMode === "output" ? "active" : ""} onClick={() => switchGallery("output").catch((e) => setError(e.message))}>本机图片</button>
+                <button className={galleryMode === "assets" ? "active" : ""} onClick={() => switchGallery("assets").catch((e) => setError(e.message))}>我的资产</button>
+              </div>
+              {activeTask && <div className="gallery-live-progress" role="status" aria-live="polite">
+                <strong>{activeTask.state === "QUEUED" ? "等待执行" : activeTask.progressDetail?.currentNode?.name || "正在读取当前节点"}</strong>
+                <span>
+                  {activeTask.progressDetail?.currentNode?.max
+                    ? `节点 ${activeTask.progressDetail.currentNode.value}/${activeTask.progressDetail.currentNode.max} · `
+                    : ""}
+                  {activeTask.progressDetail ? `已完成 ${activeTask.progressDetail.completedNodes}/${activeTask.progressDetail.totalNodes} · ` : ""}
+                  总进度 {activeTask.progress ?? 0}%
+                </span>
+              </div>}
             </div>
             <div className="gallery-actions">
               <span>
@@ -1247,6 +1270,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
                         : "完成"}
                   </span>
                   <strong>{task.progress === null ? "进度错误" : `${task.progress}%`}</strong>
+                  {["QUEUED", "RUNNING"].includes(task.state) && <button className="queue-pill__cancel" type="button" aria-label={`取消任务 ${task.id}`} title="取消任务" disabled={cancelingTask === String(task.id)} onClick={() => cancelTask(task)}><X /></button>}
                   <i style={{ width: `${task.progress ?? 0}%` }} />
                 </div>
               ))}
