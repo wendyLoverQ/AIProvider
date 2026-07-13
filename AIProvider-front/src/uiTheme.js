@@ -31,6 +31,30 @@ export const UI_THEME_PRESETS = [
   preset("one-dark", "One Dark", "现代中性、清晰的编辑器风格", {
     "--bg-page": "#282c34", "--bg-sidebar": "#21252b", "--bg-surface": "#2c313a", "--bg-card": "#333842", "--bg-card-hover": "#3e4451", "--bg-selected": "#3e4451", "--border-subtle": "#3e4451", "--border-normal": "#5c6370", "--border-focus": "#61afef", "--text-primary": "#abb2bf", "--text-secondary": "#9da5b4", "--text-muted": "#5c6370", "--accent-primary": "#61afef", "--accent-secondary": "#c678dd", "--accent-soft": "#56b6c2", "--accent-blue": "#61afef", "--accent-cyan": "#56b6c2", "--accent-mint": "#98c379", "--accent-yellow": "#e5c07b", "--accent-red": "#e06c75",
   }),
+  preset("rose-pine", "Rosé Pine", "玫瑰、松绿与鸢尾紫的静谧暗色", {
+    "--bg-page": "#191724", "--bg-sidebar": "#12101c", "--bg-surface": "#1f1d2e", "--bg-card": "#26233a", "--bg-card-hover": "#2f2b46", "--bg-selected": "#403d52", "--border-subtle": "#2f2b46", "--border-normal": "#524f67", "--border-focus": "#c4a7e7", "--text-primary": "#e0def4", "--text-secondary": "#908caa", "--text-muted": "#6e6a86", "--accent-primary": "#c4a7e7", "--accent-secondary": "#eb6f92", "--accent-soft": "#ebbcba", "--accent-blue": "#31748f", "--accent-cyan": "#9ccfd8", "--accent-mint": "#3e8fb0", "--accent-yellow": "#f6c177", "--accent-red": "#eb6f92",
+  }),
+  preset("kanagawa-wave", "Kanagawa Wave", "浮世绘海浪般沉稳温暖的深色", {
+    "--bg-page": "#1f1f28", "--bg-sidebar": "#16161d", "--bg-surface": "#252535", "--bg-card": "#2a2a37", "--bg-card-hover": "#363646", "--bg-selected": "#2d4f67", "--border-subtle": "#363646", "--border-normal": "#54546d", "--border-focus": "#7e9cd8", "--text-primary": "#dcd7ba", "--text-secondary": "#c8c093", "--text-muted": "#727169", "--accent-primary": "#7e9cd8", "--accent-secondary": "#957fb8", "--accent-soft": "#d27e99", "--accent-blue": "#7fb4ca", "--accent-cyan": "#7aa89f", "--accent-mint": "#98bb6c", "--accent-yellow": "#e6c384", "--accent-red": "#e46876",
+  }),
+  preset("everforest", "Everforest", "森林苔藓与暖木色的低刺激暗色", {
+    "--bg-page": "#2d353b", "--bg-sidebar": "#232a2e", "--bg-surface": "#343f44", "--bg-card": "#3d484d", "--bg-card-hover": "#475258", "--bg-selected": "#4f5b58", "--border-subtle": "#475258", "--border-normal": "#56635f", "--border-focus": "#a7c080", "--text-primary": "#d3c6aa", "--text-secondary": "#9da9a0", "--text-muted": "#7a8478", "--accent-primary": "#a7c080", "--accent-secondary": "#d699b6", "--accent-soft": "#e67e80", "--accent-blue": "#7fbbb3", "--accent-cyan": "#83c092", "--accent-mint": "#a7c080", "--accent-yellow": "#dbbc7f", "--accent-red": "#e67e80",
+  }),
+  preset("ayu-mirage", "Ayu Mirage", "深海蓝灰底与金橙高光", {
+    "--bg-page": "#1f2430", "--bg-sidebar": "#171b24", "--bg-surface": "#242936", "--bg-card": "#2b303d", "--bg-card-hover": "#343b4c", "--bg-selected": "#3d475e", "--border-subtle": "#343b4c", "--border-normal": "#4d5566", "--border-focus": "#ffcc66", "--text-primary": "#cccac2", "--text-secondary": "#b8cfe6", "--text-muted": "#707a8c", "--accent-primary": "#ffcc66", "--accent-secondary": "#d4bfff", "--accent-soft": "#f29e74", "--accent-blue": "#73d0ff", "--accent-cyan": "#95e6cb", "--accent-mint": "#bae67e", "--accent-yellow": "#ffd580", "--accent-red": "#f28779",
+  }),
+  preset("solarized-dark", "Solarized Dark", "经典蓝绿基底与均衡对比", {
+    "--bg-page": "#002b36", "--bg-sidebar": "#00212b", "--bg-surface": "#073642", "--bg-card": "#0b3d49", "--bg-card-hover": "#124b58", "--bg-selected": "#165766", "--border-subtle": "#124b58", "--border-normal": "#586e75", "--border-focus": "#268bd2", "--text-primary": "#fdf6e3", "--text-secondary": "#93a1a1", "--text-muted": "#657b83", "--accent-primary": "#268bd2", "--accent-secondary": "#6c71c4", "--accent-soft": "#d33682", "--accent-blue": "#268bd2", "--accent-cyan": "#2aa198", "--accent-mint": "#859900", "--accent-yellow": "#b58900", "--accent-red": "#dc322f",
+  }),
+  preset("material-ocean", "Material Ocean", "深邃海洋底色与明亮语义色", {
+    "--bg-page": "#0f111a", "--bg-sidebar": "#090b10", "--bg-surface": "#151923", "--bg-card": "#1a1f2b", "--bg-card-hover": "#222838", "--bg-selected": "#2c3346", "--border-subtle": "#222838", "--border-normal": "#3b4257", "--border-focus": "#82aaff", "--text-primary": "#babed8", "--text-secondary": "#a6accd", "--text-muted": "#525975", "--accent-primary": "#82aaff", "--accent-secondary": "#c792ea", "--accent-soft": "#f78c6c", "--accent-blue": "#82aaff", "--accent-cyan": "#89ddff", "--accent-mint": "#c3e88d", "--accent-yellow": "#ffcb6b", "--accent-red": "#f07178",
+  }),
+  preset("night-owl", "Night Owl", "夜蓝背景与高辨识度冷色高光", {
+    "--bg-page": "#011627", "--bg-sidebar": "#000c1d", "--bg-surface": "#071d31", "--bg-card": "#0b253a", "--bg-card-hover": "#102f49", "--bg-selected": "#173b57", "--border-subtle": "#102a44", "--border-normal": "#294a63", "--border-focus": "#82aaff", "--text-primary": "#d6deeb", "--text-secondary": "#addb67", "--text-muted": "#637777", "--accent-primary": "#82aaff", "--accent-secondary": "#c792ea", "--accent-soft": "#ffcb8b", "--accent-blue": "#82aaff", "--accent-cyan": "#7fdbca", "--accent-mint": "#addb67", "--accent-yellow": "#ecc48d", "--accent-red": "#ef5350",
+  }),
+  preset("github-dark", "GitHub Dark", "中性、清晰、适合长时间阅读", {
+    "--bg-page": "#0d1117", "--bg-sidebar": "#010409", "--bg-surface": "#161b22", "--bg-card": "#1c2128", "--bg-card-hover": "#262c36", "--bg-selected": "#1f3b5b", "--border-subtle": "#21262d", "--border-normal": "#30363d", "--border-focus": "#58a6ff", "--text-primary": "#f0f6fc", "--text-secondary": "#c9d1d9", "--text-muted": "#8b949e", "--accent-primary": "#58a6ff", "--accent-secondary": "#bc8cff", "--accent-soft": "#ff7b72", "--accent-blue": "#58a6ff", "--accent-cyan": "#39c5cf", "--accent-mint": "#3fb950", "--accent-yellow": "#d29922", "--accent-red": "#f85149",
+  }),
 ];
 
 export function isUiThemePreset(theme, candidate) {

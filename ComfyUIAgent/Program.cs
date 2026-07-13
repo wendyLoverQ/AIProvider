@@ -61,6 +61,7 @@ app.Use(async (context, next) => {
     var protectedPath = context.Request.Path.StartsWithSegments("/comfy") ||
                         context.Request.Path.StartsWithSegments("/api/comfy/start") ||
                         context.Request.Path.StartsWithSegments("/api/comfy/stop") ||
+                        context.Request.Path.StartsWithSegments("/api/comfy/restart") ||
                         context.Request.Path.StartsWithSegments("/api/history") ||
                         context.Request.Path.StartsWithSegments("/api/tasks") ||
                         context.Request.Path.StartsWithSegments("/api/gallery") ||
@@ -68,6 +69,7 @@ app.Use(async (context, next) => {
                         context.Request.Path.StartsWithSegments("/api/migration") ||
                         context.Request.Path.StartsWithSegments("/api/folders") ||
                         context.Request.Path.StartsWithSegments("/api/generate") ||
+                        context.Request.Path.StartsWithSegments("/api/lora-models") ||
                         context.Request.Path.StartsWithSegments("/api/local-workflows") ||
                         context.Request.Path.StartsWithSegments("/api/logs") ||
                         context.Request.Path.StartsWithSegments("/api/twitter") ||
@@ -98,6 +100,28 @@ app.MapGet("/api/comfy/status", async (IHttpClientFactory factory) => {
     return Results.Ok(new { success = true, running, launcher = "ready", platform = settings.PlatformName,
         configured = settings.IsPlatformConfigured, expectedComfyDirectory = settings.ExpectedComfyDirectory,
         message = running ? "ComfyUI is running" : settings.IsPlatformConfigured ? "ComfyUI is stopped" : "ComfyUI paths are not configured" });
+});
+app.MapGet("/api/lora-models", async (IHttpClientFactory factory) => {
+    using var response = await factory.CreateClient("comfy").GetAsync("object_info");
+    var text = await response.Content.ReadAsStringAsync();
+    if (!response.IsSuccessStatusCode) return Results.Problem($"读取 ComfyUI LoRA 模型失败（HTTP {(int)response.StatusCode}）", statusCode: 502);
+    var root = JsonNode.Parse(text) as JsonObject ?? throw new InvalidOperationException("ComfyUI object_info 返回无效 JSON");
+    var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var node in root) {
+        if (!node.Key.Contains("lora", StringComparison.OrdinalIgnoreCase) || node.Value?["input"] is not JsonObject input) continue;
+        foreach (var groupName in new[] { "required", "optional" }) {
+            if (input[groupName] is not JsonObject group) continue;
+            foreach (var field in group) {
+                if (!field.Key.Contains("lora", StringComparison.OrdinalIgnoreCase) && !field.Key.Contains("model_name", StringComparison.OrdinalIgnoreCase)) continue;
+                if (field.Value is not JsonArray spec || spec.Count == 0 || spec[0] is not JsonArray choices) continue;
+                foreach (var choice in choices.OfType<JsonValue>()) if (choice.TryGetValue<string>(out var name) &&
+                    !string.IsNullOrWhiteSpace(name) && !IsLoraPlaceholder(name)) names.Add(name);
+            }
+        }
+    }
+    var models = names.OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+        .Select(name => new { name, displayName = CompactLoraDisplayName(name) });
+    return Results.Ok(new { success = true, models });
 });
 app.MapPost("/api/comfy/start", async (IHttpClientFactory factory) => {
     if (!settings.IsPlatformConfigured)
@@ -136,6 +160,39 @@ app.MapPost("/api/comfy/stop", async (IHttpClientFactory factory) => {
     comfyProcess = null;
     for (var i = 0; i < 15; i++) { if (!await IsComfyRunning(factory)) return Results.Ok(new { success = true, running = false, message = "ComfyUI stopped" }); await Task.Delay(500); }
     return Results.Problem("ComfyUI process was stopped but the API is still reachable", statusCode: 500);
+});
+
+app.MapPost("/api/comfy/restart", async (IHttpClientFactory factory) => {
+    if (!settings.IsPlatformConfigured)
+        return Results.BadRequest(new { success = false, running = false, message = $"请先把 ComfyUI 放到 {settings.ExpectedComfyDirectory} 并完成 {settings.PlatformName} 配置" });
+
+    if (await IsComfyRunning(factory)) {
+        var processToStop = comfyProcess is { HasExited: false }
+            ? comfyProcess
+            : await FindComfyListenerProcess();
+        if (processToStop == null)
+            return Results.Problem("Could not find the local ComfyUI process", statusCode: 500);
+        processToStop.Kill(true);
+        processToStop.Dispose();
+        comfyProcess = null;
+        for (var i = 0; i < 30 && await IsComfyRunning(factory); i++) await Task.Delay(500);
+        if (await IsComfyRunning(factory))
+            return Results.Problem("ComfyUI process was stopped but the API is still reachable", statusCode: 500);
+    }
+
+    var startInfo = new ProcessStartInfo(settings.ActiveProfile.PythonPath) {
+        WorkingDirectory = settings.ActiveProfile.WorkingDirectory, UseShellExecute = false, CreateNoWindow = true
+    };
+    startInfo.ArgumentList.Add("-s");
+    startInfo.ArgumentList.Add(settings.ActiveProfile.MainPyPath);
+    foreach (var argument in settings.ActiveProfile.StartArguments) startInfo.ArgumentList.Add(argument);
+    comfyProcess = Process.Start(startInfo);
+    for (var i = 0; i < settings.StartTimeoutSeconds; i += 2) {
+        await Task.Delay(2000);
+        if (await IsComfyRunning(factory)) return Results.Ok(new { success = true, running = true, message = "ComfyUI restarted" });
+        if (comfyProcess?.HasExited == true) break;
+    }
+    return Results.Problem("ComfyUI failed to restart before timeout", statusCode: 504);
 });
 
 app.MapPost("/api/tasks/{promptId}/cancel", async (string promptId, IHttpClientFactory factory) => {
@@ -318,7 +375,7 @@ app.MapPost("/api/generate", async (HttpRequest request, IHttpClientFactory fact
     }
     if (Has("positivePrompt")) Write("positivePrompt", Required("positivePrompt"));
     if (Has("negativePrompt")) Write("negativePrompt", Required("negativePrompt"));
-    if (Has("loras")) Write("loras", form["loras"].ToString());
+    if (Has("loras")) ApplyDynamicLoras(prompt, form["loras"].ToString());
     var outputWidth = Has("width") ? int.Parse(Required("width")) : 0;
     var outputHeight = Has("height") ? int.Parse(Required("height")) : 0;
     var tileUpscaleNodeIds = prompt
@@ -440,6 +497,7 @@ app.MapPost("/api/generate", async (HttpRequest request, IHttpClientFactory fact
         CreatedAt = DateTimeOffset.Now,
         PositivePrompt = form["positivePrompt"].ToString(),
         NegativePrompt = form["negativePrompt"].ToString(),
+        Loras = ReadSelectedLoras(form["loras"].ToString()),
         WorkflowId = form["workflowId"].ToString(),
         Seed = actualSeed,
         Width = Has("width") ? int.Parse(Required("width")) : 0,
@@ -492,6 +550,29 @@ app.MapPost("/api/assets/delete", (GalleryPathsRequest request) => {
         if (File.Exists(file) && IsGalleryImage(file)) { File.Delete(file); deleted++; }
     }
     return Results.Ok(new { success = true, deleted });
+}).DisableAntiforgery();
+
+app.MapPost("/api/assets/move", (GalleryPathsRequest request) => {
+    var paths = request.Paths.Select(path => (path ?? "").Trim()).Where(path => path.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    if (paths.Length == 0) return Results.BadRequest(new { success = false, message = "请选择要迁移的资产" });
+    var destination = Path.GetFullPath(GetMigrationDirectory());
+    Directory.CreateDirectory(destination);
+    var assets = new List<object>();
+    foreach (var path in paths) {
+        var source = Path.GetFullPath(path);
+        if (!File.Exists(source) || !IsGalleryImage(source)) throw new InvalidOperationException($"资产图片不存在：{path}");
+        var target = Path.Combine(destination, Path.GetFileName(source));
+        if (!string.Equals(source, target, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)) {
+            var suffix = 1;
+            while (File.Exists(target)) target = Path.Combine(destination, $"{Path.GetFileNameWithoutExtension(source)}_{suffix++}{Path.GetExtension(source)}");
+            File.Move(source, target);
+        }
+        var image = ToGalleryImage(new GalleryFile { FullPath = target, Path = target, Filename = Path.GetFileName(target), CreatedAt = new DateTimeOffset(File.GetLastWriteTime(target)) });
+        assets.Add(new { oldPath = source, localPath = target,
+            localUrl = $"http://127.0.0.1:32145/api/assets/file?path={Uri.EscapeDataString(target)}",
+            fileName = image.Filename, fileSize = image.SizeBytes, width = image.Width, height = image.Height });
+    }
+    return Results.Ok(new { success = true, platform = settings.PlatformName, assets });
 }).DisableAntiforgery();
 
 app.MapGet("/api/migration/settings", () => Results.Ok(new { success = true, directory = GetMigrationDirectory() }));
@@ -559,7 +640,7 @@ app.MapPost("/api/gallery/move", async (GalleryMoveRequest request) => {
                 ["originalPath"] = oldPath,
                 ["newPath"] = newPath,
                 ["metadata"] = item == null ? null : JsonSerializer.SerializeToNode(new {
-                    item.PromptId, item.Prompt, item.NegativePrompt, item.CreatedAt, item.Width, item.Height,
+                    item.PromptId, item.Prompt, item.NegativePrompt, item.Loras, item.CreatedAt, item.Width, item.Height,
                     item.Seed, item.Steps, item.Cfg, item.Sampler, item.Scheduler, item.WorkflowId
                 })
             });
@@ -580,7 +661,8 @@ app.MapPost("/api/gallery/move", async (GalleryMoveRequest request) => {
             return new {
                 localPath = file.Target, localUrl = $"http://127.0.0.1:32145/api/assets/file?path={Uri.EscapeDataString(file.Target)}", fileName = image.Filename, fileSize = image.SizeBytes,
                 width = image.Width ?? item?.Width, height = image.Height ?? item?.Height,
-                prompt = item?.Prompt, negativePrompt = item?.NegativePrompt, seed = item?.Seed,
+                prompt = item?.Prompt, negativePrompt = item?.NegativePrompt,
+                lorasJson = item?.Loras == null ? null : JsonSerializer.Serialize(item.Loras, GalleryJsonOptions()), seed = item?.Seed,
                 steps = item?.Steps, cfg = item?.Cfg, sampler = item?.Sampler,
                 scheduler = item?.Scheduler, workflowId = item?.WorkflowId,
                 generatedAt = item?.CreatedAt ?? new DateTimeOffset(File.GetLastWriteTime(file.Target))
@@ -916,10 +998,24 @@ JsonObject BuildLocalWorkflow(string relative, DateTime modifiedAtUtc, JsonObjec
     Bind("scheduler", sampler, "scheduler");
     if (sampler?.Value["inputs"]?["denoise"] != null) Bind("denoise", sampler, "denoise");
 
-    var lora = Find(node => TitleHas(node, "LoRA") && node["inputs"]?["text"] is JsonValue);
-    if (lora != null) Bind("loras", lora, "text");
     var checkpoint = Find(node => node["class_type"]?.GetValue<string>() == "CheckpointLoaderSimple" && node["inputs"]?["ckpt_name"] != null);
     Bind("checkpoint", checkpoint, "ckpt_name");
+    var loraText = Find(node => TitleHas(node, "LoRA") && node["inputs"]?["text"] is JsonValue);
+    var loraNode = Find(node => node["class_type"]?.GetValue<string>()?.Contains("lora", StringComparison.OrdinalIgnoreCase) == true || TitleHas(node, "LoRA"));
+    if (loraText != null) {
+        Bind("loras", loraText, "text");
+        defaults["loras"] = new JsonArray();
+    } else if (loraNode != null && checkpoint != null) {
+        fields["loras"] = new JsonObject {
+            ["nodeId"] = loraNode.Value.Key,
+            ["nodeTitle"] = Title(loraNode.Value.Key, loraNode.Value.Value),
+            ["nodeType"] = "DynamicLoraChain",
+            ["input"] = "loras",
+            ["label"] = "动态 LoRA"
+        };
+        defaults["loras"] = new JsonArray();
+        exposed.Add("loras");
+    }
     var sourceImage = Find(node => node["class_type"]?.GetValue<string>() == "LoadImage" && node["inputs"]?["image"] != null);
     if (sourceImage != null) Bind("sourceImage", sourceImage, "image");
     var secondPass = Find(node => node["class_type"]?.GetValue<string>()?.Contains("UltimateSDUpscale", StringComparison.OrdinalIgnoreCase) == true);
@@ -1153,6 +1249,7 @@ async Task<List<GalleryItem>> ScanGallery(int maxItems) {
                 Id = generation.PromptId, PromptId = generation.PromptId,
                 Prompt = string.IsNullOrWhiteSpace(generation.PositivePrompt) ? "本机生成图片" : generation.PositivePrompt,
                 NegativePrompt = generation.NegativePrompt, CreatedAt = generation.CreatedAt,
+                Loras = generation.Loras,
                 Width = generation.Width, Height = generation.Height, Seed = generation.Seed, Steps = generation.Steps,
                 Cfg = generation.Cfg, Sampler = generation.Sampler, Scheduler = generation.Scheduler, WorkflowId = generation.WorkflowId,
                 Images = matches.Select(ToGalleryImage).ToList()
@@ -1162,7 +1259,7 @@ async Task<List<GalleryItem>> ScanGallery(int maxItems) {
             var id = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(file.Path.ToLowerInvariant()))).ToLowerInvariant();
             var embedded = ReadEmbeddedGeneration(file.FullPath);
             items.Add(new GalleryItem {
-                Id = id, Prompt = embedded?.PositivePrompt ?? "本机历史图片", NegativePrompt = embedded?.NegativePrompt,
+                Id = id, Prompt = embedded?.PositivePrompt ?? "本机历史图片", NegativePrompt = embedded?.NegativePrompt, Loras = embedded?.Loras ?? new List<GenerationLora>(),
                 CreatedAt = file.CreatedAt, Width = embedded?.Width, Height = embedded?.Height, Seed = embedded?.Seed,
                 Steps = embedded?.Steps, Cfg = embedded?.Cfg, Sampler = embedded?.Sampler, Scheduler = embedded?.Scheduler,
                 Images = new List<GalleryImage> { ToGalleryImage(file) }
@@ -1299,6 +1396,69 @@ async Task<Process?> FindComfyListenerProcess() {
     catch (ArgumentException) { return null; }
 }
 
+void ApplyDynamicLoras(JsonObject prompt, string raw) {
+    var selected = ReadSelectedLoras(raw);
+    if (selected.Count == 0) return;
+    var checkpoints = prompt.Where(entry => entry.Value?["class_type"]?.GetValue<string>() == "CheckpointLoaderSimple").ToArray();
+    if (checkpoints.Length != 1)
+        throw new InvalidOperationException(checkpoints.Length == 0
+            ? "当前工作流没有可自动连接的 CheckpointLoaderSimple，请先在工作流中预留 LoRA 节点"
+            : "当前工作流包含多个基础模型分支，无法安全自动连接 LoRA，请在工作流中预留 LoRA 节点");
+    var checkpointId = checkpoints[0].Key;
+    var originalNodes = prompt.Where(entry => entry.Value is JsonObject).ToArray();
+    var nextNumericId = prompt.Select(entry => int.TryParse(entry.Key, out var value) ? value : 0).DefaultIfEmpty().Max();
+    var previousId = checkpointId;
+    foreach (var item in selected) {
+        var id = (++nextNumericId).ToString();
+        var modelStrength = Math.Clamp(item.ModelStrength, -10d, 10d);
+        var clipStrength = Math.Clamp(item.ClipStrength, -10d, 10d);
+        prompt[id] = new JsonObject {
+            ["inputs"] = new JsonObject {
+                ["lora_name"] = item.Name, ["strength_model"] = modelStrength, ["strength_clip"] = clipStrength,
+                ["model"] = new JsonArray(previousId, 0), ["clip"] = new JsonArray(previousId, 1)
+            },
+            ["class_type"] = "LoraLoader", ["_meta"] = new JsonObject { ["title"] = $"AIProvider 动态 LoRA {id}" }
+        };
+        previousId = id;
+    }
+    foreach (var entry in originalNodes) {
+        if (entry.Value?["inputs"] is not JsonObject inputs) continue;
+        foreach (var input in inputs.ToArray()) {
+            if (input.Value is not JsonArray connection || connection.Count < 2) continue;
+            var sourceId = connection[0]?.GetValue<string>();
+            if (sourceId != checkpointId) continue;
+            var outputIndex = connection[1]?.GetValue<int>() ?? -1;
+            if (outputIndex is 0 or 1) inputs[input.Key] = new JsonArray(previousId, outputIndex);
+        }
+    }
+}
+
+List<GenerationLora> ReadSelectedLoras(string raw) {
+    if (string.IsNullOrWhiteSpace(raw) || !raw.TrimStart().StartsWith('[')) return new List<GenerationLora>();
+    var requested = JsonNode.Parse(raw) as JsonArray ?? throw new InvalidOperationException("LoRA 参数不是有效数组");
+    return requested.OfType<JsonObject>()
+        .Where(item => item["enabled"]?.GetValue<bool>() != false && !string.IsNullOrWhiteSpace(item["name"]?.GetValue<string>()))
+        .Select(item => new GenerationLora {
+            Name = item["name"]!.GetValue<string>(),
+            ModelStrength = item["modelStrength"]?.GetValue<double>() ?? 1d,
+            ClipStrength = item["clipStrength"]?.GetValue<double>() ?? 1d
+        }).ToList();
+}
+
+string CompactLoraDisplayName(string modelName) {
+    var file = modelName.Replace('\\', '/').Split('/').Last();
+    var name = Path.GetFileNameWithoutExtension(file).Trim();
+    return string.IsNullOrWhiteSpace(name) ? "未命名 LoRA" : name;
+}
+
+bool IsLoraPlaceholder(string modelName) {
+    var value = modelName.Trim().Replace("_", "").Replace("-", "").Replace(" ", "");
+    return value.Equals("none", StringComparison.OrdinalIgnoreCase) ||
+        value.Equals("noone", StringComparison.OrdinalIgnoreCase) ||
+        value.Equals("null", StringComparison.OrdinalIgnoreCase) ||
+        value.Equals("undefined", StringComparison.OrdinalIgnoreCase);
+}
+
 sealed class PlatformProfile {
     public string PythonPath { get; set; } = "";
     public string MainPyPath { get; set; } = "";
@@ -1374,6 +1534,7 @@ sealed class GalleryGenerationRecord {
     public DateTimeOffset CreatedAt { get; set; }
     public string? PositivePrompt { get; set; }
     public string? NegativePrompt { get; set; }
+    public List<GenerationLora> Loras { get; set; } = new();
     public string? WorkflowId { get; set; }
     public long? Seed { get; set; }
     public int? Width { get; set; }
@@ -1404,6 +1565,7 @@ sealed class GalleryItem {
     public string Source { get; set; } = "output";
     public string Prompt { get; set; } = "";
     public string? NegativePrompt { get; set; }
+    public List<GenerationLora> Loras { get; set; } = new();
     public DateTimeOffset CreatedAt { get; set; }
     public int? Width { get; set; }
     public int? Height { get; set; }
@@ -1414,4 +1576,9 @@ sealed class GalleryItem {
     public string? Scheduler { get; set; }
     public string? WorkflowId { get; set; }
     public List<GalleryImage> Images { get; set; } = new();
+}
+sealed class GenerationLora {
+    public string Name { get; set; } = "";
+    public double ModelStrength { get; set; } = 1;
+    public double ClipStrength { get; set; } = 1;
 }

@@ -35,6 +35,7 @@ public class AssetService {
             item.setFileName(clean(item.getFileName(), 255));
             if (item.getFileName() == null) item.setFileName(fileName(normalizedPath));
             item.setFileSize(item.getFileSize() == null ? 0 : Math.max(0, item.getFileSize()));
+            item.setLorasJson(clean(item.getLorasJson(), 16000));
             saved += repository.upsert(platform, sha256(pathKey), item) > 0 ? 1 : 0;
         }
         return saved;
@@ -87,7 +88,7 @@ public class AssetService {
     }
     private static AssetVO toVO(Map<String,Object> row) {
         return new AssetVO(number(row.get("id")), text(row.get("platform")), text(row.get("localPath")), text(row.get("localUrl")), text(row.get("fileName")), number(row.get("fileSize")),
-                integer(row.get("width")), integer(row.get("height")), text(row.get("prompt")), text(row.get("negativePrompt")), nullableLong(row.get("seed")), integer(row.get("steps")),
+                integer(row.get("width")), integer(row.get("height")), text(row.get("prompt")), text(row.get("negativePrompt")), text(row.get("lorasJson")), nullableLong(row.get("seed")), integer(row.get("steps")),
                 decimal(row.get("cfg")), text(row.get("sampler")), text(row.get("scheduler")), text(row.get("workflowId")), date(row.get("generatedAt")), date(row.get("createdAt")));
     }
     private static String text(Object value) { return value == null ? null : String.valueOf(value); }

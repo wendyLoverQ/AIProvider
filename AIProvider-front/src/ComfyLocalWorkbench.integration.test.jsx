@@ -20,7 +20,7 @@ const workflow = {
   },
   binding: { fields: {}, outputNode: { title: "最终输出" } },
 };
-const workflow2 = { ...workflow, id: "futa02", name: "Futa 02 · 透明双输出", fields: undefined, binding: { ...workflow.binding, fields: { ...Object.fromEntries(workflow.fields.map((key) => [key, {}])), node_4_control_after_generate: { nodeId: "4", input: "control_after_generate", label: "KSampler 4 · control_after_generate" } } }, defaults: { ...workflow.defaults, positivePrompt: "changed by workflow", width: 832, height: 1216, batchSize: 3, seed: 99, steps: 42, cfg: 7, sampler: "euler", scheduler: "karras", node_4_control_after_generate: false } };
+const workflow2 = { ...workflow, id: "futa02", name: "Futa 02 · 透明双输出", definition: { ...workflow.definition, "99": { class_type: "WorkflowTwoMarker", inputs: {} } }, fields: undefined, binding: { ...workflow.binding, fields: { ...Object.fromEntries(workflow.fields.map((key) => [key, {}])), node_4_control_after_generate: { nodeId: "4", input: "control_after_generate", label: "KSampler 4 · control_after_generate" } } }, defaults: { ...workflow.defaults, positivePrompt: "changed by workflow", width: 832, height: 1216, batchSize: 3, seed: 99, steps: 42, cfg: 7, sampler: "euler", scheduler: "karras", node_4_control_after_generate: false } };
 const cutoutWorkflow = {
   id: "local-a4f23acdd681e785", name: "BiRefNet_一键抠图_透明PNG", relativePath: "BiRefNet_一键抠图_透明PNG.json",
   fields: ["sourceImage", "filenamePrefix"], defaults: { sourceImage: "", filenamePrefix: "BiRefNet_一键抠图", randomSeed: true },
@@ -63,6 +63,8 @@ describe("Comfy image generation flow", () => {
   let savedTwitterTask;
   let presetIsDefault;
   let cancelledTask;
+  let multiImageGallery;
+  let submittedWorkflow;
 
   beforeEach(() => {
     submitted = false;
@@ -75,6 +77,8 @@ describe("Comfy image generation flow", () => {
     savedTwitterTask = null;
     presetIsDefault = false;
     cancelledTask = null;
+    multiImageGallery = false;
+    submittedWorkflow = null;
     vi.stubGlobal("confirm", vi.fn(() => true));
     vi.stubGlobal("fetch", vi.fn(async (input, options = {}) => {
       const url = String(input);
@@ -113,7 +117,16 @@ describe("Comfy image generation flow", () => {
       if (url.endsWith("/api/assets/batch") && options.method === "POST") return json({ code: 200, data: { saved: 1 } });
       if (url.includes("/api/gallery?")) {
         galleryRequests += 1;
-        return json({ items: externalGalleryReady ? [{ id: "external-prompt", prompt: "external", images: [{ filename: "external.png", path: "aimaid/external.png" }] }] : submitted && !moved ? [{
+        return json({ items: multiImageGallery ? [{
+          id: PROMPT_ID,
+          promptId: PROMPT_ID,
+          prompt: "two images",
+          createdAt: new Date().toISOString(),
+          images: [
+            { filename: "done.png", path: "aimaid/done.png" },
+            { filename: "done-2.png", path: "aimaid/done-2.png" },
+          ],
+        }] : externalGalleryReady ? [{ id: "external-prompt", prompt: "external", images: [{ filename: "external.png", path: "aimaid/external.png" }] }] : submitted && !moved ? [{
         id: PROMPT_ID,
         promptId: PROMPT_ID,
         prompt: "portrait",
@@ -127,6 +140,11 @@ describe("Comfy image generation flow", () => {
       if (url.includes("/comfy/view?")) return new Response(new Blob(["image"], { type: "image/png" }));
       if (url.endsWith("/api/generate") && options.method === "POST") {
         submitted = true;
+        submittedWorkflow = {
+          id: options.body.get("workflowId"),
+          name: options.body.get("workflowName"),
+          definition: options.body.get("workflowDefinition"),
+        };
         submittedEditorData = options.body.get("node_5_editor_data");
         expect(options.body.get("workflowDefinition")).toContain("SaveImage");
         expect(options.body.get("workflowBinding")).toContain("outputNode");
@@ -179,6 +197,30 @@ describe("Comfy image generation flow", () => {
     await waitFor(() => expect(screen.queryByAltText("历史生成结果")).toBeNull());
   }, 8000);
 
+  it("selects individual images independently when one task contains multiple outputs", async () => {
+    multiImageGallery = true;
+    render(<ComfyLocalWorkbench />);
+    const images = await screen.findAllByAltText("历史生成结果");
+    const first = images[0].closest("button");
+    const second = images[1].closest("button");
+    fireEvent.click(screen.getByRole("button", { name: "选择" }));
+
+    fireEvent.click(first);
+    expect(first.dataset.selected).toBe("true");
+    expect(second.dataset.selected).toBe("false");
+    expect(screen.getByRole("button", { name: "删除 1" })).toBeTruthy();
+
+    fireEvent.click(second);
+    expect(first.dataset.selected).toBe("true");
+    expect(second.dataset.selected).toBe("true");
+    expect(screen.getByRole("button", { name: "删除 2" })).toBeTruthy();
+
+    fireEvent.click(first);
+    expect(first.dataset.selected).toBe("false");
+    expect(second.dataset.selected).toBe("true");
+    expect(screen.getByRole("button", { name: "删除 1" })).toBeTruthy();
+  });
+
   it("shows and loads workflow parameters immediately when switching workflows without refreshing the gallery", async () => {
     render(<ComfyLocalWorkbench />);
     const workflowSelect = await screen.findByRole("combobox", { name: "当前生成工作流" });
@@ -208,6 +250,16 @@ describe("Comfy image generation flow", () => {
     expect(screen.queryByRole("textbox", { name: "新方案名称" })).toBeNull();
     expect(screen.queryByRole("button", { name: "保存当前配置" })).toBeNull();
     expect(galleryRequests).toBe(requestsBeforeSwitch);
+  });
+
+  it("submits the workflow explicitly selected by the user", async () => {
+    render(<ComfyLocalWorkbench />);
+    const workflowSelect = await screen.findByRole("combobox", { name: "当前生成工作流" });
+    fireEvent.change(workflowSelect, { target: { value: "futa02" } });
+    fireEvent.click(screen.getByRole("button", { name: "开始生成" }));
+    await waitFor(() => expect(submittedWorkflow?.id).toBe("futa02"));
+    expect(submittedWorkflow.name).toBe("Futa 02 · 透明双输出");
+    expect(submittedWorkflow.definition).toContain("WorkflowTwoMarker");
   });
 
   it("loads Prompt schemes by stable backend id", async () => {

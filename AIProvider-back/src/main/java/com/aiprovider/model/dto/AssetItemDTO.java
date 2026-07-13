@@ -14,6 +14,7 @@ public class AssetItemDTO {
     private Integer height;
     private String prompt;
     private String negativePrompt;
+    private String lorasJson;
     private Long seed;
     private Integer steps;
     private Double cfg;
@@ -38,6 +39,8 @@ public class AssetItemDTO {
     public void setPrompt(String prompt) { this.prompt = prompt; }
     public String getNegativePrompt() { return negativePrompt; }
     public void setNegativePrompt(String negativePrompt) { this.negativePrompt = negativePrompt; }
+    public String getLorasJson() { return lorasJson; }
+    public void setLorasJson(String lorasJson) { this.lorasJson = lorasJson; }
     public Long getSeed() { return seed; }
     public void setSeed(Long seed) { this.seed = seed; }
     public Integer getSteps() { return steps; }

@@ -39,7 +39,9 @@ public class SyncService {
 
         Map<String, Integer> savedByTable = new LinkedHashMap<>();
         for (SyncBatchDTO.BusinessRecord record : records) {
-            syncRepo.upsert(record.getTable(), record.getPayload(), ALLOWED_TABLES);
+            if (!ALLOWED_TABLES.contains(record.getTable()))
+                throw new IllegalArgumentException("不支持的业务表或数据格式");
+            syncRepo.upsert("maid_" + record.getTable(), record.getPayload());
             savedByTable.merge(record.getTable(), 1, Integer::sum);
         }
 

@@ -29,9 +29,9 @@ public class SyncRepository {
         return syncMapper.recentSyncRuns();
     }
 
-    public void upsert(String table, JsonNode payload, Set<String> allowedTables) {
-        if (!allowedTables.contains(table) || payload == null || !payload.isObject())
-            throw new IllegalArgumentException("不支持的业务表或数据格式");
+    public void upsert(String table, JsonNode payload) {
+        if (payload == null || !payload.isObject())
+            throw new IllegalArgumentException("不支持的数据格式");
 
         TableMetadata metadata = metadataCache.computeIfAbsent(table, this::loadMetadata);
         LinkedHashMap<String, Object> values = new LinkedHashMap<>();

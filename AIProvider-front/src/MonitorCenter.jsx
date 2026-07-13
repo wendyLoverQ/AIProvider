@@ -4,6 +4,7 @@ import "./MonitorCenter.css";
 import "./MonitorCenterEnhancements.css";
 
 const API = "/api/monitor";
+let monitorSummaryCache = null;
 async function readSummary() {
   const paths = ["summary", "ai-overview", "ai-timeseries?range=24h"];
   const values = await Promise.all(paths.map(async (path) => {
@@ -23,13 +24,13 @@ const percent = (used, total) => total ? Math.min(100, Math.max(0, used / total 
 const dateTime = (value) => value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "—";
 
 export default function MonitorCenter() {
-  const [summary, setSummary] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [summary, setSummary] = useState(monitorSummaryCache);
+  const [loading, setLoading] = useState(!monitorSummaryCache);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const load = useCallback(async (silent = false) => {
     if (!silent) setRefreshing(true);
-    try { setSummary(await readSummary()); setError(""); }
+    try { const next = await readSummary(); monitorSummaryCache = next; setSummary(next); setError(""); }
     catch (exception) { setError(exception.message); }
     finally { setLoading(false); setRefreshing(false); }
   }, []);
@@ -39,11 +40,11 @@ export default function MonitorCenter() {
     return () => clearInterval(timer);
   }, [load]);
 
-  if (loading) return <div className="cloud-skeleton"><i /><i /><i /></div>;
-  return <section className="cloud-monitor">
+  return <section className={`cloud-monitor ${loading ? "is-loading" : ""}`}>
+    <div className="monitor-kawaii-crown" aria-hidden="true"><i>✦</i><b>♡ SYSTEM GUARDIAN ♡</b><i>✦</i></div>
     <header className="cloud-toolbar">
       <div><span className="eyebrow">SERVICE · SERVER · TENCENT CLOUD</span><p>服务请求、服务器资源与腾讯云流量</p></div>
-      <button onClick={() => load()} disabled={refreshing}><ArrowsClockwise className={refreshing ? "spin" : ""} />{refreshing ? "刷新中" : "手动刷新"}</button>
+      <button onClick={() => load()} disabled={refreshing || loading}><ArrowsClockwise className={refreshing || loading ? "spin" : ""} />{loading ? "正在读取" : refreshing ? "刷新中" : "手动刷新"}</button>
     </header>
     {error && <div className="cloud-error"><Warning />部分数据暂不可用：{error}</div>}
     <div className={`cloud-health ${summary?.summary?.health?.status === "UP" ? "healthy" : "unhealthy"}`}>
@@ -59,6 +60,9 @@ export default function MonitorCenter() {
 }
 
 function ServiceRequests({ overview = {}, timeseries = [] }) {
+  const points = timeseries.slice(-24);
+  const maxRequests = Math.max(1, ...points.map((item) => Number(item.totalRequests || 0)));
+  const maxP95 = Math.max(1, ...points.map((item) => Number(item.p95DurationMs || 0)));
   return <section className="service-requests">
     <header><div><h2>服务请求</h2><span>今天汇总 · 最近 24 小时明细</span></div></header>
     <div className="service-kpis">
@@ -67,10 +71,21 @@ function ServiceRequests({ overview = {}, timeseries = [] }) {
       <div><Warning /><span>失败请求</span><strong>{Number(overview.failureCount || 0).toLocaleString("zh-CN")}</strong></div>
       <div><Clock /><span>P95 响应</span><strong>{Number(overview.p95DurationMs || 0).toLocaleString("zh-CN")} ms</strong></div>
     </div>
-    <div className="request-table"><table><thead><tr><th>时间</th><th>请求</th><th>失败率</th><th>平均响应</th><th>P95</th></tr></thead><tbody>
-      {timeseries.slice(-12).reverse().map((item) => <tr key={item.bucket}><td>{dateTime(item.bucket)}</td><td>{item.totalRequests || 0}</td><td>{Number(item.errorRate || 0).toFixed(1)}%</td><td>{Math.round(Number(item.avgDurationMs || 0))} ms</td><td>{Number(item.p95DurationMs || 0)} ms</td></tr>)}
-      {!timeseries.length && <tr><td colSpan="5">最近 24 小时暂无请求</td></tr>}
-    </tbody></table></div>
+    {points.length ? <div className="request-visual">
+      <div className="request-visual-head"><strong>24 小时请求走势</strong><span><i className="volume" />请求量</span><span><i className="failure" />失败率</span><span><i className="latency" />P95 响应</span></div>
+      <div className="request-chart" role="img" aria-label="最近 24 小时请求量、失败率和 P95 响应趋势">
+        {points.map((item, index) => {
+          const requests = Number(item.totalRequests || 0);
+          const failure = Number(item.errorRate || 0);
+          const p95 = Number(item.p95DurationMs || 0);
+          const time = new Date(item.bucket);
+          return <div className="request-point" key={item.bucket} title={`${dateTime(item.bucket)}\n请求 ${requests}\n失败率 ${failure.toFixed(1)}%\n平均 ${Math.round(Number(item.avgDurationMs || 0))} ms\nP95 ${p95} ms`}>
+            <div className="request-bar"><i style={{ height: `${Math.max(requests ? 5 : 0, requests / maxRequests * 100)}%` }} /><b style={{ bottom: `${Math.min(94, p95 / maxP95 * 100)}%` }} /><em style={{ height: `${Math.min(100, failure)}%` }} /></div>
+            {(index === 0 || index === points.length - 1 || index % 4 === 0) && <small>{time.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })}</small>}
+          </div>;
+        })}
+      </div>
+    </div> : <div className="request-visual-empty">最近 24 小时暂无请求</div>}
   </section>;
 }
 

@@ -2,7 +2,7 @@ export const FALLBACK_FORM = {
   workflowId: "futa01",
   positivePrompt: "",
   negativePrompt: "",
-  loras: "",
+  loras: [],
   seed: 1,
   randomSeed: true,
   controlMode: "none",
@@ -45,7 +45,9 @@ export function createWorkflowForm(workflow) {
   if (!workflow) return { ...FALLBACK_FORM, workflowId: "" };
   const fieldKeys = getWorkflowFieldKeys(workflow);
   const defaults = workflow.defaults || {};
-  const values = Object.fromEntries(fieldKeys.map((key) => [key, defaults[key] ?? FALLBACK_FORM[key] ?? ""]));
+  const values = Object.fromEntries(fieldKeys.map((key) => [key, key === "loras"
+    ? (Array.isArray(defaults[key]) ? defaults[key] : [])
+    : defaults[key] ?? FALLBACK_FORM[key] ?? ""]));
   return {
     ...values,
     workflowId: workflow.id,

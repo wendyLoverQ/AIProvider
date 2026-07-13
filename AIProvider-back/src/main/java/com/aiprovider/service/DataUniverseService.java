@@ -13,14 +13,14 @@ public class DataUniverseService {
 
     private static final Map<String, List<String>> GROUPS = new LinkedHashMap<>();
     static {
-        GROUPS.put("核心状态", Arrays.asList("MaidStates", "AppSettings", "AppRuntimeStates", "UserProfiles", "DisturbanceSettings", "AiConversations"));
-        GROUPS.put("AI 与对话", Arrays.asList("ChatMessages", "ChatCommandLaunchers", "LlmCallLogs", "LlmChatConversations", "LlmChatMessages", "LlmProviderSelections", "AgentCapabilities", "AgentToolCalls"));
-        GROUPS.put("知识与计划", Arrays.asList("NotebookNotes", "NotebookAttachments", "Reminders", "ReminderLogs", "TimerRecords"));
-        GROUPS.put("感知与主动服务", Arrays.asList("DesktopContextSnapshots", "ProactiveBroadcastSourceSettings", "ProactiveBroadcastTriggerLogs", "ActionTagDefinitions"));
-        GROUPS.put("语音宇宙", Arrays.asList("VoiceAssets", "VoiceCacheDedupeLogs", "VoiceConversations", "VoiceRoleAudioCaches", "VoiceRoleBindings", "VoiceRoleCards", "VoiceRoleVoices", "VoiceRoles", "VoiceTriggerLogs"));
-        GROUPS.put("视频与媒体", Arrays.asList("VideoAlbumFolders", "VideoAlbums", "VideoItems", "VideoPlaybackHistories", "VideoSiteConfigs", "VideoSubtitleBindings", "VideoSubtitleFolders", "VideoTagDefinitions", "RemoteAuthors", "RemoteDownloadTasks", "RemotePlayHistories", "RemoteVideoItems", "RemoteVideoSettings"));
-        GROUPS.put("私密保险箱", Arrays.asList("VaultItems", "VaultItemHistories"));
-        GROUPS.put("数据字典", Arrays.asList("DbColumnComments"));
+        GROUPS.put("核心状态", Arrays.asList("maid_MaidStates", "maid_AppSettings", "maid_AppRuntimeStates", "maid_UserProfiles", "maid_DisturbanceSettings", "maid_AiConversations"));
+        GROUPS.put("AI 与对话", Arrays.asList("maid_ChatMessages", "maid_ChatCommandLaunchers", "maid_LlmCallLogs", "maid_LlmChatConversations", "maid_LlmChatMessages", "maid_LlmProviderSelections", "maid_AgentCapabilities", "maid_AgentToolCalls"));
+        GROUPS.put("知识与计划", Arrays.asList("maid_NotebookNotes", "maid_NotebookAttachments", "maid_Reminders", "maid_ReminderLogs", "maid_TimerRecords"));
+        GROUPS.put("感知与主动服务", Arrays.asList("maid_DesktopContextSnapshots", "maid_ProactiveBroadcastSourceSettings", "maid_ProactiveBroadcastTriggerLogs", "maid_ActionTagDefinitions"));
+        GROUPS.put("语音宇宙", Arrays.asList("maid_VoiceAssets", "maid_VoiceCacheDedupeLogs", "maid_VoiceConversations", "maid_VoiceRoleAudioCaches", "maid_VoiceRoleBindings", "maid_VoiceRoleCards", "maid_VoiceRoleVoices", "maid_VoiceRoles", "maid_VoiceTriggerLogs"));
+        GROUPS.put("视频与媒体", Arrays.asList("maid_VideoAlbumFolders", "maid_VideoAlbums", "maid_VideoItems", "maid_VideoPlaybackHistories", "maid_VideoSiteConfigs", "maid_VideoSubtitleBindings", "maid_VideoSubtitleFolders", "maid_VideoTagDefinitions", "maid_RemoteAuthors", "maid_RemoteDownloadTasks", "maid_RemotePlayHistories", "maid_RemoteVideoItems", "maid_RemoteVideoSettings"));
+        GROUPS.put("私密保险箱", Arrays.asList("maid_VaultItems", "maid_VaultItemHistories"));
+        GROUPS.put("数据字典", Arrays.asList("maid_DbColumnComments"));
     }
 
     private static final Set<String> TABLES = GROUPS.values().stream()

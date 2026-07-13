@@ -20,7 +20,7 @@ describe("global UI theme", () => {
   });
 
   it("provides seven complete selectable presets", () => {
-    expect(UI_THEME_PRESETS).toHaveLength(7);
+    expect(UI_THEME_PRESETS).toHaveLength(15);
     for (const preset of UI_THEME_PRESETS) {
       expect(Object.keys(preset.theme).sort()).toEqual(Object.keys(DEFAULT_UI_THEME).sort());
       expect(isUiThemePreset({ ...preset.theme }, preset)).toBe(true);

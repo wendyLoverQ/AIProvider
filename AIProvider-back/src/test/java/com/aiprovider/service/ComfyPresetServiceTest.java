@@ -89,6 +89,26 @@ class ComfyPresetServiceTest {
         service.setDefault(3);
         verify(presets).clearDefault();
         verify(presets).setDefault(3);
+        when(presets.update(any())).thenReturn(false);
+        assertThatThrownBy(() -> service.update(4, valid())).isInstanceOf(IllegalArgumentException.class).hasMessage("参数方案不存在");
+        when(presets.setDefault(4)).thenReturn(false);
+        assertThatThrownBy(() -> service.setDefault(4)).isInstanceOf(IllegalArgumentException.class).hasMessage("参数方案不存在");
+    }
+
+    @Test void normalizesNotesAndReadsAllDefaultValueShapes() {
+        ComfyPresetDTO noted = valid(); noted.setNotes(" note "); service.create(noted);
+        ComfyPresetDTO blank = valid(); blank.setNotes("  "); service.create(blank);
+        verify(presets).insert(argThat(value -> "note".equals(value.getNotes())));
+        verify(presets).insert(argThat(value -> value.getNotes() == null));
+
+        Map<String, Object> base = new HashMap<>();
+        base.put("id", 1); base.put("parametersJson", "{}");
+        Map<String, Object> bool = new HashMap<>(base); bool.put("isDefault", true);
+        Map<String, Object> number = new HashMap<>(base); number.put("id", 2); number.put("isDefault", 1);
+        Map<String, Object> text = new HashMap<>(base); text.put("id", 3); text.put("isDefault", "true");
+        Map<String, Object> zero = new HashMap<>(base); zero.put("id", 4); zero.put("isDefault", 0);
+        when(presets.findAll()).thenReturn(Arrays.asList(bool, number, text, zero));
+        assertThat(service.list()).extracting(ComfyPresetVO::isDefaultPreset).containsExactly(true, true, true, false);
     }
 
     @Test void validatesAllRequiredFieldsAndFolderBoundaries() {
@@ -97,6 +117,7 @@ class ComfyPresetServiceTest {
         dto = valid(); dto.setTitle(" "); assertInvalid(dto, "标题长度");
         dto = valid(); dto.setTitle(String.join("", Collections.nCopies(101, "x"))); assertInvalid(dto, "标题长度");
         dto = valid(); dto.setParameters(null); assertInvalid(dto, "参数不能为空");
+        dto = valid(); dto.setNotes(String.join("", Collections.nCopies(1001, "x"))); assertInvalid(dto, "备注不能超过");
         for (String folder : Arrays.asList("../x", "/root", "\\root", String.join("", Collections.nCopies(241, "x")))) {
             dto = valid(); dto.setOutputFolder(folder); assertInvalid(dto, "输出文件夹不合法");
         }

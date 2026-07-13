@@ -10,6 +10,10 @@ describe("workbench workflow state", () => {
       .toEqual({ workflowId: "unknown", customField: "", randomSeed: true, generateTransparent: false });
     expect(createWorkflowForm({ id: "flags", fields: [], defaults: { randomSeed: false, generateTransparent: true } }))
       .toEqual({ workflowId: "flags", randomSeed: false, generateTransparent: true });
+    expect(createWorkflowForm({ id: "loras", fields: ["loras"], defaults: { loras: ["detail.safetensors"] } }))
+      .toEqual({ workflowId: "loras", loras: ["detail.safetensors"], randomSeed: true, generateTransparent: false });
+    expect(createWorkflowForm({ id: "invalid-loras", fields: ["loras"], defaults: { loras: "detail.safetensors" } }))
+      .toEqual({ workflowId: "invalid-loras", loras: [], randomSeed: true, generateTransparent: false });
     expect(FALLBACK_FORM.workflowId).toBe("futa01");
   });
 

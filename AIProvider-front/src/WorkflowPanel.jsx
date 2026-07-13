@@ -1,5 +1,5 @@
-import { Sparkle, UploadSimple } from "@phosphor-icons/react";
-import { useState } from "react";
+import { ArrowDown, ArrowUp, FloppyDisk, Plus, Sparkle, UploadSimple, X } from "@phosphor-icons/react";
+import { useEffect, useState } from "react";
 import "./WorkflowPanel.css";
 import MaskPointEditor from "./MaskPointEditor";
 
@@ -23,7 +23,8 @@ const SELECT_OPTIONS = {
   scheduler: [["normal", "标准"], ["karras", "Karras"], ["exponential", "指数"], ["sgm_uniform", "SGM 均匀"]],
 };
 
-const BASIC_FIELDS = new Set(["sourceImage", "positivePrompt", "negativePrompt", "width", "height", "batchSize", "seed"]);
+const BASIC_FIELDS = new Set(["sourceImage", "positivePrompt", "negativePrompt", "loras", "width", "height", "batchSize", "seed"]);
+const BASIC_FIELD_ORDER = ["sourceImage", "positivePrompt", "negativePrompt", "loras", "width", "height", "batchSize", "seed"];
 const SIZE_OPTIONS = [
   ["1920x1080", "横屏 · 1K（1920 × 1080）"], ["3840x2160", "横屏 · 2K（3840 × 2160）"], ["7680x4320", "横屏 · 4K（7680 × 4320）"],
   ["1080x1920", "竖屏 · 1K（1080 × 1920）"], ["2160x3840", "竖屏 · 2K（2160 × 3840）"], ["4320x7680", "竖屏 · 4K（4320 × 7680）"],
@@ -77,9 +78,58 @@ function SeedField({ value, random, onChange }) {
   </div>;
 }
 
-function WorkflowField({ fieldKey, fieldSpec, value, workflow, referenceFile, onReference, onChange }) {
+function LoraField({ value, models, loading, onChange }) {
+  const selected = Array.isArray(value) ? value : [];
+  const selectedNames = new Set(selected.map((item) => item.name));
+  const available = models.filter((model) => {
+    const name = String(model.name || "").trim();
+    const displayName = String(model.displayName || "").trim();
+    return name && !/^(none|no[ _-]?one|null|undefined)$/i.test(name) &&
+      !/^(none|no[ _-]?one|null|undefined)$/i.test(displayName) && !selectedNames.has(model.name);
+  });
+  const add = (name) => {
+    const model = models.find((item) => item.name === name);
+    if (!model) return;
+    onChange("loras", [...selected, { name: model.name, displayName: model.displayName, modelStrength: 1, clipStrength: 1, enabled: true }]);
+  };
+  const update = (index, patch) => onChange("loras", selected.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
+  const move = (index, offset) => {
+    const target = index + offset;
+    if (target < 0 || target >= selected.length) return;
+    const next = [...selected]; [next[index], next[target]] = [next[target], next[index]]; onChange("loras", next);
+  };
+  return <section className="workflow-panel__loras">
+    <header><div><strong>LoRA 模型</strong><small>按顺序叠加 · 使用原文件名加载</small></div><span>{selected.length} 个</span></header>
+    <select className="lora-select" aria-label="选择 LoRA 模型" value="" disabled={loading || !available.length} onChange={(event) => add(event.target.value)}>
+      <option value="" disabled hidden>{loading ? "正在读取 LoRA 模型…" : available.length ? "选择 LoRA 模型…" : "没有更多可选 LoRA"}</option>
+      {available.map((model) => <option key={model.name} value={model.name}>{model.displayName}</option>)}
+    </select>
+    {selected.length > 0 && <div className="lora-selected-list">{selected.map((item, index) => <article key={`${item.name}-${index}`} className={item.enabled === false ? "disabled" : ""}>
+      <label className="lora-enabled"><input type="checkbox" checked={item.enabled !== false} onChange={(event) => update(index, { enabled: event.target.checked })} /><span title={item.name}>{item.displayName || models.find((model) => model.name === item.name)?.displayName || item.name}</span></label>
+      <label>模型强度<input type="number" min="-2" max="2" step="0.05" value={item.modelStrength ?? 1} onChange={(event) => update(index, { modelStrength: Number(event.target.value) })} /></label>
+      <label>CLIP 强度<input type="number" min="-2" max="2" step="0.05" value={item.clipStrength ?? 1} onChange={(event) => update(index, { clipStrength: Number(event.target.value) })} /></label>
+      <div className="lora-row-actions"><button type="button" onClick={() => move(index, -1)} disabled={index === 0} title="上移"><ArrowUp /></button><button type="button" onClick={() => move(index, 1)} disabled={index === selected.length - 1} title="下移"><ArrowDown /></button><button type="button" onClick={() => onChange("loras", selected.filter((_, itemIndex) => itemIndex !== index))} title="移除"><X /></button></div>
+    </article>)}</div>}
+  </section>;
+}
+
+function WorkflowField({ fieldKey, fieldSpec, value, workflow, referenceFile, onReference, onReferenceDrop, onChange }) {
+  const [draggingFile, setDraggingFile] = useState(false);
+  const [referenceUrl, setReferenceUrl] = useState("");
+  useEffect(() => {
+    if (!referenceFile) { setReferenceUrl(""); return undefined; }
+    const url = URL.createObjectURL(referenceFile);
+    setReferenceUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [referenceFile]);
   const label = displayLabel(fieldKey, fieldSpec);
-  if (fieldKey === "sourceImage") return <label className="workflow-panel__file">待处理原图<input aria-label="待处理原图" type="file" accept="image/*" onChange={(event) => onReference("sourceImage", event)} /><span><UploadSimple />{referenceFile?.name || "选择图片"}</span></label>;
+  if (fieldKey === "sourceImage") return <label
+    className={`workflow-panel__file ${draggingFile ? "is-dragging" : ""}`}
+    onDragEnter={(event) => { event.preventDefault(); setDraggingFile(true); }}
+    onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setDraggingFile(true); }}
+    onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setDraggingFile(false); }}
+    onDrop={(event) => { setDraggingFile(false); onReferenceDrop?.("sourceImage", event); }}
+  >待处理原图<input aria-label="待处理原图" type="file" accept="image/*" onChange={(event) => onReference("sourceImage", event)} /><span className={referenceUrl ? "has-image" : ""}>{referenceUrl ? <img src={referenceUrl} alt={referenceFile?.name || "待处理原图"} /> : <UploadSimple />}<em>{referenceFile?.name || "拖入本机图片，或点击选择"}</em></span></label>;
   if (["positivePrompt", "negativePrompt", "loras"].includes(fieldKey)) return <label className={fieldKey === "positivePrompt" || fieldKey === "negativePrompt" ? "workflow-panel__prompt-field" : undefined}>{LABELS[fieldKey]}<textarea aria-label={LABELS[fieldKey]} rows={fieldKey === "positivePrompt" ? 9 : fieldKey === "negativePrompt" ? 7 : 3} value={value ?? ""} onChange={(event) => onChange(fieldKey, event.target.value)} /></label>;
   if (fieldKey === "checkpoint" && workflow.models?.length) return <label>{LABELS.checkpoint}<select aria-label={LABELS.checkpoint} value={value || workflow.models[0]} onChange={(event) => onChange(fieldKey, event.target.value)}>{workflow.models.map((model) => <option key={model} value={model}>{model}</option>)}</select></label>;
   if (SELECT_OPTIONS[fieldKey]) return <SelectField fieldKey={fieldKey} value={value} onChange={onChange} />;
@@ -88,19 +138,20 @@ function WorkflowField({ fieldKey, fieldSpec, value, workflow, referenceFile, on
   return <label>{label}<input aria-label={label} value={value ?? ""} onChange={(event) => onChange(fieldKey, event.target.value)} /></label>;
 }
 
-export default function WorkflowPanel({ workflows, loading, workflow, fieldKeys, fieldSpecs, values, onWorkflowChange, onFieldChange, referenceFiles, onReference, presets, presetQuery, onPresetChange, appliedPresetTitle, onGenerate, disabled }) {
+export default function WorkflowPanel({ workflows, loading, workflow, fieldKeys, fieldSpecs, values, onWorkflowChange, onFieldChange, referenceFiles, onReference, onReferenceDrop, loraModels, loraModelsLoading, presets, presetQuery, onPresetChange, appliedPresetTitle, presetSaveName, onPresetSaveNameChange, onSavePreset, presetSaving, onGenerate, disabled }) {
   const supportsPrompt = fieldKeys.includes("positivePrompt") || fieldKeys.includes("negativePrompt");
   const editorKey = fieldKeys.find((fieldKey) => fieldSpecs[fieldKey]?.nodeType === "MaskEditMEC" && fieldSpecs[fieldKey]?.input === "editor_data");
   const editorNodeId = editorKey ? fieldSpecs[editorKey]?.nodeId : null;
   const radiusKey = editorNodeId ? fieldKeys.find((fieldKey) => fieldSpecs[fieldKey]?.nodeId === editorNodeId && fieldSpecs[fieldKey]?.input === "default_radius") : null;
-  const basicFieldKeys = fieldKeys.filter((fieldKey) => BASIC_FIELDS.has(fieldKey));
+  const basicFieldKeys = fieldKeys.filter((fieldKey) => BASIC_FIELDS.has(fieldKey)).sort((left, right) => BASIC_FIELD_ORDER.indexOf(left) - BASIC_FIELD_ORDER.indexOf(right));
   const advancedFieldKeys = fieldKeys.filter((fieldKey) => !BASIC_FIELDS.has(fieldKey) && fieldKey !== editorKey);
   const hasCombinedSize = fieldKeys.includes("width") && fieldKeys.includes("height");
   const renderField = (fieldKey) => {
     if (hasCombinedSize && fieldKey === "width") return <SizeField key="size" width={values.width} height={values.height} onChange={onFieldChange} />;
     if (hasCombinedSize && fieldKey === "height") return null;
     if (fieldKey === "seed") return <SeedField key="seed" value={values.seed} random={values.randomSeed !== false} onChange={onFieldChange} />;
-    return <WorkflowField key={fieldKey} fieldKey={fieldKey} fieldSpec={fieldSpecs[fieldKey]} value={values[fieldKey]} workflow={workflow} referenceFile={referenceFiles[fieldKey]} onReference={onReference} onChange={onFieldChange} />;
+    if (fieldKey === "loras") return <LoraField key="loras" value={values.loras} models={loraModels || []} loading={loraModelsLoading} onChange={onFieldChange} />;
+    return <WorkflowField key={fieldKey} fieldKey={fieldKey} fieldSpec={fieldSpecs[fieldKey]} value={values[fieldKey]} workflow={workflow} referenceFile={referenceFiles[fieldKey]} onReference={onReference} onReferenceDrop={onReferenceDrop} onChange={onFieldChange} />;
   };
   return <div className="workflow-panel">
     <section className="workflow-panel__chooser" aria-label="选择工作流">
@@ -127,6 +178,13 @@ export default function WorkflowPanel({ workflows, loading, workflow, fieldKeys,
         <option value="">请选择 Prompt 方案</option>
         {presets.map((preset) => <option key={preset.id} value={String(preset.id)}>{preset.title}</option>)}
       </select>
+      <div className="workflow-panel__preset-save">
+        <input aria-label="新 Prompt 方案名称" value={presetSaveName} maxLength="100" onChange={(event) => onPresetSaveNameChange(event.target.value)} placeholder="另存为新方案时填写名称" />
+        <div>
+          <button type="button" disabled={presetSaving || !presetSaveName.trim()} onClick={() => onSavePreset("new")}><Plus />另存为新方案</button>
+          <button type="button" disabled={presetSaving || !presetQuery} onClick={() => onSavePreset("overwrite")}><FloppyDisk />覆盖当前方案</button>
+        </div>
+      </div>
       {!presets.length && <small>还没有 Prompt 方案。</small>}
       {appliedPresetTitle && <div>已应用：{appliedPresetTitle}</div>}
     </section>}

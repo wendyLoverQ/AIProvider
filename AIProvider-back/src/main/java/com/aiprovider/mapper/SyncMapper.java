@@ -11,14 +11,14 @@ import java.util.Map;
 @Mapper
 public interface SyncMapper {
 
-    @Insert("INSERT INTO SyncRuns(DeviceId, ReceivedCount, UpsertedCount, FailedCount) " +
+    @Insert("INSERT INTO c_SyncRuns(DeviceId, ReceivedCount, UpsertedCount, FailedCount) " +
             "VALUES(#{deviceId}, #{receivedCount}, #{upsertedCount}, 0)")
     void insertSyncRun(@Param("deviceId") String deviceId,
                        @Param("receivedCount") int receivedCount,
                        @Param("upsertedCount") int upsertedCount);
 
     @Select("SELECT DeviceId, ReceivedCount, UpsertedCount, FailedCount, CreatedAt " +
-            "FROM SyncRuns ORDER BY Id DESC LIMIT 20")
+            "FROM c_SyncRuns ORDER BY Id DESC LIMIT 20")
     List<Map<String, Object>> recentSyncRuns();
 
     @Select("SELECT COLUMN_NAME, COLUMN_KEY, DATA_TYPE " +

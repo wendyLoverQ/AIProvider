@@ -43,6 +43,14 @@ import {
   SlidersHorizontal,
   Palette,
   XLogo,
+  Cat,
+  Star,
+  Cloud,
+  FlowerLotus,
+  PawPrint,
+  MoonStars,
+  MagicWand,
+  LockKey,
 } from "@phosphor-icons/react";
 import {
   Area,
@@ -62,9 +70,13 @@ import MonitorCenter from "./MonitorCenter";
 import PromptManager from "./PromptManager";
 import UiControl from "./UiControl";
 import TwitterPublisher from "./TwitterPublisher";
+import DynamicShowcase from "./DynamicShowcase";
+import CuteHomeBackground from "./CuteHomeBackground";
+import CuteWorkshopCard from "./CuteWorkshopCard";
 import "./App.css";
 import "./CodexTheme.css";
 import "./SemanticTheme.css";
+import "./KawaiiUi.css";
 
 const API = "/api";
 const NAV = [
@@ -72,8 +84,8 @@ const NAV = [
   { key: "prompts", label: "Prompt 管理", icon: SlidersHorizontal },
   { key: "maid", label: "我的女仆", icon: Heart },
   { key: "monitor", label: "监控中心", icon: Pulse },
-  { key: "camera", label: "手机监控", icon: VideoCamera },
-  { key: "twitter", label: "Twitter 发布", icon: XLogo },
+  { key: "camera", label: "手机监控", icon: VideoCamera, closed: true },
+  { key: "twitter", label: "Twitter 发布", icon: XLogo, closed: true },
   { key: "appearance", label: "UI 控制", icon: Palette },
   { key: "settings", label: "系统设置", icon: GearSix },
 ];
@@ -237,12 +249,13 @@ function App() {
           onClick={() => setView("home")}
           style={{ cursor: "pointer" }}
         >
-          <Sparkle weight="fill" />
-          <span>AI</span>
+          <span className="rail-mascot"><i className="mascot-ear ear-left" /><i className="mascot-ear ear-right" /><Cat weight="fill" /><b>•ᴗ•</b><em>✦</em></span>
+          <span className="rail-brand-label">MAID</span>
         </div>
         <nav>
           <button
             className={view === "home" ? "nav-button active" : "nav-button"}
+            data-nav-key="home"
             onClick={() => setView("home")}
             title="首页"
           >
@@ -258,21 +271,17 @@ function App() {
             />
           ))}
         </nav>
-        <div className="rail-signal">
-          <span />
-          <span />
-          <span />
-        </div>
       </aside>
       <header className="mobile-head">
         <div className="mobile-logo">
-          <Sparkle weight="fill" /> AI Maid
+          <Cat weight="fill" /> Kawaii Maid
         </div>
         <span className="live-copy">
           <i /> LIVE
         </span>
       </header>
       <main className="workspace">
+        {!["home", "appearance", "settings"].includes(view) && <KawaiiPageAtmosphere soft={["workshop", "prompts"].includes(view)} />}
         {view !== "home" && current && (
           <div className="section-head">
             <div>
@@ -295,9 +304,9 @@ function App() {
           ) : (
             <MaidView data={dashboard} />
           ))}
-        {view === "camera" && <CameraMonitor />}
+        {view === "camera" && <SealedFeature title="手机监控" message="这片频道正在休眠，暂时不对外开放。" />}
         {view === "monitor" && <MonitorCenter />}
-        {view === "twitter" && <TwitterPublisher />}
+        {view === "twitter" && <SealedFeature title="Twitter 发布" message="信使小鸟正在放假，这项功能暂时封闭。" />}
         {view === "appearance" && <UiControl />}
         {view === "settings" && <div className="tool-home system-settings-view"><ComfyConsole mode="settings" /></div>}
       </main>
@@ -320,11 +329,14 @@ function NavButton({ item, active, onClick }) {
   return (
     <button
       className={active ? "nav-button active" : "nav-button"}
-      onClick={onClick}
-      title={item.label}
+      disabled={item.closed}
+      data-nav-key={item.key}
+      onClick={item.closed ? undefined : onClick}
+      title={item.closed ? `${item.label} · 暂未开放` : item.label}
     >
       <Icon size={22} weight={active ? "duotone" : "regular"} />
       <span>{item.label}</span>
+      {item.closed && <i className="nav-closed-dot">休</i>}
     </button>
   );
 }
@@ -351,22 +363,20 @@ function SystemClock() {
 
 /* ========== 首页：纯大图 ========== */
 function HomeView({ data, onOpenWorkshop }) {
-  const roles = data.insights?.voiceRoles || [];
-  const currentMaid = data.insights?.currentMaid || {};
-  const runtime = data.insights?.runtime || {};
-  const currentRoleId = currentMaid.MaidId ?? currentMaid.maidId ?? runtime.LastRole ?? runtime.lastRole ?? roles[0]?.RoleId ?? roles[0]?.roleId ?? "";
-  const currentRole = roles.find((role) => String(role.RoleId ?? role.roleId).toLowerCase() === String(currentRoleId).toLowerCase());
-  const avatarUrl = currentRole?.avatarUrl;
   return (
     <div className="home-launcher">
-      <div className="home-launcher-portrait">
-        <i className="home-launcher-ring ring-a" /><i className="home-launcher-ring ring-b" />
-        <div className="maid-avatar-placeholder"><User /></div>
-        {avatarUrl && <img src={avatarUrl} alt={currentRole?.DisplayName ?? currentRole?.displayName ?? currentRoleId} onError={(event) => { event.currentTarget.style.display = "none"; }} />}
+      <CuteHomeBackground />
+      <DynamicShowcase />
+      <div className="home-kawaii-title"><span>✦ KAWAII CREATIVE ROOM ✦</span><strong>今天也要创造可爱呀</strong><small>♡ 灵感、角色与魔法都准备好了 ♡</small></div>
+      <div className="home-sticker-ribbon" aria-hidden="true"><span>MAGIC</span><i>♡</i><span>DREAM</span><i>✦</i><span>CREATE</span><i>☁</i><span>KAWAII</span></div>
+      <div className="home-cute-notes" aria-hidden="true">
+        <div className="cute-note note-a"><MoonStars weight="fill" /><b>梦境正在加载</b><small>Dreaming in pastel colors</small></div>
+        <div className="cute-note note-b"><FlowerLotus weight="duotone" /><b>今日可爱能量</b><span><i /><i /><i /><i /><i /></span></div>
+        <div className="cute-note note-c"><MagicWand weight="fill" /><b>闪闪灵感</b><small>+ 999 sparkle power</small></div>
       </div>
-      <button className="home-workshop-button" onClick={onOpenWorkshop}>
-        <ImageSquare size={24} weight="duotone" /><span><strong>图像工坊</strong><small>进入本机生成与资产管理</small></span><CaretRight />
-      </button>
+      <div className="home-cloud cloud-left" aria-hidden="true"><Cloud weight="fill" /><span>♡</span></div>
+      <div className="home-cloud cloud-right" aria-hidden="true"><Cloud weight="fill" /><Star weight="fill" /></div>
+      <CuteWorkshopCard onOpen={onOpenWorkshop} />
     </div>
   );
 }
@@ -416,7 +426,8 @@ function MaidView({ data }) {
   };
 
   return (
-    <div className="maid-compact-page">
+    <div className="maid-compact-page kawaii-maid-space">
+      <div className="maid-kawaii-banner" aria-hidden="true"><PawPrint weight="fill" /><span>MY DEAREST MAID</span><Heart weight="fill" /><b>いつもそばにいるよ</b><Sparkle weight="fill" /></div>
       <section className="maid-compact-hero">
         <div className="maid-avatar-stage">
           <div className="portrait-core">
@@ -501,6 +512,24 @@ function MaidView({ data }) {
       </section>
     </div>
   );
+}
+
+function KawaiiPageAtmosphere({ soft = false }) {
+  return <div className={`kawaii-page-atmosphere ${soft ? "soft" : ""}`} aria-hidden="true">
+    <i className="page-aurora aurora-a" /><i className="page-aurora aurora-b" />
+    <span className="page-charm charm-one"><Heart weight="fill" /></span>
+    <span className="page-charm charm-two"><Star weight="fill" /></span>
+    <span className="page-charm charm-three"><PawPrint weight="fill" /></span>
+    <div className="page-spark-trail">✦　·　♡　·　✧</div>
+  </div>;
+}
+
+function SealedFeature({ title, message }) {
+  return <div className="sealed-feature">
+    <div className="sealed-orbit"><Star weight="fill" /><Heart weight="fill" /></div>
+    <div className="sealed-mascot"><Cat weight="duotone" /><LockKey weight="fill" /><i>z Z</i></div>
+    <span>PASTEL AREA · SLEEPING</span><h2>{title}暂时休息中</h2><p>{message}</p><small>♡ 等它准备好后再回来看看吧 ♡</small>
+  </div>;
 }
 
 function PanelHeader({ title, subtitle }) {

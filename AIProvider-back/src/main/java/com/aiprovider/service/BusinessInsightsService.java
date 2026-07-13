@@ -50,9 +50,9 @@ public class BusinessInsightsService {
 
     private Map<String, Long> getCounts() {
         return insightsRepo.countAll(Arrays.asList(
-            "NotebookNotes", "Reminders", "VoiceConversations", "VoiceTriggerLogs",
-            "VoiceRoles", "VideoItems", "RemoteVideoItems", "AiConversations",
-            "ProactiveTriggerRules", "ProactiveTriggerStates"
+            "maid_NotebookNotes", "maid_Reminders", "maid_VoiceConversations", "maid_VoiceTriggerLogs",
+            "maid_VoiceRoles", "maid_VideoItems", "maid_RemoteVideoItems", "maid_AiConversations",
+            "maid_ProactiveTriggerRules", "maid_ProactiveTriggerStates"
         ));
     }
 }

@@ -17,15 +17,15 @@ public class DashboardService {
     public Map<String, Object> getOverview() {
         Map<String, Object> stats = new LinkedHashMap<>();
 
-        stats.put("totalChatMessages", dashboardRepo.count("ChatMessages"));
-        stats.put("totalLlmCalls", dashboardRepo.count("LlmCallLogs"));
-        stats.put("totalLlmConversations", dashboardRepo.count("LlmChatConversations"));
-        stats.put("totalTimeRecords", dashboardRepo.count("TimerRecords"));
-        stats.put("totalAgentCalls", dashboardRepo.count("AgentToolCalls"));
-        stats.put("totalDesktopSnapshots", dashboardRepo.count("DesktopContextSnapshots"));
-        stats.put("totalBroadcasts", dashboardRepo.count("ProactiveBroadcastTriggerLogs"));
-        stats.put("totalNotebooks", dashboardRepo.count("NotebookNotes"));
-        stats.put("totalReminders", dashboardRepo.count("Reminders"));
+        stats.put("totalChatMessages", dashboardRepo.count("maid_ChatMessages"));
+        stats.put("totalLlmCalls", dashboardRepo.count("maid_LlmCallLogs"));
+        stats.put("totalLlmConversations", dashboardRepo.count("maid_LlmChatConversations"));
+        stats.put("totalTimeRecords", dashboardRepo.count("maid_TimerRecords"));
+        stats.put("totalAgentCalls", dashboardRepo.count("maid_AgentToolCalls"));
+        stats.put("totalDesktopSnapshots", dashboardRepo.count("maid_DesktopContextSnapshots"));
+        stats.put("totalBroadcasts", dashboardRepo.count("maid_ProactiveBroadcastTriggerLogs"));
+        stats.put("totalNotebooks", dashboardRepo.count("maid_NotebookNotes"));
+        stats.put("totalReminders", dashboardRepo.count("maid_Reminders"));
 
         Map<String, Object> llmAgg = dashboardRepo.llmAggregation();
         stats.put("totalPromptTokens", llmAgg.getOrDefault("totalPromptTokens", 0L));
