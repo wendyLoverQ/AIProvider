@@ -76,6 +76,8 @@ describe("Comfy image generation flow", () => {
   let progressFails;
   let deletedPaths;
   let incrementalHistoryRun;
+  let incrementalHistoryAlreadyPresent;
+  let existingHistoryAlreadyPresent;
   let recentHistoryPoll;
   let bridgeRequests;
 
@@ -99,6 +101,8 @@ describe("Comfy image generation flow", () => {
     progressFails = false;
     deletedPaths = [];
     incrementalHistoryRun = false;
+    incrementalHistoryAlreadyPresent = false;
+    existingHistoryAlreadyPresent = false;
     recentHistoryPoll = 0;
     bridgeRequests = [];
     vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
@@ -175,6 +179,8 @@ describe("Comfy image generation flow", () => {
       if (url.includes("/api/gallery/file?")) return new Response(new Blob(["image"], { type: "image/png" }));
       if (url.includes("/api/assets/file?")) return new Response(new Blob(["image"], { type: "image/png" }));
       if (url.includes("/comfy/history?")) {
+        if (existingHistoryAlreadyPresent) return json({ "existing-prompt": completed });
+        if (incrementalHistoryAlreadyPresent) return json({ "incremental-prompt": incrementalCompleted });
         if (incrementalHistoryRun) return json(recentHistoryPoll++ === 0 ? {} : { "incremental-prompt": incrementalCompleted });
         return json(externalGalleryReady ? { "external-prompt": completed } : {});
       }
@@ -404,6 +410,52 @@ describe("Comfy image generation flow", () => {
     expect(galleryRequestUrls).toEqual(["http://127.0.0.1:32145/api/gallery?page=1&pageSize=100"]);
     expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
     expect(screen.getByText("2 张")).toBeTruthy();
+    const tiles = Array.from(document.querySelectorAll(".local-image-tile"));
+    expect(tiles).toHaveLength(2);
+    expect(tiles[0].dataset.galleryEntryId).toBe("incremental-prompt");
+    expect(tiles[0].dataset.imagePath).toBe("aimaid/incremental.png");
+    expect(tiles[1].dataset.galleryEntryId).toBe(PROMPT_ID);
+    expect(tiles[1].dataset.imagePath).toBe("aimaid/done.png");
+  }, 8000);
+
+  it("reconciles a completed bridge result already present on the first history poll", async () => {
+    submitted = true;
+    incrementalHistoryAlreadyPresent = true;
+    render(<ComfyLocalWorkbench />);
+
+    await waitFor(() => {
+      const incrementalTile = document.querySelector('[data-gallery-entry-id="incremental-prompt"]');
+      expect(incrementalTile).not.toBeNull();
+      expect(incrementalTile.dataset.imagePath).toBe("aimaid/incremental.png");
+    }, { timeout: 7000 });
+
+    const tiles = Array.from(document.querySelectorAll(".local-image-tile"));
+    expect(tiles).toHaveLength(2);
+    expect(tiles[0].dataset.galleryEntryId).toBe("incremental-prompt");
+    expect(tiles[1].dataset.galleryEntryId).toBe(PROMPT_ID);
+    expect(galleryRequests).toBe(1);
+    expect(bridgeRequests.filter((url) => url.includes("/comfy/view?") && url.includes("incremental.png"))).toHaveLength(1);
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("2 张")).toBeTruthy();
+  }, 8000);
+
+  it("does not duplicate a first-poll bridge result whose image address is already loaded", async () => {
+    submitted = true;
+    existingHistoryAlreadyPresent = true;
+    render(<ComfyLocalWorkbench />);
+
+    await waitFor(() => expect(
+      bridgeRequests.filter((url) => url.includes("/comfy/history?max_items=20")).length,
+    ).toBeGreaterThanOrEqual(2), { timeout: 7000 });
+
+    const tiles = Array.from(document.querySelectorAll(".local-image-tile"));
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0].dataset.galleryEntryId).toBe(PROMPT_ID);
+    expect(tiles[0].dataset.imagePath).toBe("aimaid/done.png");
+    expect(bridgeRequests.filter((url) => url.includes("/comfy/view?"))).toHaveLength(0);
+    expect(galleryRequests).toBe(1);
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("1 张")).toBeTruthy();
   }, 8000);
 
   it("shows every active task in ComfyUI execution order even when progress lookup fails", async () => {

@@ -925,12 +925,26 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       const data = await readJson(response, "ComfyUI 最近历史");
       if (!response.ok || !data || Array.isArray(data)) throw new Error(data.message || `HTTP ${response.status}`);
       const ids = Object.keys(data);
+      let newIds;
       if (!comfyHistoryInitialized.current) {
-        comfyHistoryIds.current = new Set(ids);
+        const knownAddresses = new Set([
+          ...gallerySourcesRef.current.output.serverEntries,
+          ...gallerySourcesRef.current.output.recentEntries,
+        ].flatMap((item) => (item.images || []).map((image) => galleryImageAddress("output", image))));
+        newIds = ids.filter((id) => {
+          const task = tasksRef.current.find((candidate) => String(candidate.id) === String(id));
+          const finalOutput = findFinalOutput(data[id], task?.finalOutputNodeId);
+          return finalOutput?.images?.some((image) => {
+            const path = image.path || [image.subfolder, image.filename].filter(Boolean).join("/");
+            return !knownAddresses.has(galleryImageAddress("output", { ...image, path }));
+          });
+        });
+        const missingIds = new Set(newIds);
+        comfyHistoryIds.current = new Set(ids.filter((id) => !missingIds.has(id)));
         comfyHistoryInitialized.current = true;
-        return;
+      } else {
+        newIds = ids.filter((id) => !comfyHistoryIds.current.has(id));
       }
-      const newIds = ids.filter((id) => !comfyHistoryIds.current.has(id));
       await Promise.allSettled(newIds.map((id) => {
         const task = tasksRef.current.find((candidate) => String(candidate.id) === String(id)) || {
           id,
@@ -1979,6 +1993,8 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
                     }
                     title={item.prompt}
                     data-selected={selectedImages.has(selectionKey)}
+                    data-gallery-entry-id={item.promptId || item.id}
+                    data-image-path={image.path}
                     draggable
                     onDragStart={(event) => startHistoryImageDrag(event, item, image)}
                     onDragEnd={() => { draggedHistoryImage.current = null; }}
