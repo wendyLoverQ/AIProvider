@@ -56,6 +56,7 @@ describe("Comfy image generation flow", () => {
   let submitted;
   let moved;
   let galleryRequests;
+  let galleryRequestUrls;
   let localGalleryPages;
   let assetRequests;
   let externalRun;
@@ -75,6 +76,7 @@ describe("Comfy image generation flow", () => {
     submitted = false;
     moved = false;
     galleryRequests = 0;
+    galleryRequestUrls = [];
     localGalleryPages = 1;
     assetRequests = 0;
     externalRun = false;
@@ -138,6 +140,7 @@ describe("Comfy image generation flow", () => {
       if (url.endsWith("/api/assets/batch") && options.method === "POST") return json({ code: 200, data: { saved: 1 } });
       if (url.includes("/api/gallery?")) {
         galleryRequests += 1;
+        galleryRequestUrls.push(url);
         const items = multiImageGallery ? [{
           id: PROMPT_ID,
           promptId: PROMPT_ID,
@@ -278,7 +281,7 @@ describe("Comfy image generation flow", () => {
     expect(galleryRequests).toBe(requestsBeforeSwitch);
   });
 
-  it("reuses cached image addresses when switching between local images and assets", async () => {
+  it("loads each gallery once and reuses its image addresses when switching tabs", async () => {
     submitted = true;
     render(<ComfyLocalWorkbench />);
     await screen.findByAltText("历史生成结果");
@@ -295,6 +298,7 @@ describe("Comfy image generation flow", () => {
 
     expect(galleryRequests).toBe(1);
     expect(assetRequests).toBe(1);
+    expect(galleryRequestUrls).toEqual(["http://127.0.0.1:32145/api/gallery?page=1&pageSize=100"]);
     expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
   });
 
@@ -308,6 +312,10 @@ describe("Comfy image generation flow", () => {
 
     await waitFor(() => expect(galleryRequests).toBe(2));
     expect(screen.getByText("第 2 / 2 页 · 每页 100 张")).toBeTruthy();
+    expect(galleryRequestUrls).toEqual([
+      "http://127.0.0.1:32145/api/gallery?page=1&pageSize=100",
+      "http://127.0.0.1:32145/api/gallery?page=2&pageSize=100",
+    ]);
   });
 
   it("submits the workflow explicitly selected by the user", async () => {
