@@ -29,8 +29,41 @@ import { applySchemeToWorkflow, createComfyProgressPlan, createWorkflowForm, des
 const BRIDGE = "http://127.0.0.1:32145";
 const initial = FALLBACK_FORM;
 const VIEWER_ZOOM_STEP = 0.2;
+const taskStateRank = { RUNNING: 0, QUEUED: 1 };
+const sortActiveTasks = (items) => [...items].sort((left, right) => {
+  const stateDifference = (taskStateRank[left.state] ?? 9) - (taskStateRank[right.state] ?? 9);
+  if (stateDifference) return stateDifference;
+  const leftNumber = Number(left.queueNumber);
+  const rightNumber = Number(right.queueNumber);
+  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber) && leftNumber !== rightNumber)
+    return leftNumber - rightNumber;
+  const leftOrder = Number.isFinite(left.queueOrder) ? left.queueOrder : Number.MAX_SAFE_INTEGER;
+  const rightOrder = Number.isFinite(right.queueOrder) ? right.queueOrder : Number.MAX_SAFE_INTEGER;
+  if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+  return new Date(left.createdAt || 0) - new Date(right.createdAt || 0);
+});
+const workflowStructureKey = (definition) => JSON.stringify(
+  Object.entries(definition || {})
+    .sort(([left], [right]) => left.localeCompare(right, undefined, { numeric: true }))
+    .map(([id, node]) => [
+      id,
+      node?.class_type || "",
+      Object.entries(node?.inputs || {})
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([name, value]) => [name, Array.isArray(value) ? value.slice(0, 2) : typeof value]),
+    ]),
+);
 const imageSelectionKey = (item, image) =>
   `${item.id}::${image.path || image.url || image.filename || "image"}`;
+const limitGalleryImages = (entries, limit = 100) => {
+  let remaining = limit;
+  return entries.flatMap((entry) => {
+    if (remaining <= 0) return [];
+    const images = (entry.images || []).slice(0, remaining);
+    remaining -= images.length;
+    return images.length ? [{ ...entry, images, count: images.length, imageUrl: images[0]?.url || null }] : [];
+  });
+};
 const fileSize = (value) => {
   const bytes = Number(value || 0);
   if (!bytes) return "-";
@@ -108,7 +141,6 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   const [galleryTransparencyFilter, setGalleryTransparencyFilter] = useState("all");
   const [assetPage, setAssetPage] = useState({ page: 1, pages: 0, total: 0 });
   const [detail, setDetail] = useState(null);
-  const [detailIndex, setDetailIndex] = useState(0);
   const [infoDetail, setInfoDetail] = useState(null);
   const [imageMenu, setImageMenu] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
@@ -140,7 +172,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   const [twitterSubmitting, setTwitterSubmitting] = useState(false);
   const polling = useRef(new Map()),
     externalTaskIds = useRef(new Set()),
-    externalGalleryRefresh = useRef(null),
+    tasksRef = useRef([]),
     draggedHistoryImage = useRef(null),
     selectedWorkflowIdRef = useRef(""),
     historyLoaded = useRef(false),
@@ -149,9 +181,11 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     workflowVersions = useRef(new Map()),
     workflowRefreshInFlight = useRef(false),
     taskSyncInFlight = useRef(false),
+    galleryCache = useRef({ output: null, assets: null }),
     loadWorkflowsRef = useRef(null),
     defaultPresetApplied = useRef(""),
     viewerTransform = useRef(null);
+  useEffect(() => { tasksRef.current = tasks; }, [tasks]);
   useEffect(() => {
     if (!notice) return undefined;
     const timer = setTimeout(() => setNotice(""), 3000);
@@ -271,7 +305,9 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     return () => {
       clearInterval(id);
       activePolling.forEach((timer) => clearInterval(timer));
-      if (externalGalleryRefresh.current) clearTimeout(externalGalleryRefresh.current);
+      Object.values(galleryCache.current).forEach((cached) => cached?.entries.forEach((item) =>
+        (item.images || []).forEach((image) => URL.revokeObjectURL(image.url)),
+      ));
     };
   }, []);
 
@@ -574,14 +610,43 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         progress: null,
       })),
     );
-    saved.forEach((item) => poll(item.id, authToken, item.finalOutputNodeId, item.progressPlan));
+    saved.forEach((item) => poll(item.id, authToken, item.finalOutputNodeId, item.progressPlan, item));
     localStorage.removeItem("comfy_active_task");
   };
+  const dehydrateGalleryEntries = (entries) => entries.map((item) => ({
+    ...item,
+    imageUrl: null,
+    images: (item.images || []).map(({ url, ...image }) => image),
+  }));
+  const releaseCachedGalleryImages = (mode) => {
+    const cached = galleryCache.current[mode];
+    if (!cached?.hydrated) return;
+    cached.entries.forEach((item) => (item.images || []).forEach((image) => {
+      if (image.url) URL.revokeObjectURL(image.url);
+    }));
+    galleryCache.current[mode] = { ...cached, entries: dehydrateGalleryEntries(cached.entries), hydrated: false };
+  };
+  const hydrateGalleryEntries = async (entries, assets, authToken) => mapLimit(
+    entries, 6, async (item) => {
+      const settledImages = await Promise.allSettled(
+        (item.images || []).map(async (image) => {
+          const query = new URLSearchParams({ path: image.path });
+          const response = await call(`${assets ? "/api/assets/file" : "/api/gallery/file"}?${query}`, {}, 30000, authToken);
+          if (!response.ok) throw new Error("missing image");
+          const blob = await response.blob();
+          const recordedTransparency = item.form?.generateTransparent ?? item.generateTransparent;
+          return { ...image, url: URL.createObjectURL(blob), transparent: typeof recordedTransparency === "boolean" ? recordedTransparency : image.transparent ?? null };
+        }),
+      );
+      const loadedImages = settledImages.filter((result) => result.status === "fulfilled").map((result) => result.value);
+      return { ...item, prompt: item.prompt || "", count: loadedImages.length, imageUrl: loadedImages[0]?.url || null, images: loadedImages };
+    },
+  );
   const loadHistory = async (authToken, mode = galleryMode, page = 1) => {
     const assets = mode === "assets";
     const response = assets
       ? await fetch(`/api/assets?platform=${encodeURIComponent(platform)}&page=${page}&pageSize=100`, { signal: deadline(30000) })
-      : await call("/api/gallery?maxItems=1000", {}, 30000, authToken);
+      : await call("/api/gallery?maxItems=100", {}, 30000, authToken);
     const data = await readJson(response, assets ? "后端资产目录" : "本机图片目录");
     if (!response.ok || (assets && data.code !== 200)) throw new Error(data.message || `HTTP ${response.status}`);
     const payload = assets ? data.data || {} : data;
@@ -593,50 +658,101 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       width: item.width, height: item.height, createdAt: item.generatedAt || item.createdAt,
       images: [{ path: item.localPath, localUrl: item.localUrl, filename: item.fileName, sizeBytes: item.fileSize, width: item.width, height: item.height }],
     })) : payload.items || [];
-    const entries = await mapLimit(
-      sourceItems, 6, async (item) => {
-          const settledImages = await Promise.allSettled(
-            (item.images || []).map(async (image) => {
-              const query = new URLSearchParams({ path: image.path });
-              const response = await call(
-                `${assets ? "/api/assets/file" : "/api/gallery/file"}?${query}`,
-                {},
-                30000,
-                authToken,
-              );
-              if (!response.ok) throw new Error("missing image");
-              const blob = await response.blob();
-              const recordedTransparency = item.form?.generateTransparent ?? item.generateTransparent;
-              return { ...image, url: URL.createObjectURL(blob), transparent: typeof recordedTransparency === "boolean" ? recordedTransparency : null };
-            }),
-          );
-          const loadedImages = settledImages
-            .filter((result) => result.status === "fulfilled")
-            .map((result) => result.value);
-          const imageUrl = loadedImages[0]?.url || null;
-          return {
-            ...item,
-            prompt: item.prompt || "",
-            count: loadedImages.length,
-            imageUrl,
-            images: loadedImages,
-          };
-        },
-    );
-    setHistory((previous) => {
-      previous.forEach((item) =>
-        (item.images || []).forEach((image) => URL.revokeObjectURL(image.url)),
-      );
-      return entries.filter((item) => item.images.length > 0);
-    });
+    const limitedSourceItems = limitGalleryImages(sourceItems);
+    const entries = await hydrateGalleryEntries(limitedSourceItems, assets, authToken);
+    const previousCache = galleryCache.current[mode];
+    if (previousCache) releaseCachedGalleryImages(mode);
+    const visibleEntries = entries.filter((item) => item.images.length > 0);
+    const pageState = assets ? { page: payload.page || page, pages: payload.pages || 0, total: payload.total || 0 } : null;
+    galleryCache.current[mode] = { entries: visibleEntries, pageState, loadedAt: Date.now(), hydrated: true };
+    setHistory(visibleEntries);
   };
+  const updateGalleryHistory = (updater) => setHistory((current) => {
+    const next = typeof updater === "function" ? updater(current) : updater;
+    const cached = galleryCache.current[galleryMode];
+    galleryCache.current[galleryMode] = { entries: next, pageState: galleryMode === "assets" ? assetPage : cached?.pageState || null, loadedAt: Date.now(), hydrated: true };
+    return next;
+  });
+  const updateAssetPage = (updater) => setAssetPage((current) => {
+    const next = typeof updater === "function" ? updater(current) : updater;
+    const cached = galleryCache.current.assets;
+    if (cached) galleryCache.current.assets = { ...cached, pageState: next, loadedAt: Date.now() };
+    return next;
+  });
   const switchGallery = async (mode) => {
+    if (mode === galleryMode) return;
+    releaseCachedGalleryImages(galleryMode);
     setGalleryMode(mode);
+    setHistory([]);
     setSelectionMode(false);
     setSelectedImages(new Set());
     setGalleryWorkflowFilter("all");
     setGalleryTransparencyFilter("all");
+    const cached = galleryCache.current[mode];
+    if (cached) {
+      const entries = cached.hydrated ? cached.entries : await hydrateGalleryEntries(cached.entries, mode === "assets", token);
+      galleryCache.current[mode] = { ...cached, entries, hydrated: true, loadedAt: Date.now() };
+      setHistory(entries);
+      if (cached.pageState) setAssetPage(cached.pageState);
+      return;
+    }
     await loadHistory(token, mode, 1);
+  };
+  const loadOutputImages = async (images, authToken, includeResultUrl = false) => Promise.all(
+    (images || []).map(async (image) => {
+      const query = new URLSearchParams({
+        filename: image.filename,
+        subfolder: image.subfolder || "",
+        type: image.type || "output",
+      });
+      const response = await call(`/comfy/view?${query}`, {}, 30000, authToken);
+      if (!response.ok) throw new Error(`读取生成图片失败（HTTP ${response.status}）`);
+      const blob = await response.blob();
+      const path = image.path || [image.subfolder, image.filename].filter(Boolean).join("/");
+      return { ...image, path, blob, url: includeResultUrl ? URL.createObjectURL(blob) : null };
+    }),
+  );
+  const appendTaskToHistory = (promptId, task, loadedImages) => {
+    if (!loadedImages.length || galleryMode !== "output") return;
+    const images = loadedImages.map(({ blob, ...image }) => ({ ...image, url: URL.createObjectURL(blob) }));
+    const form = task?.form || {};
+    const entry = {
+      id: promptId,
+      promptId,
+      prompt: form.positivePrompt || "",
+      negativePrompt: form.negativePrompt || "",
+      loras: form.loras || [],
+      seed: task?.actualSeed ?? form.seed,
+      steps: form.steps,
+      cfg: form.cfg,
+      sampler: form.sampler,
+      scheduler: form.scheduler,
+      workflowId: task?.workflowId || form.workflowId,
+      workflowName: task?.workflowName,
+      width: form.width,
+      height: form.height,
+      createdAt: task?.createdAt || new Date().toISOString(),
+      images,
+    };
+    updateGalleryHistory((current) => {
+      const allEntries = [entry, ...current.filter((item) => String(item.id) !== String(promptId))];
+      const limited = limitGalleryImages(allEntries);
+      const retainedUrls = new Set(limited.flatMap((item) => item.images.map((image) => image.url)));
+      allEntries.forEach((item) => item.images.forEach((image) => {
+        if (image.url && !retainedUrls.has(image.url)) URL.revokeObjectURL(image.url);
+      }));
+      return limited;
+    });
+  };
+  const appendCompletedExternalTask = async (task, authToken) => {
+    const promptId = String(task.id);
+    const response = await call(`/comfy/history/${encodeURIComponent(promptId)}`, {}, 10000, authToken);
+    const data = await readJson(response, "ComfyUI history");
+    if (!response.ok || !data[promptId]) return;
+    const finalOutput = findFinalOutput(data[promptId], task.finalOutputNodeId);
+    if (!finalOutput) return;
+    const images = await loadOutputImages(finalOutput.images, authToken);
+    appendTaskToHistory(promptId, task, images);
   };
   const syncComfyTasks = async (authToken = token) => {
     if (taskSyncInFlight.current) return;
@@ -644,38 +760,68 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     try {
     const queueResponse = await call("/comfy/queue", {}, 10000, authToken);
     const queue = await readJson(queueResponse, "ComfyUI queue");
-    if (!queueResponse.ok) return;
-    const progressResponse = await call("/comfy/aiprovider/progress", {}, 5000, authToken);
-    const liveProgress = await readJson(progressResponse, "ComfyUI 实时进度接口");
-    if (!progressResponse.ok) throw new Error(liveProgress.message || `ComfyUI 实时进度接口失败（HTTP ${progressResponse.status}）`);
+    if (!queueResponse.ok) throw new Error(queue.message || `ComfyUI 队列接口失败（HTTP ${queueResponse.status}）`);
     const rows = [
-      ...(queue.queue_running || []).map((row) => ({ row, state: "RUNNING" })),
-      ...(queue.queue_pending || []).map((row) => ({ row, state: "QUEUED" })),
+      ...(Array.isArray(queue.queue_running) ? queue.queue_running : []).map((row, queueOrder) => ({ row, state: "RUNNING", queueOrder })),
+      ...(Array.isArray(queue.queue_pending) ? queue.queue_pending : []).map((row, queueOrder) => ({ row, state: "QUEUED", queueOrder })),
     ];
+    let liveProgress = null;
+    if (rows.some(({ state }) => state === "RUNNING")) {
+      try {
+        const progressResponse = await call("/comfy/aiprovider/progress", {}, 5000, authToken);
+        const progressData = await readJson(progressResponse, "ComfyUI 实时进度接口");
+        if (!progressResponse.ok) throw new Error(progressData.message || `HTTP ${progressResponse.status}`);
+        liveProgress = progressData;
+      } catch (exception) {
+        // Queue state is authoritative. A missing optional progress extension must
+        // not make active tasks disappear or turn queue refresh into an error.
+        reportLocalError("task-progress", exception, { path: "/comfy/aiprovider/progress" }, authToken);
+      }
+    }
     const nextExternalIds = new Set(rows.filter(({ row }) => Array.isArray(row) && row[1]).map(({ row }) => String(row[1])));
-    const completedExternally = [...externalTaskIds.current].some((id) => !nextExternalIds.has(id));
+    const previousTasks = new Map(tasksRef.current.map((task) => [String(task.id), task]));
+    const completedExternalTasks = [...externalTaskIds.current]
+      .filter((id) => !nextExternalIds.has(id))
+      .map((id) => previousTasks.get(id))
+      .filter((task) => task?.external);
     externalTaskIds.current = nextExternalIds;
     setTasks((current) => {
-      const ownTasks = current.filter((task) => !task.external);
-      const ownIds = new Set(ownTasks.map((task) => String(task.id)));
-      const existingExternal = new Map(current.filter((task) => task.external).map((task) => [String(task.id), task]));
-      const externalTasks = rows
-        .filter(({ row }) => Array.isArray(row) && row[1] && !ownIds.has(String(row[1])))
-        .map(({ row, state }) => {
+      const existingTasks = new Map(current.map((task) => [String(task.id), task]));
+      const activeTasks = rows
+        .filter(({ row }) => Array.isArray(row) && row[1])
+        .map(({ row, state, queueOrder }) => {
           const promptId = String(row[1]);
-          const progressPlan = createComfyProgressPlan(row[2], row[4]);
-          const progressDetail = state === "QUEUED" ? null : describeComfyProgress(liveProgress, promptId, progressPlan);
-          const existing = existingExternal.get(promptId);
-          return { ...existing, id: promptId, state, progress: progressDetail?.totalPercent ?? 0, progressDetail, progressPlan, external: true, createdAt: existing?.createdAt || new Date().toISOString() };
+          const existing = existingTasks.get(promptId);
+          const rowStructure = workflowStructureKey(row[2]);
+          const matchedWorkflow = existing?.workflowName
+            ? null
+            : workflows.find((workflow) => workflowStructureKey(workflow.definition) === rowStructure);
+          const progressPlan = existing?.progressPlan || createComfyProgressPlan(row[2], row[4]);
+          const progressDetail = state === "RUNNING" && liveProgress
+            ? describeComfyProgress(liveProgress, promptId, progressPlan)
+            : null;
+          const previousProgress = Number.isFinite(existing?.progress) ? existing.progress : null;
+          return {
+            ...existing,
+            id: promptId,
+            state,
+            progress: state === "QUEUED" ? 0 : progressDetail?.totalPercent ?? previousProgress,
+            progressDetail,
+            progressPlan,
+            workflowId: existing?.workflowId || matchedWorkflow?.id,
+            workflowName: existing?.workflowName || matchedWorkflow?.name,
+            external: existing ? Boolean(existing.external) : true,
+            queueOrder,
+            queueNumber: row[0],
+            createdAt: existing?.createdAt || new Date().toISOString(),
+          };
         });
-      return [...ownTasks, ...externalTasks].slice(0, 12);
+      const next = sortActiveTasks(activeTasks);
+      localStorage.setItem("comfy_active_tasks", JSON.stringify(next.filter((task) => !task.external)));
+      return next;
     });
-    if (completedExternally && galleryMode === "output") {
-      if (externalGalleryRefresh.current) clearTimeout(externalGalleryRefresh.current);
-      externalGalleryRefresh.current = setTimeout(() => {
-        loadHistory(authToken, "output").catch(() => {});
-      }, 700);
-    }
+    if (galleryMode === "output" && completedExternalTasks.length)
+      await Promise.allSettled(completedExternalTasks.map((task) => appendCompletedExternalTask(task, authToken)));
     } finally {
       taskSyncInFlight.current = false;
     }
@@ -684,7 +830,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     if (!token || !running) return undefined;
     const sync = () => syncComfyTasks(token).catch((e) => {
       reportLocalError("task-sync", e, { path: "/comfy/queue + /comfy/aiprovider/progress" }, token);
-      setError(`读取 ComfyUI 实时进度失败：${e.message}`);
+      setError(`查询当前任务失败：${e.message}`);
     });
     sync();
     const id = setInterval(sync, 1500);
@@ -766,7 +912,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         );
         return next;
       });
-      poll(data.promptId, token, data.finalOutputNodeId, progressPlan);
+      poll(data.promptId, token, data.finalOutputNodeId, progressPlan, nextTask);
     } catch (e) {
       reportLocalError("generate", e, { path: "/api/generate" });
       setError(e.message);
@@ -774,7 +920,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       setBusy(false);
     }
   };
-  const poll = (promptId, authToken = token, finalOutputNodeId, progressPlan) => {
+  const poll = (promptId, authToken = token, finalOutputNodeId, progressPlan, taskHint = null) => {
     if (polling.current.has(promptId)) return;
     const timer = setInterval(async () => {
       try {
@@ -828,38 +974,10 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         polling.current.delete(promptId);
         const finalOutput = findFinalOutput(item, finalOutputNodeId);
         if (!finalOutput) throw new Error("历史结果中没有可展示的图片输出");
-        const images = finalOutput.images || [];
-        const loaded = await Promise.all(
-          images.map(async (image) => {
-            const query = new URLSearchParams({
-              filename: image.filename,
-              subfolder: image.subfolder || "",
-              type: image.type || "output",
-            });
-            const blob = await (
-              await call(`/comfy/view?${query}`, {}, 30000)
-            ).blob();
-            return { ...image, url: URL.createObjectURL(blob) };
-          }),
-        );
-        setResults(loaded);
-        setTasks((current) => {
-          const next = current.map((task) =>
-            task.id === promptId
-              ? { ...task, state: "SUCCEEDED", progress: 100, progressDetail: null }
-              : task,
-          );
-          localStorage.setItem(
-            "comfy_active_tasks",
-            JSON.stringify(
-              next.filter(
-                (task) => !["SUCCEEDED", "FAILED"].includes(task.state),
-              ),
-            ),
-          );
-          return next;
-        });
-        await loadHistory(authToken);
+        const loaded = await loadOutputImages(finalOutput.images, authToken, true);
+        setResults(loaded.map(({ blob, ...image }) => image));
+        appendTaskToHistory(promptId, taskHint || tasksRef.current.find((task) => String(task.id) === String(promptId)), loaded);
+        removeActiveTask(promptId);
       } catch (e) {
         reportLocalError("task-poll", e, { promptId, path: `/comfy/history/${promptId}` }, authToken);
         try {
@@ -884,17 +1002,9 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     const gallery = history.flatMap((entry) =>
       (entry.images || []).map((candidate) => ({ ...candidate, task: entry })),
     );
-    setDetail({ images: gallery });
-    setDetailIndex(
-      Math.max(
-        0,
-        gallery.findIndex(
-          (candidate) =>
-            candidate.task.id === item.id &&
-            candidate.filename === image.filename,
-        ),
-      ),
-    );
+    const selectedKey = imageSelectionKey(item, image);
+    const index = gallery.findIndex((candidate) => imageSelectionKey(candidate.task, candidate) === selectedKey);
+    setDetail({ images: gallery, index: Math.max(0, index) });
   };
   const openImageInfo = (item, image) => {
     setImageMenu(null);
@@ -910,25 +1020,63 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     }
   };
   const closeDetail = () => {
-    const shouldRefresh = detail?.refreshOnClose;
     setDetail(null);
-    if (shouldRefresh) loadHistory(token).catch((e) => setError(`刷新本机图片失败：${e.message}`));
   };
   const advanceDetailAfterAction = (item, image) => {
     const removedKey = imageSelectionKey(item, image);
+    setSelectedImages((current) => {
+      if (!current.has(removedKey)) return current;
+      const next = new Set(current);
+      next.delete(removedKey);
+      return next;
+    });
+    if (item.source === "asset") {
+      updateAssetPage((current) => {
+        const total = Math.max(0, current.total - 1);
+        return { ...current, total, pages: total ? Math.ceil(total / 100) : 0 };
+      });
+    }
+    updateGalleryHistory((current) => current
+      .map((entry) => ({
+        ...entry,
+        images: (entry.images || []).filter((candidate) => imageSelectionKey(entry, candidate) !== removedKey),
+      }))
+      .filter((entry) => entry.images.length > 0));
     setDetail((current) => {
       if (!current) return current;
-      const images = current.images.filter(
-        (candidate) => imageSelectionKey(candidate.task, candidate) !== removedKey,
+      const removedIndex = current.images.findIndex(
+        (candidate) => imageSelectionKey(candidate.task, candidate) === removedKey,
       );
-      if (!images.length) {
-        setDetailIndex(0);
-        return null;
-      }
-      setDetailIndex((index) => Math.min(index, images.length - 1));
-      return { ...current, images, refreshOnClose: true };
+      if (removedIndex < 0) return current;
+      const images = current.images.filter((_, index) => index !== removedIndex);
+      if (!images.length) return null;
+      const index = current.index > removedIndex
+        ? current.index - 1
+        : current.index === removedIndex
+          ? Math.min(removedIndex, images.length - 1)
+          : current.index;
+      return { ...current, images, index };
     });
   };
+  const navigateDetail = (offset) => {
+    setDetail((current) => current?.images.length
+      ? { ...current, index: (current.index + offset + current.images.length) % current.images.length }
+      : current);
+  };
+  useEffect(() => {
+    if (!detail) return undefined;
+    const handleViewerKey = (event) => {
+      if (!["ArrowLeft", "ArrowRight"].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
+      event.preventDefault();
+      setDetail((current) => current?.images.length
+        ? { ...current, index: (current.index + (event.key === "ArrowLeft" ? -1 : 1) + current.images.length) % current.images.length }
+        : current);
+    };
+    window.addEventListener("keydown", handleViewerKey);
+    return () => window.removeEventListener("keydown", handleViewerKey);
+  }, [Boolean(detail)]);
   const galleryImages = history.flatMap((item) =>
     (item.images || []).map((image) => ({
       item,
@@ -952,7 +1100,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       .then((detected) => {
         if (cancelled) return;
         const values = new Map(detected.map((entry) => [entry.key, entry.transparent]));
-        setHistory((current) => current.map((item) => ({ ...item, images: (item.images || []).map((image) => {
+        updateGalleryHistory((current) => current.map((item) => ({ ...item, images: (item.images || []).map((image) => {
           const value = values.get(imageSelectionKey(item, image));
           return value === undefined ? image : { ...image, transparent: value };
         }) })));
@@ -1056,9 +1204,18 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         const backendData = await readJson(backend, "后端资产删除接口");
         if (!backend.ok || backendData.code !== 200) throw new Error(backendData.message || "后端资产记录删除失败");
       }
+      const deletedKeys = new Set(selectedEntries.map(({ item, image }) => imageSelectionKey(item, image)));
+      updateGalleryHistory((current) => current
+        .map((item) => ({ ...item, images: (item.images || []).filter((image) => !deletedKeys.has(imageSelectionKey(item, image))) }))
+        .filter((item) => item.images.length > 0));
+      if (deletingAssets) {
+        updateAssetPage((current) => {
+          const total = Math.max(0, current.total - selectedEntries.length);
+          return { ...current, total, pages: total ? Math.ceil(total / 100) : 0 };
+        });
+      }
       setSelectedImages(new Set());
       setSelectionMode(false);
-      await loadHistory(token);
     } catch (e) {
       setError(`批量删除失败：${e.message}`);
     } finally {
@@ -1117,7 +1274,12 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       setSelectionMode(false);
       setNotice("迁移成功");
       if (viewerEntry) advanceDetailAfterAction(viewerEntry.item, viewerEntry.image);
-      await loadHistory(token);
+      else {
+        const movedPaths = new Set(paths.map((path) => String(path).toLowerCase()));
+        updateGalleryHistory((current) => current
+          .map((item) => ({ ...item, images: (item.images || []).filter((image) => !movedPaths.has(String(image.path).toLowerCase())) }))
+          .filter((item) => item.images.length > 0));
+      }
       await loadFolders(token);
     } catch (e) {
       setError(`批量迁移失败：${e.message}`);
@@ -1169,7 +1331,18 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       setSelectionMode(false);
       setNotice(changed.length ? `已迁移 ${changed.length} 张资产图片` : "所选图片已在当前迁移目录");
       if (viewerEntry) advanceDetailAfterAction(viewerEntry.item, viewerEntry.image);
-      await loadHistory(token, "assets", assetPage.page);
+      else if (changed.length) {
+        const movedKeys = new Set(entries
+          .filter(({ image }) => changed.some((asset) => String(asset.oldPath).toLowerCase() === String(image.path).toLowerCase()))
+          .map(({ item, image }) => imageSelectionKey(item, image)));
+        updateGalleryHistory((current) => current
+          .map((item) => ({ ...item, images: (item.images || []).filter((image) => !movedKeys.has(imageSelectionKey(item, image))) }))
+          .filter((item) => item.images.length > 0));
+        updateAssetPage((current) => {
+          const total = Math.max(0, current.total - movedKeys.size);
+          return { ...current, total, pages: total ? Math.ceil(total / 100) : 0 };
+        });
+      }
     } catch (e) {
       setError(`资产迁移失败：${e.message}`);
     } finally {
@@ -1237,7 +1410,6 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         if (!backend.ok || backendData.code !== 200) throw new Error(backendData.message || "后端资产记录删除失败");
       }
       advanceDetailAfterAction(item, image);
-      await loadHistory(token);
     } catch (e) {
       setError(`删除失败：${e.message}`);
     } finally {
@@ -1364,11 +1536,10 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   };
 
   const allHistorySelected = filteredGalleryImages.length > 0 && filteredGalleryImages.every((entry) => selectedImages.has(entry.key));
-  const sortedTasks = [...tasks].sort((left, right) => new Date(right.createdAt || 0) - new Date(left.createdAt || 0));
-  const completedTaskCount = tasks.filter((task) => task.state === "SUCCEEDED").length;
+  const sortedTasks = sortActiveTasks(tasks);
   const runningTaskCount = tasks.filter((task) => task.state === "RUNNING").length;
   const queuedTaskCount = tasks.filter((task) => task.state === "QUEUED").length;
-  const activeTask = tasks.find((task) => task.state === "RUNNING") || tasks.find((task) => task.state === "QUEUED") || null;
+  const activeTask = sortedTasks[0] || null;
   const activeTaskWorkflowName = activeTask
     ? activeTask.workflowName || workflows.find((workflow) => workflow.id === (activeTask.workflowId || activeTask.form?.workflowId))?.name || (activeTask.external ? "外部 ComfyUI 工作流" : "当前工作流")
     : "";
@@ -1586,7 +1757,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
           </div>
           {tasks.length > 0 && (
             <div className="task-queue-area">
-              <div className="task-queue-overview"><strong>当前 {tasks.length} 个任务</strong><span>完成 {completedTaskCount}</span><span>执行中 {runningTaskCount}</span><span>排队 {queuedTaskCount}</span></div>
+              <div className="task-queue-overview"><strong>当前 {tasks.length} 个任务</strong><span>执行中 {runningTaskCount}</span><span>排队 {queuedTaskCount}</span></div>
               <div className="task-queue-strip">
               {sortedTasks.map((task) => (
                 <div
@@ -1606,7 +1777,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
                     </span>
                     <small>{task.workflowName || workflows.find((workflow) => workflow.id === (task.workflowId || task.form?.workflowId))?.name || (task.external ? "外部 ComfyUI 工作流" : "当前工作流")}</small>
                   </div>
-                  <strong>{task.progress === null ? "进度错误" : `${task.progress}%`}</strong>
+                  <strong>{task.progress === null ? "读取中" : `${task.progress}%`}</strong>
                   {["QUEUED", "RUNNING"].includes(task.state) && <button className="queue-pill__cancel" type="button" aria-label={`取消任务 ${task.id}`} title="取消任务" disabled={cancelingTask === String(task.id)} onClick={() => cancelTask(task)}><X /></button>}
                   <i style={{ width: `${task.progress ?? 0}%` }} />
                 </div>
@@ -1759,18 +1930,18 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
                 <button onClick={() => viewerTransform.current?.zoomIn(VIEWER_ZOOM_STEP, 120, "easeOut")} title="放大"><MagnifyingGlassPlus /></button>
                 <small>每次 20% · 滚轮同档</small>
               </div>
-              <div className="viewer-file-title" title={detail.images[detailIndex].filename || detail.images[detailIndex].path || "图片"}>
-                <strong>{detail.images[detailIndex].filename || detail.images[detailIndex].path?.split(/[\\/]/).pop() || "图片"}</strong>
-                <span>{detailIndex + 1} / {detail.images.length}</span>
+              <div className="viewer-file-title" title={detail.images[detail.index].filename || detail.images[detail.index].path || "图片"}>
+                <strong>{detail.images[detail.index].filename || detail.images[detail.index].path?.split(/[\\/]/).pop() || "图片"}</strong>
+                <span>{detail.index + 1} / {detail.images.length}</span>
               </div>
               <div className="viewer-header-actions">
-                <button onClick={() => openImageInfo(detail.images[detailIndex].task, detail.images[detailIndex])} title="查看详细信息"><Info /></button>
+                <button onClick={() => openImageInfo(detail.images[detail.index].task, detail.images[detail.index])} title="查看详细信息"><Info /></button>
                 <button onClick={closeDetail} title="关闭大图"><X /></button>
               </div>
             </header>
             <div className="history-lightbox" onContextMenu={(event) => {
               event.preventDefault();
-              const image = detail.images[detailIndex];
+              const image = detail.images[detail.index];
               setImageMenu({ x: Math.min(event.clientX, window.innerWidth - 190), y: Math.min(event.clientY, window.innerHeight - 155), item: image.task, image, viewer: true });
             }}>
               <TransformWrapper
@@ -1792,10 +1963,10 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
                 {() => (
                   <>
                     <TransformComponent wrapperClass="zoom-viewer" contentClass="zoom-content">
-                      <img src={detail.images[detailIndex].url} alt="历史生成结果" />
+                      <img src={detail.images[detail.index].url} alt="历史生成结果" />
                     </TransformComponent>
-                    <button className="lightbox-nav prev" onClick={() => setDetailIndex((detailIndex - 1 + detail.images.length) % detail.images.length)}><CaretLeft /></button>
-                    <button className="lightbox-nav next" onClick={() => setDetailIndex((detailIndex + 1) % detail.images.length)}><CaretRight /></button>
+                    <button className="lightbox-nav prev" aria-label="上一张图片" onClick={() => navigateDetail(-1)}><CaretLeft /></button>
+                    <button className="lightbox-nav next" aria-label="下一张图片" onClick={() => navigateDetail(1)}><CaretRight /></button>
                   </>
                 )}
               </TransformWrapper>

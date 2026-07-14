@@ -65,6 +65,9 @@ describe("Comfy image generation flow", () => {
   let cancelledTask;
   let multiImageGallery;
   let submittedWorkflow;
+  let customQueue;
+  let progressFails;
+  let deletedPaths;
 
   beforeEach(() => {
     submitted = false;
@@ -79,6 +82,10 @@ describe("Comfy image generation flow", () => {
     cancelledTask = null;
     multiImageGallery = false;
     submittedWorkflow = null;
+    customQueue = null;
+    progressFails = false;
+    deletedPaths = [];
+    vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
     vi.stubGlobal("confirm", vi.fn(() => true));
     vi.stubGlobal("fetch", vi.fn(async (input, options = {}) => {
       const url = String(input);
@@ -100,11 +107,18 @@ describe("Comfy image generation flow", () => {
         cancelledTask = decodeURIComponent(url.split("/api/tasks/")[1].replace("/cancel", ""));
         return json({ success: true, cancelled: true, promptId: cancelledTask });
       }
+      if (url.endsWith("/api/gallery/delete") && options.method === "POST") {
+        deletedPaths.push(...JSON.parse(options.body).paths);
+        return json({ success: true, deleted: deletedPaths.length });
+      }
       if (url.endsWith("/comfy/queue")) {
+        if (customQueue) return json(customQueue);
         if (externalRun && externalQueuePoll++ === 0) return json({ queue_running: [[0, "external-prompt", workflow.definition, {}, ["7"]]], queue_pending: [] });
         if (externalRun) externalGalleryReady = true;
         return json({ queue_running: [], queue_pending: [] });
       }
+      if (url.endsWith("/api/logs/client") && options.method === "POST") return json({ success: true });
+      if (url.endsWith("/comfy/aiprovider/progress") && progressFails) return json({ message: "progress extension unavailable" }, 404);
       if (url.endsWith("/comfy/aiprovider/progress")) return externalRun
         ? json({ promptId: "external-prompt", nodes: { "5": { state: "finished" }, "4": { state: "running", value: 5, max: 10 } } })
         : json({ promptId: "", nodes: {} });
@@ -136,6 +150,7 @@ describe("Comfy image generation flow", () => {
       }
       if (url.includes("/api/gallery/file?")) return new Response(new Blob(["image"], { type: "image/png" }));
       if (url.includes("/api/assets/file?")) return new Response(new Blob(["image"], { type: "image/png" }));
+      if (url.includes("/comfy/history/external-prompt")) return json({ "external-prompt": completed });
       if (url.includes(`/comfy/history/${PROMPT_ID}`)) return json({ [PROMPT_ID]: completed });
       if (url.includes("/comfy/view?")) return new Response(new Blob(["image"], { type: "image/png" }));
       if (url.endsWith("/api/generate") && options.method === "POST") {
@@ -286,13 +301,67 @@ describe("Comfy image generation flow", () => {
     expect(screen.getByRole("textbox", { name: "正向提示词" }).value).toBe("preset prompt");
   });
 
-  it("refreshes the gallery when an external ComfyUI task leaves the queue", async () => {
+  it("appends an external ComfyUI result without rescanning the full gallery", async () => {
     externalRun = true;
     render(<ComfyLocalWorkbench />);
     const image = await screen.findByAltText("历史生成结果", {}, { timeout: 7000 });
     expect(image.getAttribute("src")).toBe("blob:done");
-    expect(galleryRequests).toBeGreaterThan(1);
+    expect(galleryRequests).toBe(1);
   }, 8000);
+
+  it("shows every active task in ComfyUI execution order even when progress lookup fails", async () => {
+    progressFails = true;
+    customQueue = {
+      queue_running: [[90, "running-task", workflow.definition, {}, ["7"]]],
+      // ComfyUI exposes its heap here; only the numeric priority is authoritative.
+      queue_pending: [
+        [30, "queued-third", workflow.definition, {}, ["7"]],
+        [10, "queued-first", workflow.definition, {}, ["7"]],
+        [20, "queued-second", workflow.definition, {}, ["7"]],
+      ],
+    };
+    render(<ComfyLocalWorkbench />);
+    await screen.findByText("当前 4 个任务");
+    const taskIds = Array.from(document.querySelectorAll(".queue-pill")).map((item) => item.title.split(" · ").pop());
+    expect(taskIds).toEqual(["running-task", "queued-first", "queued-second", "queued-third"]);
+    expect(screen.getByText("读取中")).toBeTruthy();
+    expect(screen.queryByText(/查询当前任务失败/)).toBeNull();
+  });
+
+  it("advances atomically to the next image after deleting the current large image", async () => {
+    multiImageGallery = true;
+    render(<ComfyLocalWorkbench />);
+    const images = await screen.findAllByAltText("历史生成结果");
+    fireEvent.click(images[0].closest("button"));
+    expect(screen.getByText("1 / 2")).toBeTruthy();
+    expect(screen.getByText("done.png")).toBeTruthy();
+
+    fireEvent.contextMenu(document.querySelector(".history-lightbox"));
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => expect(deletedPaths).toEqual(["aimaid/done.png"]));
+    expect(screen.getByText("done-2.png")).toBeTruthy();
+    expect(screen.getByText("1 / 1")).toBeTruthy();
+    expect(galleryRequests).toBe(1);
+  });
+
+  it("falls back to the previous image after deleting the last large image", async () => {
+    multiImageGallery = true;
+    render(<ComfyLocalWorkbench />);
+    const images = await screen.findAllByAltText("历史生成结果");
+    fireEvent.click(images[0].closest("button"));
+    fireEvent.click(screen.getByRole("button", { name: "下一张图片" }));
+    expect(screen.getByText("2 / 2")).toBeTruthy();
+
+    fireEvent.contextMenu(document.querySelector(".history-lightbox"));
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => expect(deletedPaths).toEqual(["aimaid/done-2.png"]));
+    expect(screen.getByText("done.png")).toBeTruthy();
+    expect(screen.getByText("1 / 1")).toBeTruthy();
+  });
 
   it("shows node details to the right of the local and asset tabs", async () => {
     externalRun = true;

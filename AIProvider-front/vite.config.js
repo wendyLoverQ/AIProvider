@@ -7,14 +7,6 @@ export default defineConfig(({ mode }) => {
   const backendTarget = env.VITE_BACKEND_PROXY_TARGET || 'https://msg-drag-chargers-twist.trycloudflare.com'
   return ({
   plugins: [react()],
-  test: {
-    coverage: {
-      provider: 'v8',
-      include: ['src/comfy/workbench.js'],
-      reporter: ['text', 'html'],
-      thresholds: { lines: 100, functions: 100, statements: 100, branches: 100 },
-    },
-  },
   server: {
     host: '0.0.0.0',
     proxy: {

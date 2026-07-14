@@ -65,6 +65,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { motion } from "motion/react";
 import ComfyConsole from "./ComfyLocalWorkbench";
 import MonitorCenter from "./MonitorCenter";
 import PromptManager from "./PromptManager";
@@ -84,12 +85,13 @@ const NAV = [
   { key: "prompts", label: "Prompt 管理", icon: SlidersHorizontal },
   { key: "maid", label: "我的女仆", icon: Heart },
   { key: "monitor", label: "监控中心", icon: Pulse },
-  { key: "camera", label: "手机监控", icon: VideoCamera, closed: true },
-  { key: "twitter", label: "Twitter 发布", icon: XLogo, closed: true },
+  { key: "camera", label: "手机监控", icon: VideoCamera, closed: true, hidden: true },
+  { key: "twitter", label: "Twitter 发布", icon: XLogo },
   { key: "appearance", label: "UI 控制", icon: Palette },
   { key: "settings", label: "系统设置", icon: GearSix },
 ];
-const MOBILE_NAV = NAV;
+const VISIBLE_NAV = NAV.filter((item) => !item.hidden);
+const MOBILE_NAV = VISIBLE_NAV;
 
 const fmt = (value) => Number(value || 0).toLocaleString("zh-CN");
 const compact = (value) =>
@@ -262,7 +264,7 @@ function App() {
             <House size={22} weight={view === "home" ? "duotone" : "regular"} />
             <span>首页</span>
           </button>
-          {NAV.map((item) => (
+          {VISIBLE_NAV.map((item) => (
             <NavButton
               key={item.key}
               item={item}
@@ -306,7 +308,7 @@ function App() {
           ))}
         {view === "camera" && <SealedFeature title="手机监控" message="这片频道正在休眠，暂时不对外开放。" />}
         {view === "monitor" && <MonitorCenter />}
-        {view === "twitter" && <SealedFeature title="Twitter 发布" message="信使小鸟正在放假，这项功能暂时封闭。" />}
+        {view === "twitter" && <TwitterPublisher />}
         {view === "appearance" && <UiControl />}
         {view === "settings" && <div className="tool-home system-settings-view"><ComfyConsole mode="settings" /></div>}
       </main>
@@ -364,20 +366,27 @@ function SystemClock() {
 /* ========== 首页：纯大图 ========== */
 function HomeView({ data, onOpenWorkshop }) {
   return (
-    <div className="home-launcher">
+    <motion.div className="home-launcher" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: .55 }}>
       <CuteHomeBackground />
+      <div className="home-motion-stage" aria-hidden="true">
+        <motion.i className="motion-halo halo-a" animate={{ rotate: 360, scale: [1, 1.08, 1], opacity: [.22, .48, .22] }} transition={{ rotate: { duration: 24, repeat: Infinity, ease: "linear" }, scale: { duration: 5.5, repeat: Infinity, ease: "easeInOut" }, opacity: { duration: 5.5, repeat: Infinity } }} />
+        <motion.i className="motion-halo halo-b" animate={{ rotate: -360, scale: [1.06, .94, 1.06] }} transition={{ rotate: { duration: 31, repeat: Infinity, ease: "linear" }, scale: { duration: 7, repeat: Infinity, ease: "easeInOut" } }} />
+        <motion.i className="motion-pulse pulse-a" animate={{ scale: [.75, 1.35], opacity: [.55, 0] }} transition={{ duration: 3.2, repeat: Infinity, ease: "easeOut" }} />
+        <motion.i className="motion-pulse pulse-b" animate={{ scale: [.65, 1.48], opacity: [.38, 0] }} transition={{ duration: 3.2, delay: 1.6, repeat: Infinity, ease: "easeOut" }} />
+        <motion.div className="motion-scanline" animate={{ x: ["-25vw", "125vw"], opacity: [0, .65, 0] }} transition={{ duration: 6.8, repeat: Infinity, repeatDelay: 2.4, ease: "easeInOut" }} />
+      </div>
       <DynamicShowcase />
-      <div className="home-kawaii-title"><span>✦ KAWAII CREATIVE ROOM ✦</span><strong>今天也要创造可爱呀</strong><small>♡ 灵感、角色与魔法都准备好了 ♡</small></div>
-      <div className="home-sticker-ribbon" aria-hidden="true"><span>MAGIC</span><i>♡</i><span>DREAM</span><i>✦</i><span>CREATE</span><i>☁</i><span>KAWAII</span></div>
+      <motion.div className="home-kawaii-title" initial={{ opacity: 0, filter: "blur(12px)" }} animate={{ opacity: 1, filter: "blur(0px)" }} transition={{ delay: .18, duration: .9 }}><span>✦ KAWAII CREATIVE ROOM ✦</span><strong>今天也要创造可爱呀</strong><small>♡ 灵感、角色与魔法都准备好了 ♡</small></motion.div>
+      <motion.div className="home-sticker-ribbon" aria-hidden="true" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: .5, duration: .7 }}><span>MAGIC</span><i>♡</i><span>DREAM</span><i>✦</i><span>CREATE</span><i>☁</i><span>KAWAII</span></motion.div>
       <div className="home-cute-notes" aria-hidden="true">
-        <div className="cute-note note-a"><MoonStars weight="fill" /><b>梦境正在加载</b><small>Dreaming in pastel colors</small></div>
-        <div className="cute-note note-b"><FlowerLotus weight="duotone" /><b>今日可爱能量</b><span><i /><i /><i /><i /><i /></span></div>
-        <div className="cute-note note-c"><MagicWand weight="fill" /><b>闪闪灵感</b><small>+ 999 sparkle power</small></div>
+        <motion.div className="cute-note note-a" initial={{ opacity: 0, scale: .7 }} animate={{ opacity: 1, scale: 1 }} whileHover={{ scale: 1.08 }} transition={{ delay: .35, type: "spring", stiffness: 180, damping: 16 }}><MoonStars weight="fill" /><b>梦境正在加载</b><small>Dreaming in pastel colors</small></motion.div>
+        <motion.div className="cute-note note-b" initial={{ opacity: 0, scale: .7 }} animate={{ opacity: 1, scale: 1 }} whileHover={{ scale: 1.08 }} transition={{ delay: .5, type: "spring", stiffness: 180, damping: 16 }}><FlowerLotus weight="duotone" /><b>今日可爱能量</b><span><i /><i /><i /><i /><i /></span></motion.div>
+        <motion.div className="cute-note note-c" initial={{ opacity: 0, scale: .7 }} animate={{ opacity: 1, scale: 1 }} whileHover={{ scale: 1.08 }} transition={{ delay: .65, type: "spring", stiffness: 180, damping: 16 }}><MagicWand weight="fill" /><b>闪闪灵感</b><small>+ 999 sparkle power</small></motion.div>
       </div>
       <div className="home-cloud cloud-left" aria-hidden="true"><Cloud weight="fill" /><span>♡</span></div>
       <div className="home-cloud cloud-right" aria-hidden="true"><Cloud weight="fill" /><Star weight="fill" /></div>
       <CuteWorkshopCard onOpen={onOpenWorkshop} />
-    </div>
+    </motion.div>
   );
 }
 

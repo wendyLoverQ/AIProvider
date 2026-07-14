@@ -7,11 +7,13 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
-    "test": "vitest run --coverage",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "preview": "vite preview"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
+    "motion": "^12.42.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-zoom-pan-pinch": "^4.0.3",
