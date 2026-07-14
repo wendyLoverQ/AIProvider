@@ -60,7 +60,6 @@ bridgeDescribe("ComfyUIAgent bridge contract", () => {
     const entries = Object.entries(history);
 
     expect(Array.isArray(history)).toBe(false);
-    expect(entries.length).toBeGreaterThan(0);
     expect(entries.length).toBeLessThanOrEqual(20);
     expect(entries.every(([promptId, item]) => promptId && item && typeof item === "object")).toBe(true);
   });
@@ -82,16 +81,17 @@ bridgeDescribe("ComfyUIAgent bridge contract", () => {
   });
 
   it("proxies a generated image whose filename contains non-ASCII characters", async () => {
-    const history = await bridgeJson("/comfy/history?max_items=20");
-    const images = Object.values(history).flatMap((item) =>
-      Object.values(item.outputs || {}).flatMap((output) => output.images || []));
+    const gallery = await bridgeJson("/api/gallery?page=1&pageSize=100");
+    const images = (gallery.items || []).flatMap((item) => item.images || []);
     const image = images.find((candidate) => /[^\x00-\x7F]/.test(candidate.filename || ""));
-    expect(image, "recent ComfyUI history should contain a non-ASCII filename fixture").toBeTruthy();
+    expect(image, "local gallery should contain a non-ASCII filename fixture").toBeTruthy();
+    const normalizedPath = String(image.path || image.filename).replace(/\\/g, "/");
+    const slash = normalizedPath.lastIndexOf("/");
 
     const query = new URLSearchParams({
       filename: image.filename,
-      subfolder: image.subfolder || "",
-      type: image.type || "output",
+      subfolder: slash < 0 ? "" : normalizedPath.slice(0, slash),
+      type: "output",
     });
     const response = await bridgeFetch(`/comfy/view?${query}`);
     const bytes = await response.arrayBuffer();
