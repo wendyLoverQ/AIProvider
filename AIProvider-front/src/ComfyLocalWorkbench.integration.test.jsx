@@ -47,6 +47,10 @@ const completed = {
   outputs: { "7": { images: [{ filename: "done.png", subfolder: "aimaid", type: "output" }] } },
   status: { messages: [["execution_start", { timestamp: Date.now() }]] },
 };
+const incrementalCompleted = {
+  ...completed,
+  outputs: { "7": { images: [{ filename: "incremental.png", subfolder: "aimaid", type: "output" }] } },
+};
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
@@ -71,6 +75,9 @@ describe("Comfy image generation flow", () => {
   let customQueue;
   let progressFails;
   let deletedPaths;
+  let incrementalHistoryRun;
+  let recentHistoryPoll;
+  let bridgeRequests;
 
   beforeEach(() => {
     submitted = false;
@@ -91,10 +98,14 @@ describe("Comfy image generation flow", () => {
     customQueue = null;
     progressFails = false;
     deletedPaths = [];
+    incrementalHistoryRun = false;
+    recentHistoryPoll = 0;
+    bridgeRequests = [];
     vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
     vi.stubGlobal("confirm", vi.fn(() => true));
     vi.stubGlobal("fetch", vi.fn(async (input, options = {}) => {
       const url = String(input);
+      if (url.startsWith("http://127.0.0.1:32145")) bridgeRequests.push(url);
       if (url.endsWith("/api/config")) return json({ token: "local-token", platform: "Windows", configured: true });
       if (url.endsWith("/api/comfy/status")) return json({ running: true, platform: "Windows", configured: true });
       if (url.endsWith("/api/local-workflows/settings")) return json({ directory: "F:\\ComfyUI\\user\\default\\workflows", exists: true });
@@ -163,7 +174,10 @@ describe("Comfy image generation flow", () => {
       }
       if (url.includes("/api/gallery/file?")) return new Response(new Blob(["image"], { type: "image/png" }));
       if (url.includes("/api/assets/file?")) return new Response(new Blob(["image"], { type: "image/png" }));
-      if (url.includes("/comfy/history?")) return json(externalGalleryReady ? { "external-prompt": completed } : {});
+      if (url.includes("/comfy/history?")) {
+        if (incrementalHistoryRun) return json(recentHistoryPoll++ === 0 ? {} : { "incremental-prompt": incrementalCompleted });
+        return json(externalGalleryReady ? { "external-prompt": completed } : {});
+      }
       if (url.includes("/comfy/history/external-prompt")) return json({ "external-prompt": completed });
       if (url.includes(`/comfy/history/${PROMPT_ID}`)) return json({ [PROMPT_ID]: completed });
       if (url.includes("/comfy/view?")) return new Response(new Blob(["image"], { type: "image/png" }));
@@ -372,6 +386,24 @@ describe("Comfy image generation flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "本机图片" }));
 
     expect(await screen.findByAltText("历史生成结果")).toBeTruthy();
+  }, 8000);
+
+  it("inserts only the new bridge history result without reloading the gallery", async () => {
+    submitted = true;
+    incrementalHistoryRun = true;
+    render(<ComfyLocalWorkbench />);
+
+    expect(await screen.findByText("1 张")).toBeTruthy();
+    await waitFor(() => expect(screen.getAllByAltText("历史生成结果")).toHaveLength(2), { timeout: 7000 });
+
+    const recentHistoryRequests = bridgeRequests.filter((url) => url.includes("/comfy/history?max_items=20"));
+    const incrementalImageRequests = bridgeRequests.filter((url) => url.includes("/comfy/view?") && url.includes("incremental.png"));
+    expect(recentHistoryRequests.length).toBeGreaterThanOrEqual(2);
+    expect(incrementalImageRequests).toHaveLength(1);
+    expect(galleryRequests).toBe(1);
+    expect(galleryRequestUrls).toEqual(["http://127.0.0.1:32145/api/gallery?page=1&pageSize=100"]);
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("2 张")).toBeTruthy();
   }, 8000);
 
   it("shows every active task in ComfyUI execution order even when progress lookup fails", async () => {
