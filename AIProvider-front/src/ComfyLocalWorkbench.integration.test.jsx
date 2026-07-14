@@ -160,6 +160,7 @@ describe("Comfy image generation flow", () => {
       }
       if (url.includes("/api/gallery/file?")) return new Response(new Blob(["image"], { type: "image/png" }));
       if (url.includes("/api/assets/file?")) return new Response(new Blob(["image"], { type: "image/png" }));
+      if (url.includes("/comfy/history?")) return json(externalGalleryReady ? { "external-prompt": completed } : {});
       if (url.includes("/comfy/history/external-prompt")) return json({ "external-prompt": completed });
       if (url.includes(`/comfy/history/${PROMPT_ID}`)) return json({ [PROMPT_ID]: completed });
       if (url.includes("/comfy/view?")) return new Response(new Blob(["image"], { type: "image/png" }));
@@ -340,12 +341,26 @@ describe("Comfy image generation flow", () => {
     expect(screen.getByRole("textbox", { name: "正向提示词" }).value).toBe("preset prompt");
   });
 
-  it("appends an external ComfyUI result without rescanning the full gallery", async () => {
+  it("appends an external ComfyUI result without recreating its cached image", async () => {
     externalRun = true;
     render(<ComfyLocalWorkbench />);
     const image = await screen.findByAltText("历史生成结果", {}, { timeout: 7000 });
     expect(image.getAttribute("src")).toBe("blob:done");
+    expect(galleryRequests).toBeGreaterThanOrEqual(1);
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+  }, 8000);
+
+  it("keeps a completed result in the local gallery even while assets are open", async () => {
+    externalRun = true;
+    render(<ComfyLocalWorkbench />);
+    fireEvent.click(await screen.findByRole("button", { name: "我的资产" }));
+    await screen.findByAltText("历史生成结果");
+
+    await waitFor(() => expect(URL.createObjectURL.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 7000 });
     expect(galleryRequests).toBe(1);
+    fireEvent.click(screen.getByRole("button", { name: "本机图片" }));
+
+    expect(await screen.findByAltText("历史生成结果")).toBeTruthy();
   }, 8000);
 
   it("shows every active task in ComfyUI execution order even when progress lookup fails", async () => {

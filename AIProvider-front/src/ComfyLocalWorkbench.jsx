@@ -64,6 +64,47 @@ const limitGalleryImages = (entries, limit = 100) => {
     return images.length ? [{ ...entry, images, count: images.length, imageUrl: images[0]?.url || null }] : [];
   });
 };
+const createGallerySource = () => ({
+  serverEntries: [],
+  recentEntries: [],
+  page: 1,
+  serverPage: 0,
+  pages: 0,
+  total: 0,
+  status: "idle",
+  loadedAt: 0,
+});
+const galleryImageAddress = (mode, image) => {
+  const address = String(image.path || image.localUrl || image.filename || "").replace(/\\/g, "/").toLowerCase();
+  return `${mode}::${address}`;
+};
+const galleryEntryUrls = (entries) => entries.flatMap((item) =>
+  (item.images || []).map((image) => image.url).filter(Boolean));
+const mergeGalleryEntries = (mode, preferredEntries, fallbackEntries, limit = 100) => {
+  const seen = new Set();
+  let remaining = limit;
+  return [...preferredEntries, ...fallbackEntries].flatMap((entry) => {
+    if (remaining <= 0) return [];
+    const images = (entry.images || []).filter((image) => {
+      const address = galleryImageAddress(mode, image);
+      if (seen.has(address)) return false;
+      seen.add(address);
+      return true;
+    }).slice(0, remaining);
+    remaining -= images.length;
+    return images.length ? [{ ...entry, images, count: images.length, imageUrl: images[0]?.url || null }] : [];
+  });
+};
+const visibleGalleryEntries = (mode, source) => {
+  const serverEntries = source.serverPage === source.page ? source.serverEntries : [];
+  return mode === "output" && source.page === 1
+    ? mergeGalleryEntries(mode, source.recentEntries, serverEntries)
+    : serverEntries;
+};
+const mapGalleryEntries = (entries, mapper) => entries.map((item) => {
+  const images = (item.images || []).map((image) => mapper(image, item)).filter(Boolean);
+  return { ...item, images, count: images.length, imageUrl: images[0]?.url || null };
+}).filter((item) => item.images.length > 0);
 const fileSize = (value) => {
   const bytes = Number(value || 0);
   if (!bytes) return "-";
@@ -135,12 +176,13 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   const [tasks, setTasks] = useState([]),
     [results, setResults] = useState([]),
     [cancelingTask, setCancelingTask] = useState("");
-  const [history, setHistory] = useState([]);
   const [galleryMode, setGalleryMode] = useState("output");
+  const [gallerySources, setGallerySources] = useState(() => ({
+    output: createGallerySource(),
+    assets: createGallerySource(),
+  }));
   const [galleryWorkflowFilter, setGalleryWorkflowFilter] = useState("all");
   const [galleryTransparencyFilter, setGalleryTransparencyFilter] = useState("all");
-  const [localPage, setLocalPage] = useState({ page: 1, pages: 0, total: 0 });
-  const [assetPage, setAssetPage] = useState({ page: 1, pages: 0, total: 0 });
   const [detail, setDetail] = useState(null);
   const [infoDetail, setInfoDetail] = useState(null);
   const [imageMenu, setImageMenu] = useState(null);
@@ -183,10 +225,18 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     workflowRefreshInFlight = useRef(false),
     taskSyncInFlight = useRef(false),
     galleryModeRef = useRef("output"),
-    galleryCache = useRef({ output: null, assets: null }),
+    gallerySourcesRef = useRef(gallerySources),
+    galleryRequestVersions = useRef({ output: 0, assets: 0 }),
+    comfyHistoryIds = useRef(new Set()),
+    comfyHistoryLoadingIds = useRef(new Set()),
+    comfyHistoryInitialized = useRef(false),
+    comfyHistorySyncInFlight = useRef(false),
     loadWorkflowsRef = useRef(null),
     defaultPresetApplied = useRef(""),
     viewerTransform = useRef(null);
+  gallerySourcesRef.current = gallerySources;
+  const activeGallerySource = gallerySources[galleryMode];
+  const history = visibleGalleryEntries(galleryMode, activeGallerySource);
   useEffect(() => { tasksRef.current = tasks; }, [tasks]);
   useEffect(() => {
     if (!notice) return undefined;
@@ -272,7 +322,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       }
       if (!historyLoaded.current) {
         historyLoaded.current = true;
-        loadHistory(config.token).catch((e) => {
+        loadGalleryPage(config.token, "output", 1).catch((e) => {
           historyLoaded.current = false;
           setError(`读取本机历史失败：${e.message}`);
         });
@@ -307,9 +357,11 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     return () => {
       clearInterval(id);
       activePolling.forEach((timer) => clearInterval(timer));
-      Object.values(galleryCache.current).forEach((cached) => cached?.entries.forEach((item) =>
-        (item.images || []).forEach((image) => URL.revokeObjectURL(image.url)),
-      ));
+      const urls = new Set(Object.values(gallerySourcesRef.current).flatMap((source) => [
+        ...galleryEntryUrls(source.serverEntries),
+        ...galleryEntryUrls(source.recentEntries),
+      ]));
+      urls.forEach((url) => URL.revokeObjectURL(url));
     };
   }, []);
 
@@ -615,93 +667,150 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     saved.forEach((item) => poll(item.id, authToken, item.finalOutputNodeId, item.progressPlan, item));
     localStorage.removeItem("comfy_active_task");
   };
-  const galleryImageAddress = (image, assets) =>
-    `${assets ? "assets" : "output"}::${image.path || image.localUrl || image.filename || ""}`;
-  const releaseReplacedGalleryImages = (previousEntries, nextEntries) => {
-    const retainedUrls = new Set(nextEntries.flatMap((item) => (item.images || []).map((image) => image.url).filter(Boolean)));
-    previousEntries.forEach((item) => (item.images || []).forEach((image) => {
-      if (image.url && !retainedUrls.has(image.url)) URL.revokeObjectURL(image.url);
-    }));
+  const replaceGallerySource = (mode, updater) => {
+    const currentSources = gallerySourcesRef.current;
+    const nextSource = updater(currentSources[mode]);
+    const nextSources = { ...currentSources, [mode]: nextSource };
+    gallerySourcesRef.current = nextSources;
+    setGallerySources(nextSources);
+    return nextSource;
   };
-  const hydrateGalleryEntries = async (entries, assets, authToken, cachedEntries = []) => {
+  const releaseGalleryUrlsNotRetained = (previousEntries, retainedEntries) => {
+    const retainedUrls = new Set(galleryEntryUrls(retainedEntries));
+    new Set(galleryEntryUrls(previousEntries)).forEach((url) => {
+      if (!retainedUrls.has(url)) URL.revokeObjectURL(url);
+    });
+  };
+  const hydrateGalleryEntries = async (entries, mode, authToken, cachedEntries = []) => {
+    const assets = mode === "assets";
     const cachedImages = new Map(
       cachedEntries.flatMap((item) => (item.images || [])
         .filter((image) => image.url)
-        .map((image) => [galleryImageAddress(image, assets), image])),
+        .map((image) => [galleryImageAddress(mode, image), image])),
     );
     return mapLimit(
-    entries, 6, async (item) => {
-      const settledImages = await Promise.allSettled(
-        (item.images || []).map(async (image) => {
-          const cachedImage = cachedImages.get(galleryImageAddress(image, assets));
-          const recordedTransparency = item.form?.generateTransparent ?? item.generateTransparent;
-          if (cachedImage?.url) {
-            return {
-              ...image,
-              url: cachedImage.url,
-              transparent: typeof recordedTransparency === "boolean"
-                ? recordedTransparency
-                : image.transparent ?? cachedImage.transparent ?? null,
-            };
-          }
-          const query = new URLSearchParams({ path: image.path });
-          const response = await call(`${assets ? "/api/assets/file" : "/api/gallery/file"}?${query}`, {}, 30000, authToken);
-          if (!response.ok) throw new Error("missing image");
-          const blob = await response.blob();
-          return { ...image, url: URL.createObjectURL(blob), transparent: typeof recordedTransparency === "boolean" ? recordedTransparency : image.transparent ?? null };
-        }),
-      );
-      const loadedImages = settledImages.filter((result) => result.status === "fulfilled").map((result) => result.value);
-      return { ...item, prompt: item.prompt || "", count: loadedImages.length, imageUrl: loadedImages[0]?.url || null, images: loadedImages };
-    },
+      entries, 6, async (item) => {
+        const settledImages = await Promise.allSettled(
+          (item.images || []).map(async (image) => {
+            const cachedImage = cachedImages.get(galleryImageAddress(mode, image));
+            const recordedTransparency = item.form?.generateTransparent ?? item.generateTransparent;
+            if (cachedImage?.url) {
+              return {
+                ...image,
+                url: cachedImage.url,
+                transparent: typeof recordedTransparency === "boolean"
+                  ? recordedTransparency
+                  : image.transparent ?? cachedImage.transparent ?? null,
+              };
+            }
+            const query = new URLSearchParams({ path: image.path });
+            const response = await call(`${assets ? "/api/assets/file" : "/api/gallery/file"}?${query}`, {}, 30000, authToken);
+            if (!response.ok) throw new Error("missing image");
+            const blob = await response.blob();
+            return { ...image, url: URL.createObjectURL(blob), transparent: typeof recordedTransparency === "boolean" ? recordedTransparency : image.transparent ?? null };
+          }),
+        );
+        const loadedImages = settledImages.filter((result) => result.status === "fulfilled").map((result) => result.value);
+        return { ...item, prompt: item.prompt || "", count: loadedImages.length, imageUrl: loadedImages[0]?.url || null, images: loadedImages };
+      },
     );
   };
-  const loadHistory = async (authToken, mode = galleryMode, page = 1) => {
-    const assets = mode === "assets";
-    const response = assets
-      ? await fetch(`/api/assets?platform=${encodeURIComponent(platform)}&page=${page}&pageSize=100`, { signal: deadline(30000) })
-      : await call(`/api/gallery?page=${page}&pageSize=100`, {}, 30000, authToken);
-    const data = await readJson(response, assets ? "后端资产目录" : "本机图片目录");
-    if (!response.ok || (assets && data.code !== 200)) throw new Error(data.message || `HTTP ${response.status}`);
-    const payload = assets ? data.data || {} : data;
-    const pageState = { page: payload.page || page, pages: payload.pages || 0, total: payload.total || 0 };
-    if (galleryModeRef.current === mode) {
-      if (assets) setAssetPage(pageState);
-      else setLocalPage(pageState);
-    }
-    const sourceItems = assets ? (payload.items || []).map((item) => ({
-      id: `asset-${item.id}`, assetId: item.id, source: "asset", platform: item.platform,
-      prompt: item.prompt, negativePrompt: item.negativePrompt, loras: parseLoras(item.lorasJson), seed: item.seed, steps: item.steps,
-      cfg: item.cfg, sampler: item.sampler, scheduler: item.scheduler, workflowId: item.workflowId,
-      width: item.width, height: item.height, createdAt: item.generatedAt || item.createdAt,
-      images: [{ path: item.localPath, localUrl: item.localUrl, filename: item.fileName, sizeBytes: item.fileSize, width: item.width, height: item.height }],
-    })) : payload.items || [];
-    const limitedSourceItems = limitGalleryImages(sourceItems);
-    const previousCache = galleryCache.current[mode];
-    const entries = await hydrateGalleryEntries(limitedSourceItems, assets, authToken, previousCache?.entries || []);
-    const visibleEntries = entries.filter((item) => item.images.length > 0);
-    if (previousCache) releaseReplacedGalleryImages(previousCache.entries, visibleEntries);
-    galleryCache.current[mode] = { entries: visibleEntries, pageState, loadedAt: Date.now() };
-    if (galleryModeRef.current === mode) setHistory(visibleEntries);
+  const reconcileGalleryUrls = (entries, mode, cachedEntries) => {
+    const cachedImages = new Map(cachedEntries.flatMap((item) => (item.images || [])
+      .filter((image) => image.url)
+      .map((image) => [galleryImageAddress(mode, image), image])));
+    return mapGalleryEntries(entries, (image) => {
+      const cached = cachedImages.get(galleryImageAddress(mode, image));
+      if (!cached?.url || cached.url === image.url) return image;
+      if (image.url) URL.revokeObjectURL(image.url);
+      return { ...image, url: cached.url, transparent: image.transparent ?? cached.transparent ?? null };
+    });
   };
-  const updateGalleryHistory = (updater) => setHistory((current) => {
-    const next = typeof updater === "function" ? updater(current) : updater;
-    const cached = galleryCache.current[galleryMode];
-    galleryCache.current[galleryMode] = { entries: next, pageState: galleryMode === "assets" ? assetPage : localPage, loadedAt: Date.now() };
-    return next;
-  });
-  const updateAssetPage = (updater) => setAssetPage((current) => {
-    const next = typeof updater === "function" ? updater(current) : updater;
-    const cached = galleryCache.current.assets;
-    if (cached) galleryCache.current.assets = { ...cached, pageState: next, loadedAt: Date.now() };
-    return next;
-  });
-  const updateLocalPage = (updater) => setLocalPage((current) => {
-    const next = typeof updater === "function" ? updater(current) : updater;
-    const cached = galleryCache.current.output;
-    if (cached) galleryCache.current.output = { ...cached, pageState: next, loadedAt: Date.now() };
-    return next;
-  });
+  const loadGalleryPage = async (authToken, mode = galleryModeRef.current, page = 1) => {
+    const requestVersion = ++galleryRequestVersions.current[mode];
+    const sourceBeforeRequest = replaceGallerySource(mode, (source) => ({
+      ...source,
+      status: source.serverEntries.length ? "refreshing" : "loading",
+    }));
+    const assets = mode === "assets";
+    try {
+      const response = assets
+        ? await fetch(`/api/assets?platform=${encodeURIComponent(platform)}&page=${page}&pageSize=100`, { signal: deadline(30000) })
+        : await call(`/api/gallery?page=${page}&pageSize=100`, {}, 30000, authToken);
+      const data = await readJson(response, assets ? "后端资产目录" : "本机图片目录");
+      if (!response.ok || (assets && data.code !== 200)) throw new Error(data.message || `HTTP ${response.status}`);
+      const payload = assets ? data.data || {} : data;
+      const sourceItems = assets ? (payload.items || []).map((item) => ({
+        id: `asset-${item.id}`, assetId: item.id, source: "asset", platform: item.platform,
+        prompt: item.prompt, negativePrompt: item.negativePrompt, loras: parseLoras(item.lorasJson), seed: item.seed, steps: item.steps,
+        cfg: item.cfg, sampler: item.sampler, scheduler: item.scheduler, workflowId: item.workflowId,
+        width: item.width, height: item.height, createdAt: item.generatedAt || item.createdAt,
+        images: [{ path: item.localPath, localUrl: item.localUrl, filename: item.fileName, sizeBytes: item.fileSize, width: item.width, height: item.height }],
+      })) : payload.items || [];
+      const cachedAtStart = [...sourceBeforeRequest.serverEntries, ...sourceBeforeRequest.recentEntries];
+      const hydrated = await hydrateGalleryEntries(limitGalleryImages(sourceItems), mode, authToken, cachedAtStart);
+      if (galleryRequestVersions.current[mode] !== requestVersion) {
+        releaseGalleryUrlsNotRetained(hydrated, [
+          ...gallerySourcesRef.current[mode].serverEntries,
+          ...gallerySourcesRef.current[mode].recentEntries,
+        ]);
+        return;
+      }
+      const current = gallerySourcesRef.current[mode];
+      const serverEntries = reconcileGalleryUrls(hydrated, mode, [...current.serverEntries, ...current.recentEntries]);
+      const confirmedAddresses = new Set(serverEntries.flatMap((item) =>
+        (item.images || []).map((image) => galleryImageAddress(mode, image))));
+      const recentEntries = mode === "output" && Number(payload.page || page) === 1
+        ? mapGalleryEntries(current.recentEntries, (image) =>
+          confirmedAddresses.has(galleryImageAddress(mode, image)) ? null : image)
+        : current.recentEntries;
+      releaseGalleryUrlsNotRetained(
+        [...current.serverEntries, ...current.recentEntries],
+        [...serverEntries, ...recentEntries],
+      );
+      const payloadTotal = Number(payload.total || 0);
+      const total = recentEntries.length ? Math.max(payloadTotal, current.total) : payloadTotal;
+      replaceGallerySource(mode, () => ({
+        serverEntries,
+        recentEntries,
+        page: Number(payload.page || page),
+        serverPage: Number(payload.page || page),
+        pages: total ? Math.ceil(total / 100) : 0,
+        total,
+        status: "ready",
+        loadedAt: Date.now(),
+      }));
+    } catch (exception) {
+      if (galleryRequestVersions.current[mode] === requestVersion)
+        replaceGallerySource(mode, (source) => ({ ...source, status: "error" }));
+      throw exception;
+    }
+  };
+  const mapGalleryImages = (mode, mapper) => replaceGallerySource(mode, (source) => ({
+    ...source,
+    serverEntries: mapGalleryEntries(source.serverEntries, mapper),
+    recentEntries: mapGalleryEntries(source.recentEntries, mapper),
+  }));
+  const removeGalleryImages = (mode, images) => {
+    const addresses = new Set(images.map((image) => galleryImageAddress(mode, image)));
+    if (!addresses.size) return;
+    replaceGallerySource(mode, (source) => {
+      const allEntries = [...source.serverEntries, ...source.recentEntries];
+      const existingAddresses = new Set(allEntries.flatMap((item) => (item.images || [])
+        .map((image) => galleryImageAddress(mode, image))
+        .filter((address) => addresses.has(address))));
+      const removedUrls = new Set(allEntries.flatMap((item) => (item.images || [])
+        .filter((image) => addresses.has(galleryImageAddress(mode, image)))
+        .map((image) => image.url).filter(Boolean)));
+      const keep = (image) => addresses.has(galleryImageAddress(mode, image)) ? null : image;
+      const serverEntries = mapGalleryEntries(source.serverEntries, keep);
+      const recentEntries = mapGalleryEntries(source.recentEntries, keep);
+      const retainedUrls = new Set([...galleryEntryUrls(serverEntries), ...galleryEntryUrls(recentEntries)]);
+      removedUrls.forEach((url) => { if (!retainedUrls.has(url)) URL.revokeObjectURL(url); });
+      const total = Math.max(0, source.total - existingAddresses.size);
+      return { ...source, serverEntries, recentEntries, total, pages: total ? Math.ceil(total / 100) : 0 };
+    });
+  };
   const switchGallery = async (mode) => {
     if (mode === galleryModeRef.current) return;
     galleryModeRef.current = mode;
@@ -710,18 +819,8 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     setSelectedImages(new Set());
     setGalleryWorkflowFilter("all");
     setGalleryTransparencyFilter("all");
-    const cached = galleryCache.current[mode];
-    if (cached) {
-      setHistory(cached.entries);
-      if (cached.pageState) {
-        if (mode === "assets") setAssetPage(cached.pageState);
-        else setLocalPage(cached.pageState);
-      }
-      loadHistory(token, mode, cached.pageState?.page || 1).catch((e) => setError(e.message));
-      return;
-    }
-    setHistory([]);
-    await loadHistory(token, mode, 1);
+    const source = gallerySourcesRef.current[mode];
+    await loadGalleryPage(token, mode, source.page || 1);
   };
   const loadOutputImages = async (images, authToken, includeResultUrl = false) => Promise.all(
     (images || []).map(async (image) => {
@@ -737,8 +836,44 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       return { ...image, path, blob, url: includeResultUrl ? URL.createObjectURL(blob) : null };
     }),
   );
-  const appendTaskToHistory = (promptId, task, loadedImages) => {
-    if (!loadedImages.length || galleryMode !== "output") return;
+  const addRecentOutputEntry = (entry) => replaceGallerySource("output", (source) => {
+    const knownAddresses = new Set([...source.serverEntries, ...source.recentEntries].flatMap((item) =>
+      (item.images || []).map((image) => galleryImageAddress("output", image))));
+    const newAddresses = new Set((entry.images || [])
+      .map((image) => galleryImageAddress("output", image))
+      .filter((address) => !knownAddresses.has(address)));
+    const recentEntries = limitGalleryImages([
+      entry,
+      ...source.recentEntries.filter((item) => String(item.id) !== String(entry.id)),
+    ]);
+    const recentAddresses = new Set(recentEntries.flatMap((item) =>
+      (item.images || []).map((image) => galleryImageAddress("output", image))));
+    const recentImageCount = recentAddresses.size;
+    const serverEntries = source.serverPage === 1
+      ? limitGalleryImages(
+        mapGalleryEntries(source.serverEntries, (image) =>
+          recentAddresses.has(galleryImageAddress("output", image)) ? null : image),
+        Math.max(0, 100 - recentImageCount),
+      )
+      : [];
+    releaseGalleryUrlsNotRetained(
+      [...source.serverEntries, ...source.recentEntries],
+      [...serverEntries, ...recentEntries],
+    );
+    const total = source.total + newAddresses.size;
+    return {
+      ...source,
+      serverEntries,
+      recentEntries,
+      page: 1,
+      total,
+      pages: total ? Math.ceil(total / 100) : 0,
+      loadedAt: Date.now(),
+    };
+  });
+  const appendTaskToHistory = (promptId, task, loadedImages, authToken = token) => {
+    if (!loadedImages.length) return;
+    comfyHistoryIds.current.add(String(promptId));
     const images = loadedImages.map(({ blob, ...image }) => ({ ...image, url: URL.createObjectURL(blob) }));
     const form = task?.form || {};
     const entry = {
@@ -759,25 +894,55 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       createdAt: task?.createdAt || new Date().toISOString(),
       images,
     };
-    updateGalleryHistory((current) => {
-      const allEntries = [entry, ...current.filter((item) => String(item.id) !== String(promptId))];
-      const limited = limitGalleryImages(allEntries);
-      const retainedUrls = new Set(limited.flatMap((item) => item.images.map((image) => image.url)));
-      allEntries.forEach((item) => item.images.forEach((image) => {
-        if (image.url && !retainedUrls.has(image.url)) URL.revokeObjectURL(image.url);
-      }));
-      return limited;
-    });
+    addRecentOutputEntry(entry);
+  };
+  const appendCompletedHistoryItem = async (promptId, task, historyItem, authToken) => {
+    const id = String(promptId);
+    if (comfyHistoryLoadingIds.current.has(id)) return false;
+    comfyHistoryLoadingIds.current.add(id);
+    try {
+      const finalOutput = findFinalOutput(historyItem, task.finalOutputNodeId);
+      if (!finalOutput) return true;
+      const images = await loadOutputImages(finalOutput.images, authToken);
+      appendTaskToHistory(id, task, images, authToken);
+      return true;
+    } finally {
+      comfyHistoryLoadingIds.current.delete(id);
+    }
   };
   const appendCompletedExternalTask = async (task, authToken) => {
     const promptId = String(task.id);
     const response = await call(`/comfy/history/${encodeURIComponent(promptId)}`, {}, 10000, authToken);
     const data = await readJson(response, "ComfyUI history");
     if (!response.ok || !data[promptId]) return;
-    const finalOutput = findFinalOutput(data[promptId], task.finalOutputNodeId);
-    if (!finalOutput) return;
-    const images = await loadOutputImages(finalOutput.images, authToken);
-    appendTaskToHistory(promptId, task, images);
+    await appendCompletedHistoryItem(promptId, task, data[promptId], authToken);
+  };
+  const syncRecentComfyHistory = async (authToken = token) => {
+    if (comfyHistorySyncInFlight.current || gallerySourcesRef.current.output.status !== "ready") return;
+    comfyHistorySyncInFlight.current = true;
+    try {
+      const response = await call("/comfy/history?max_items=20", {}, 10000, authToken);
+      const data = await readJson(response, "ComfyUI 最近历史");
+      if (!response.ok || !data || Array.isArray(data)) throw new Error(data.message || `HTTP ${response.status}`);
+      const ids = Object.keys(data);
+      if (!comfyHistoryInitialized.current) {
+        comfyHistoryIds.current = new Set(ids);
+        comfyHistoryInitialized.current = true;
+        return;
+      }
+      const newIds = ids.filter((id) => !comfyHistoryIds.current.has(id));
+      await Promise.allSettled(newIds.map((id) => {
+        const task = tasksRef.current.find((candidate) => String(candidate.id) === String(id)) || {
+          id,
+          external: true,
+          createdAt: new Date().toISOString(),
+        };
+        return appendCompletedHistoryItem(id, task, data[id], authToken)
+          .then((processed) => { if (processed) comfyHistoryIds.current.add(id); });
+      }));
+    } finally {
+      comfyHistorySyncInFlight.current = false;
+    }
   };
   const syncComfyTasks = async (authToken = token) => {
     if (taskSyncInFlight.current) return;
@@ -845,7 +1010,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       localStorage.setItem("comfy_active_tasks", JSON.stringify(next.filter((task) => !task.external)));
       return next;
     });
-    if (galleryMode === "output" && completedExternalTasks.length)
+    if (completedExternalTasks.length)
       await Promise.allSettled(completedExternalTasks.map((task) => appendCompletedExternalTask(task, authToken)));
     } finally {
       taskSyncInFlight.current = false;
@@ -861,6 +1026,14 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     const id = setInterval(sync, 1500);
     return () => clearInterval(id);
   }, [token, running]);
+  useEffect(() => {
+    if (!token || !running || !active) return undefined;
+    const sync = () => syncRecentComfyHistory(token)
+      .catch((exception) => reportLocalError("comfy-history-sync", exception, { path: "/comfy/history?max_items=20" }, token));
+    sync();
+    const id = setInterval(sync, 2000);
+    return () => clearInterval(id);
+  }, [token, running, active]);
   const generate = async () => {
     setBusy(true);
     setError("");
@@ -1001,7 +1174,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         if (!finalOutput) throw new Error("历史结果中没有可展示的图片输出");
         const loaded = await loadOutputImages(finalOutput.images, authToken, true);
         setResults(loaded.map(({ blob, ...image }) => image));
-        appendTaskToHistory(promptId, taskHint || tasksRef.current.find((task) => String(task.id) === String(promptId)), loaded);
+        appendTaskToHistory(promptId, taskHint || tasksRef.current.find((task) => String(task.id) === String(promptId)), loaded, authToken);
         removeActiveTask(promptId);
       } catch (e) {
         reportLocalError("task-poll", e, { promptId, path: `/comfy/history/${promptId}` }, authToken);
@@ -1055,23 +1228,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       next.delete(removedKey);
       return next;
     });
-    if (item.source === "asset") {
-      updateAssetPage((current) => {
-        const total = Math.max(0, current.total - 1);
-        return { ...current, total, pages: total ? Math.ceil(total / 100) : 0 };
-      });
-    } else {
-      updateLocalPage((current) => {
-        const total = Math.max(0, current.total - 1);
-        return { ...current, total, pages: total ? Math.ceil(total / 100) : 0 };
-      });
-    }
-    updateGalleryHistory((current) => current
-      .map((entry) => ({
-        ...entry,
-        images: (entry.images || []).filter((candidate) => imageSelectionKey(entry, candidate) !== removedKey),
-      }))
-      .filter((entry) => entry.images.length > 0));
+    removeGalleryImages(item.source === "asset" ? "assets" : "output", [image]);
     setDetail((current) => {
       if (!current) return current;
       const removedIndex = current.images.findIndex(
@@ -1125,15 +1282,16 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   useEffect(() => {
     if (!transparencyScanKey) return undefined;
     let cancelled = false;
+    const scanMode = galleryMode;
     const pending = galleryImages.filter(({ image }) => image.transparent == null);
     mapLimit(pending, 3, async ({ key, image }) => ({ key, transparent: await detectImageTransparency(image.url).catch(() => false) }))
       .then((detected) => {
         if (cancelled) return;
         const values = new Map(detected.map((entry) => [entry.key, entry.transparent]));
-        updateGalleryHistory((current) => current.map((item) => ({ ...item, images: (item.images || []).map((image) => {
+        mapGalleryImages(scanMode, (image, item) => {
           const value = values.get(imageSelectionKey(item, image));
           return value === undefined ? image : { ...image, transparent: value };
-        }) })));
+        });
       });
     return () => { cancelled = true; };
   }, [transparencyScanKey]);
@@ -1234,21 +1392,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         const backendData = await readJson(backend, "后端资产删除接口");
         if (!backend.ok || backendData.code !== 200) throw new Error(backendData.message || "后端资产记录删除失败");
       }
-      const deletedKeys = new Set(selectedEntries.map(({ item, image }) => imageSelectionKey(item, image)));
-      updateGalleryHistory((current) => current
-        .map((item) => ({ ...item, images: (item.images || []).filter((image) => !deletedKeys.has(imageSelectionKey(item, image))) }))
-        .filter((item) => item.images.length > 0));
-      if (deletingAssets) {
-        updateAssetPage((current) => {
-          const total = Math.max(0, current.total - selectedEntries.length);
-          return { ...current, total, pages: total ? Math.ceil(total / 100) : 0 };
-        });
-      } else {
-        updateLocalPage((current) => {
-          const total = Math.max(0, current.total - selectedEntries.length);
-          return { ...current, total, pages: total ? Math.ceil(total / 100) : 0 };
-        });
-      }
+      removeGalleryImages(deletingAssets ? "assets" : "output", selectedEntries.map(({ image }) => image));
       setSelectedImages(new Set());
       setSelectionMode(false);
     } catch (e) {
@@ -1310,14 +1454,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       setNotice("迁移成功");
       if (viewerEntry) advanceDetailAfterAction(viewerEntry.item, viewerEntry.image);
       else {
-        const movedPaths = new Set(paths.map((path) => String(path).toLowerCase()));
-        updateGalleryHistory((current) => current
-          .map((item) => ({ ...item, images: (item.images || []).filter((image) => !movedPaths.has(String(image.path).toLowerCase())) }))
-          .filter((item) => item.images.length > 0));
-        updateLocalPage((current) => {
-          const total = Math.max(0, current.total - movedPaths.size);
-          return { ...current, total, pages: total ? Math.ceil(total / 100) : 0 };
-        });
+        removeGalleryImages("output", paths.map((path) => ({ path })));
       }
       await loadFolders(token);
     } catch (e) {
@@ -1371,16 +1508,10 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       setNotice(changed.length ? `已迁移 ${changed.length} 张资产图片` : "所选图片已在当前迁移目录");
       if (viewerEntry) advanceDetailAfterAction(viewerEntry.item, viewerEntry.image);
       else if (changed.length) {
-        const movedKeys = new Set(entries
+        const movedImages = entries
           .filter(({ image }) => changed.some((asset) => String(asset.oldPath).toLowerCase() === String(image.path).toLowerCase()))
-          .map(({ item, image }) => imageSelectionKey(item, image)));
-        updateGalleryHistory((current) => current
-          .map((item) => ({ ...item, images: (item.images || []).filter((image) => !movedKeys.has(imageSelectionKey(item, image))) }))
-          .filter((item) => item.images.length > 0));
-        updateAssetPage((current) => {
-          const total = Math.max(0, current.total - movedKeys.size);
-          return { ...current, total, pages: total ? Math.ceil(total / 100) : 0 };
-        });
+          .map(({ image }) => image);
+        removeGalleryImages("assets", movedImages);
       }
     } catch (e) {
       setError(`资产迁移失败：${e.message}`);
@@ -1582,7 +1713,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   const activeTaskWorkflowName = activeTask
     ? activeTask.workflowName || workflows.find((workflow) => workflow.id === (activeTask.workflowId || activeTask.form?.workflowId))?.name || (activeTask.external ? "外部 ComfyUI 工作流" : "当前工作流")
     : "";
-  const activeGalleryPage = galleryMode === "assets" ? assetPage : localPage;
+  const activeGalleryPage = activeGallerySource;
 
   if (mode === "settings") {
     return (
@@ -1824,8 +1955,10 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
           )}
           {history.length === 0 && (
             <div className="empty-mini">
-              <ImageSquare size={38} />
-              <span>{galleryMode === "assets" ? `当前 ${platform} 暂无已登记资产` : "生成结果只保存在本机"}</span>
+              {activeGalleryPage.status === "loading" ? <SpinnerGap className="spin" size={38} /> : <ImageSquare size={38} />}
+              <span>{activeGalleryPage.status === "loading"
+                ? "正在读取图片…"
+                : galleryMode === "assets" ? `当前 ${platform} 暂无已登记资产` : "生成结果只保存在本机"}</span>
             </div>
           )}
           {history.length > 0 && filteredGalleryImages.length === 0 && (
@@ -1868,9 +2001,9 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
             </div>
           )}
           {activeGalleryPage.pages > 1 && <div className="asset-pagination">
-            <button disabled={activeGalleryPage.page <= 1 || busy} onClick={() => loadHistory(token, galleryMode, activeGalleryPage.page - 1).catch((e) => setError(e.message))}>上一页</button>
+            <button disabled={activeGalleryPage.page <= 1 || busy || activeGalleryPage.status === "loading"} onClick={() => loadGalleryPage(token, galleryMode, activeGalleryPage.page - 1).catch((e) => setError(e.message))}>上一页</button>
             <span>第 {activeGalleryPage.page} / {activeGalleryPage.pages} 页 · 每页 100 张</span>
-            <button disabled={activeGalleryPage.page >= activeGalleryPage.pages || busy} onClick={() => loadHistory(token, galleryMode, activeGalleryPage.page + 1).catch((e) => setError(e.message))}>下一页</button>
+            <button disabled={activeGalleryPage.page >= activeGalleryPage.pages || busy || activeGalleryPage.status === "loading"} onClick={() => loadGalleryPage(token, galleryMode, activeGalleryPage.page + 1).catch((e) => setError(e.message))}>下一页</button>
           </div>}
         </section>
       </div>
