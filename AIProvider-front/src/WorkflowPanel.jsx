@@ -162,7 +162,22 @@ export default function WorkflowPanel({ workflows, loading, workflow, fieldKeys,
         </select></label>
         <button className="comfy-submit workflow-panel__generate" type="button" onClick={onGenerate} disabled={disabled.blocked}><Sparkle />{disabled.busy ? "正在提交…" : "开始生成"}</button>
       </div>
-      <small>工作流决定下方参数；切换后立即载入它的必要参数和默认值。</small>
+      {supportsPrompt && <div className="workflow-panel__presets workflow-panel__presets--chooser">
+        <header><strong>Prompt 方案</strong><small>只回填正向和反向 Prompt</small></header>
+        <select aria-label="Prompt 方案" value={presetQuery} onChange={(event) => onPresetChange(event.target.value)}>
+          <option value="">请选择 Prompt 方案</option>
+          {presets.map((preset) => <option key={preset.id} value={String(preset.id)}>{preset.title}</option>)}
+        </select>
+        <div className="workflow-panel__preset-save">
+          <input aria-label="新 Prompt 方案名称" value={presetSaveName} maxLength="100" onChange={(event) => onPresetSaveNameChange(event.target.value)} placeholder="另存为新方案时填写名称" />
+          <div>
+            <button type="button" disabled={presetSaving || !presetSaveName.trim()} onClick={() => onSavePreset("new")}><Plus />另存为新方案</button>
+            <button type="button" disabled={presetSaving || !presetQuery} onClick={() => onSavePreset("overwrite")}><FloppyDisk />覆盖当前方案</button>
+          </div>
+        </div>
+        {!presets.length && <small>还没有 Prompt 方案。</small>}
+        {appliedPresetTitle && <div className="workflow-panel__preset-applied">已应用：{appliedPresetTitle}</div>}
+      </div>}
     </section>
 
     {workflow ? <section className="workflow-panel__parameters" aria-label="工作流参数" key={workflow.id}>
@@ -171,23 +186,6 @@ export default function WorkflowPanel({ workflows, loading, workflow, fieldKeys,
       {editorKey && <MaskPointEditor file={referenceFiles.sourceImage} value={values[editorKey]} radius={Number(values[radiusKey] || 12)} onChange={(next) => onFieldChange(editorKey, next)} onRadiusChange={(next) => radiusKey && onFieldChange(radiusKey, next)} />}
       {workflow.capabilities?.generationAndCutout && <label className="workflow-panel__check workflow-panel__transparent"><input type="checkbox" checked={Boolean(values.generateTransparent)} onChange={(event) => onFieldChange("generateTransparent", event.target.checked)} /><span>透明背景</span></label>}
     </section> : <section className="workflow-panel__empty">请先启动 ComfyUI 并读取工作流。</section>}
-
-    {supportsPrompt && <section className="workflow-panel__presets">
-      <header><strong>Prompt 方案</strong><small>方案全局可用，只回填正向和反向 Prompt</small></header>
-      <select aria-label="Prompt 方案" value={presetQuery} onChange={(event) => onPresetChange(event.target.value)}>
-        <option value="">请选择 Prompt 方案</option>
-        {presets.map((preset) => <option key={preset.id} value={String(preset.id)}>{preset.title}</option>)}
-      </select>
-      <div className="workflow-panel__preset-save">
-        <input aria-label="新 Prompt 方案名称" value={presetSaveName} maxLength="100" onChange={(event) => onPresetSaveNameChange(event.target.value)} placeholder="另存为新方案时填写名称" />
-        <div>
-          <button type="button" disabled={presetSaving || !presetSaveName.trim()} onClick={() => onSavePreset("new")}><Plus />另存为新方案</button>
-          <button type="button" disabled={presetSaving || !presetQuery} onClick={() => onSavePreset("overwrite")}><FloppyDisk />覆盖当前方案</button>
-        </div>
-      </div>
-      {!presets.length && <small>还没有 Prompt 方案。</small>}
-      {appliedPresetTitle && <div>已应用：{appliedPresetTitle}</div>}
-    </section>}
 
     {workflow && advancedFieldKeys.length > 0 && <details className="workflow-panel__advanced workflow-panel__advanced--bottom"><summary><span>高级选项</span><small>{advancedFieldKeys.length} 项</small></summary><div className="workflow-panel__fields">{advancedFieldKeys.map(renderField)}</div></details>}
   </div>;

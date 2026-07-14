@@ -351,6 +351,10 @@ describe("Comfy image generation flow", () => {
   it("loads Prompt schemes by stable backend id", async () => {
     render(<ComfyLocalWorkbench />);
     const schemes = await screen.findByRole("combobox", { name: "Prompt 方案" });
+    const chooser = screen.getByRole("region", { name: "选择工作流" });
+    const parameters = screen.getByRole("region", { name: "工作流参数" });
+    expect(chooser.contains(schemes)).toBe(true);
+    expect(chooser.compareDocumentPosition(parameters) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByRole("option", { name: "扶她0" }).value).toBe("2");
     fireEvent.change(schemes, { target: { value: "2" } });
     expect(screen.getByRole("textbox", { name: "正向提示词" }).value).toBe("preset prompt");

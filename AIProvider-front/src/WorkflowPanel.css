@@ -1,11 +1,11 @@
-.workflow-panel{display:flex;flex-direction:column;gap:12px}
+.workflow-panel{display:flex;flex-direction:column;gap:8px}
 .workflow-panel label{display:flex;flex-direction:column;gap:6px;margin:0;color:var(--text-secondary);font-size:9px}
 .workflow-panel input,.workflow-panel textarea,.workflow-panel select{box-sizing:border-box;width:100%;min-width:0;padding:10px;color:var(--text-primary);background:var(--bg-page);border:1px solid var(--border-normal);border-radius:var(--control-radius);outline:none}
 .workflow-panel input:focus,.workflow-panel textarea:focus,.workflow-panel select:focus{border-color:var(--border-focus);box-shadow:0 0 0 3px color-mix(in srgb,var(--border-focus) 14%,transparent)}
-.workflow-panel__chooser{padding:13px;border:1px solid var(--border-focus);border-radius:var(--control-radius);background:var(--bg-selected)}
+.workflow-panel__chooser{padding:11px 12px;border:1px solid var(--border-focus);border-radius:var(--control-radius);background:var(--bg-selected)}
 .workflow-panel__chooser-main{display:grid;grid-template-columns:minmax(0,1fr) minmax(120px,.45fr);align-items:end;gap:9px}
 .workflow-panel__chooser label{color:var(--text-primary);font-size:10px;font-weight:700}
-.workflow-panel__chooser small{display:block;margin-top:7px;color:var(--text-muted);font-size:8px}
+.workflow-panel__chooser small{display:block;color:var(--text-muted);font-size:8px}
 .workflow-panel__parameters,.workflow-panel__presets,.workflow-panel__empty{padding:13px;border:1px solid var(--border-subtle);border-radius:var(--control-radius);background:var(--bg-surface)}
 .workflow-panel__parameters header,.workflow-panel__presets header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:11px}
 .workflow-panel__parameters header div{display:flex;align-items:center;gap:7px}
@@ -36,6 +36,11 @@
 .workflow-panel__advanced .workflow-panel__fields{margin-top:11px;padding-top:11px;border-top:1px dashed var(--border-subtle)}
 .workflow-panel__presets{display:grid;gap:9px}
 .workflow-panel__presets header{margin:0}
+.workflow-panel__presets--chooser{margin-top:8px;padding:8px 0 0;border:0;border-top:1px solid color-mix(in srgb,var(--border-focus) 45%,transparent);border-radius:0;background:transparent;gap:6px}
+.workflow-panel__presets--chooser header{align-items:center;margin:0}
+.workflow-panel__presets--chooser select,.workflow-panel__presets--chooser input{padding:8px 9px}
+.workflow-panel__presets--chooser button{padding:7px 9px}
+.workflow-panel__preset-applied{color:var(--text-muted);font-size:8px;line-height:1.2}
 .workflow-panel__presets footer{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
 .workflow-panel__presets button{padding:8px;border:1px solid var(--border-normal);border-radius:var(--control-radius);background:var(--bg-card-hover);color:var(--text-secondary);cursor:pointer}
 .workflow-panel__preset-save{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px}.workflow-panel__preset-save>div{display:flex;gap:5px}.workflow-panel__preset-save button{display:flex;align-items:center;justify-content:center;gap:5px;white-space:nowrap}.workflow-panel__preset-save button:disabled{opacity:.4;cursor:not-allowed}.workflow-panel__preset-save svg{width:14px;height:14px}
