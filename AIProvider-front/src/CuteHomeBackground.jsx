@@ -84,7 +84,7 @@ export default function CuteHomeBackground({ onOpenWorkshop }) {
       x: Math.random(),
       y: Math.random(),
       size: .45 + Math.random() * 1.9,
-      speed: Math.random() * .0005,
+      speed: .004 + Math.random() * .008,
       phase: Math.random() * Math.PI * 2,
       color: colors[index % colors.length],
     }));
@@ -97,14 +97,14 @@ export default function CuteHomeBackground({ onOpenWorkshop }) {
       life: 0,
       duration: 0,
     }));
-    const flybyPlanets = [
-      { type: "jupiter", delay: 2, duration: 110, cycle: 980, x0: 1500, y0: 210, k: .0024, radius: .195 },
-      { type: "saturn", delay: 130, duration: 120, cycle: 980, x0: 1540, y0: 370, k: .0026, radius: .19 },
-      { type: "earth", delay: 270, duration: 100, cycle: 980, x0: 1450, y0: 285, k: .002, radius: .15 },
-      { type: "venus", delay: 390, duration: 100, cycle: 980, x0: 1520, y0: 450, k: .0023, radius: .145 },
-      { type: "mars", delay: 510, duration: 95, cycle: 980, x0: 1400, y0: 165, k: .0025, radius: .14 },
-      { type: "neptune", delay: 625, duration: 105, cycle: 980, x0: 1450, y0: 395, k: .0021, radius: .15 },
-      { type: "pluto", delay: 750, duration: 100, cycle: 980, x0: 1300, y0: 270, k: .0022, radius: .13 },
+    const flybyTemplates = [
+      { type: "jupiter", k: .072, maxScale: 6, radius: .042 },
+      { type: "saturn", k: .068, maxScale: 5.8, radius: .032 },
+      { type: "earth", k: .078, maxScale: 6.2, radius: .035 },
+      { type: "venus", k: .076, maxScale: 6.1, radius: .034 },
+      { type: "mars", k: .082, maxScale: 6.2, radius: .031 },
+      { type: "neptune", k: .074, maxScale: 6, radius: .035 },
+      { type: "pluto", k: .084, maxScale: 6.5, radius: .023 },
     ];
     const celestialImages = Object.fromEntries(Object.entries({
       jupiter: jupiterReal,
@@ -122,12 +122,42 @@ export default function CuteHomeBackground({ onOpenWorkshop }) {
       return [key, image];
     }));
     const startedAt = performance.now();
+    let flybyQueue = [];
+    let activeFlyby = null;
+    let previousFlybyType = "";
+    let nextFlybyAt = startedAt + 900;
+
+    const refillFlybyQueue = () => {
+      flybyQueue = [...flybyTemplates];
+      for (let index = flybyQueue.length - 1; index > 0; index -= 1) {
+        const swapIndex = Math.floor(Math.random() * (index + 1));
+        [flybyQueue[index], flybyQueue[swapIndex]] = [flybyQueue[swapIndex], flybyQueue[index]];
+      }
+      if (flybyQueue[0]?.type === previousFlybyType) {
+        [flybyQueue[0], flybyQueue[1]] = [flybyQueue[1], flybyQueue[0]];
+      }
+    };
+
+    const launchFlyby = (time) => {
+      if (!flybyQueue.length) refillFlybyQueue();
+      const template = flybyQueue.shift();
+      const lanes = [-70, -36, 0, 42, 76];
+      const lane = previousFlybyType ? lanes[Math.floor(Math.random() * lanes.length)] : 0;
+      activeFlyby = {
+        ...template,
+        startedAt: time,
+        x0: 1540 + Math.random() * 105,
+        y0: 285 + lane,
+        k: template.k * (.92 + Math.random() * .16),
+      };
+      previousFlybyType = template.type;
+    };
 
     const launchMeteor = (meteor) => {
       meteor.active = true;
       meteor.x = .62 + Math.random() * .25;
       meteor.y = .04 + Math.random() * .34;
-      meteor.speed = .01 + Math.random() * .03;
+      meteor.speed = .025 + Math.random() * .045;
       meteor.life = 0;
       meteor.duration = 2.4 + Math.random() * 1.6;
     };
@@ -162,15 +192,17 @@ export default function CuteHomeBackground({ onOpenWorkshop }) {
     };
 
     const drawFlybyPlanet = (planet, time) => {
-      const seconds = (time - startedAt) / 1000;
-      const local = ((seconds - planet.delay) % planet.cycle + planet.cycle) % planet.cycle;
-      if (seconds < planet.delay || local > planet.duration) return;
-      const progress = local / planet.duration;
-      const edgeFade = Math.min(1, progress / .08, (1 - progress) / .08);
+      const local = (time - planet.startedAt) / 1000;
       const perspectiveScale = Math.exp(planet.k * local);
+      if (perspectiveScale >= planet.maxScale) {
+        activeFlyby = null;
+        nextFlybyAt = time + 2500 + Math.random() * 4500;
+        return;
+      }
+      const edgeFade = Math.min(1, local / .9, (planet.maxScale - perspectiveScale) / .7);
       const x = (1800 + (planet.x0 - 1800) * perspectiveScale) / COCKPIT_DESIGN_SIZE.width;
       const y = (285 + (planet.y0 - 285) * perspectiveScale) / COCKPIT_DESIGN_SIZE.height;
-      const radius = Math.max(92, Math.min(width, height) * planet.radius * perspectiveScale);
+      const radius = Math.max(20, Math.min(width, height) * planet.radius * perspectiveScale);
       context.save();
       context.translate(x * width, y * height);
       context.globalAlpha = .96 * edgeFade;
@@ -243,7 +275,8 @@ export default function CuteHomeBackground({ onOpenWorkshop }) {
       });
 
       context.globalCompositeOperation = "source-over";
-      flybyPlanets.forEach((planet) => drawFlybyPlanet(planet, time));
+      if (!activeFlyby && time >= nextFlybyAt) launchFlyby(time);
+      if (activeFlyby) drawFlybyPlanet(activeFlyby, time);
       context.globalCompositeOperation = "lighter";
 
       meteors.forEach((meteor) => {
