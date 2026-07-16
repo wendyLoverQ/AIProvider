@@ -45,11 +45,7 @@ import {
   XLogo,
   Cat,
   Star,
-  Cloud,
-  FlowerLotus,
   PawPrint,
-  MoonStars,
-  MagicWand,
   LockKey,
 } from "@phosphor-icons/react";
 import {
@@ -69,11 +65,10 @@ import { motion } from "motion/react";
 import ComfyConsole from "./ComfyLocalWorkbench";
 import MonitorCenter from "./MonitorCenter";
 import PromptManager from "./PromptManager";
+import PromptOptionManager from "./PromptOptionManager";
 import UiControl from "./UiControl";
 import TwitterPublisher from "./TwitterPublisher";
-import DynamicShowcase from "./DynamicShowcase";
 import CuteHomeBackground from "./CuteHomeBackground";
-import CuteWorkshopCard from "./CuteWorkshopCard";
 import "./App.css";
 import "./CodexTheme.css";
 import "./SemanticTheme.css";
@@ -231,12 +226,13 @@ function useDashboardData() {
 }
 
 function App() {
-  const viewFromPath = () => ({ "/workshop": "workshop", "/prompts": "prompts", "/maid": "maid", "/admin/monitor": "monitor", "/camera": "camera", "/twitter": "twitter", "/appearance": "appearance", "/settings": "settings" })[window.location.pathname] || "home";
+  const viewFromPath = () => ({ "/workshop": "workshop", "/prompts": "prompts", "/prompt-options": "promptOptions", "/maid": "maid", "/admin/monitor": "monitor", "/camera": "camera", "/twitter": "twitter", "/appearance": "appearance", "/settings": "settings" })[window.location.pathname] || "home";
   const [view, setView] = useState(viewFromPath);
+  const [promptOptionCategory, setPromptOptionCategory] = useState("");
   const dashboard = useDashboardData();
-  const current = NAV.find((item) => item.key === view);
+  const current = NAV.find((item) => item.key === (view === "promptOptions" ? "prompts" : view));
   useEffect(() => {
-    const path = ({ workshop: "/workshop", prompts: "/prompts", maid: "/maid", monitor: "/admin/monitor", camera: "/camera", twitter: "/twitter", appearance: "/appearance", settings: "/settings" })[view] || "/";
+    const path = ({ workshop: "/workshop", prompts: "/prompts", promptOptions: "/prompt-options", maid: "/maid", monitor: "/admin/monitor", camera: "/camera", twitter: "/twitter", appearance: "/appearance", settings: "/settings" })[view] || "/";
     if (window.location.pathname !== path) window.history.replaceState({}, "", path);
   }, [view]);
   useEffect(() => {
@@ -268,7 +264,7 @@ function App() {
             <NavButton
               key={item.key}
               item={item}
-              active={view === item.key}
+              active={view === item.key || (view === "promptOptions" && item.key === "prompts")}
               onClick={() => setView(item.key)}
             />
           ))}
@@ -282,7 +278,7 @@ function App() {
           <i /> LIVE
         </span>
       </header>
-      <main className="workspace">
+      <main className={`workspace workspace-${view}`}>
         {!["home", "appearance", "settings"].includes(view) && <KawaiiPageAtmosphere soft={["workshop", "prompts"].includes(view)} />}
         {view !== "home" && current && (
           <div className="section-head">
@@ -297,7 +293,8 @@ function App() {
         <div className={`tool-home compact-home persistent-workshop ${view === "workshop" ? "" : "persistent-view-hidden"}`} aria-hidden={view !== "workshop"}>
           <ComfyConsole embedded active={view === "workshop"} />
         </div>
-        {view === "prompts" && <PromptManager />}
+        {view === "prompts" && <PromptManager onEditOptions={(category = "") => { setPromptOptionCategory(category); setView("promptOptions"); }} />}
+        {view === "promptOptions" && <PromptOptionManager initialCategory={promptOptionCategory} onBack={() => setView("prompts")} />}
         {view === "maid" &&
           (dashboard.state === "loading" ? (
             <LoadingState />
@@ -367,25 +364,7 @@ function SystemClock() {
 function HomeView({ data, onOpenWorkshop }) {
   return (
     <motion.div className="home-launcher" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: .55 }}>
-      <CuteHomeBackground />
-      <div className="home-motion-stage" aria-hidden="true">
-        <motion.i className="motion-halo halo-a" animate={{ rotate: 360, scale: [1, 1.08, 1], opacity: [.22, .48, .22] }} transition={{ rotate: { duration: 24, repeat: Infinity, ease: "linear" }, scale: { duration: 5.5, repeat: Infinity, ease: "easeInOut" }, opacity: { duration: 5.5, repeat: Infinity } }} />
-        <motion.i className="motion-halo halo-b" animate={{ rotate: -360, scale: [1.06, .94, 1.06] }} transition={{ rotate: { duration: 31, repeat: Infinity, ease: "linear" }, scale: { duration: 7, repeat: Infinity, ease: "easeInOut" } }} />
-        <motion.i className="motion-pulse pulse-a" animate={{ scale: [.75, 1.35], opacity: [.55, 0] }} transition={{ duration: 3.2, repeat: Infinity, ease: "easeOut" }} />
-        <motion.i className="motion-pulse pulse-b" animate={{ scale: [.65, 1.48], opacity: [.38, 0] }} transition={{ duration: 3.2, delay: 1.6, repeat: Infinity, ease: "easeOut" }} />
-        <motion.div className="motion-scanline" animate={{ x: ["-25vw", "125vw"], opacity: [0, .65, 0] }} transition={{ duration: 6.8, repeat: Infinity, repeatDelay: 2.4, ease: "easeInOut" }} />
-      </div>
-      <DynamicShowcase />
-      <motion.div className="home-kawaii-title" initial={{ opacity: 0, filter: "blur(12px)" }} animate={{ opacity: 1, filter: "blur(0px)" }} transition={{ delay: .18, duration: .9 }}><span>✦ KAWAII CREATIVE ROOM ✦</span><strong>今天也要创造可爱呀</strong><small>♡ 灵感、角色与魔法都准备好了 ♡</small></motion.div>
-      <motion.div className="home-sticker-ribbon" aria-hidden="true" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: .5, duration: .7 }}><span>MAGIC</span><i>♡</i><span>DREAM</span><i>✦</i><span>CREATE</span><i>☁</i><span>KAWAII</span></motion.div>
-      <div className="home-cute-notes" aria-hidden="true">
-        <motion.div className="cute-note note-a" initial={{ opacity: 0, scale: .7 }} animate={{ opacity: 1, scale: 1 }} whileHover={{ scale: 1.08 }} transition={{ delay: .35, type: "spring", stiffness: 180, damping: 16 }}><MoonStars weight="fill" /><b>梦境正在加载</b><small>Dreaming in pastel colors</small></motion.div>
-        <motion.div className="cute-note note-b" initial={{ opacity: 0, scale: .7 }} animate={{ opacity: 1, scale: 1 }} whileHover={{ scale: 1.08 }} transition={{ delay: .5, type: "spring", stiffness: 180, damping: 16 }}><FlowerLotus weight="duotone" /><b>今日可爱能量</b><span><i /><i /><i /><i /><i /></span></motion.div>
-        <motion.div className="cute-note note-c" initial={{ opacity: 0, scale: .7 }} animate={{ opacity: 1, scale: 1 }} whileHover={{ scale: 1.08 }} transition={{ delay: .65, type: "spring", stiffness: 180, damping: 16 }}><MagicWand weight="fill" /><b>闪闪灵感</b><small>+ 999 sparkle power</small></motion.div>
-      </div>
-      <div className="home-cloud cloud-left" aria-hidden="true"><Cloud weight="fill" /><span>♡</span></div>
-      <div className="home-cloud cloud-right" aria-hidden="true"><Cloud weight="fill" /><Star weight="fill" /></div>
-      <CuteWorkshopCard onOpen={onOpenWorkshop} />
+      <CuteHomeBackground onOpenWorkshop={onOpenWorkshop} />
     </motion.div>
   );
 }
@@ -439,6 +418,7 @@ function MaidView({ data }) {
       <div className="maid-kawaii-banner" aria-hidden="true"><PawPrint weight="fill" /><span>MY DEAREST MAID</span><Heart weight="fill" /><b>いつもそばにいるよ</b><Sparkle weight="fill" /></div>
       <section className="maid-compact-hero">
         <div className="maid-avatar-stage">
+          <button className="maid-carousel-button" onClick={() => selectRelativeRole(-1)} disabled={roles.length < 2} aria-label="上一个角色"><CaretLeft /></button>
           <div className="portrait-core">
             <div className="orbit orbit-a" />
             <div className="orbit orbit-b" />
@@ -448,20 +428,13 @@ function MaidView({ data }) {
               : <div className="maid-avatar-placeholder"><User /></div>}
             <div className="pulse-line" />
           </div>
+          <button className="maid-carousel-button" onClick={() => selectRelativeRole(1)} disabled={roles.length < 2} aria-label="下一个角色"><CaretRight /></button>
         </div>
         <div className="maid-current-role">
           <span className="live-copy"><i /> {isCurrentRole ? (explicitCurrentRoleId ? "AMA 当前角色" : "默认展示角色") : "角色数据查看"}</span>
           <h1>{selectedName || "未同步角色"}</h1>
           <p>{isCurrentRole ? (explicitCurrentRoleId ? "这是 AMA 当前正在使用的角色。" : "AMA 尚未指定当前角色，网页先展示角色列表中的第一位。") : "当前只切换网页查看的数据，不会修改 AMA 正在使用的角色。"}</p>
-          <div className="maid-role-switcher" aria-label="切换角色">
-            <button onClick={() => selectRelativeRole(-1)} disabled={roles.length < 2} aria-label="上一个角色"><CaretLeft /></button>
-            <div>
-              <span>切换角色</span>
-              <strong>{selectedName || "暂无角色"}</strong>
-              <small>{roles.length ? `${selectedRoleIndex + 1} / ${roles.length}` : "0 / 0"}{isCurrentRole ? " · 当前" : ""}</small>
-            </div>
-            <button onClick={() => selectRelativeRole(1)} disabled={roles.length < 2} aria-label="下一个角色"><CaretRight /></button>
-          </div>
+          <label className="maid-role-select"><span>直接选择角色</span><select aria-label="直接选择角色" value={selectedRoleId} onChange={(event) => setSelectedRoleId(event.target.value)} disabled={!roles.length}>{roles.map((role) => { const id = role.RoleId ?? role.roleId; const name = role.DisplayName ?? role.displayName ?? id; return <option key={id} value={id}>{name}{String(id).toLowerCase() === String(currentRoleId).toLowerCase() ? " · 当前" : ""}</option>; })}</select><small>{roles.length ? `${selectedRoleIndex + 1} / ${roles.length}` : "暂无角色"}</small></label>
           <div className="role-freshness">
             <span>{roleLoading ? "正在加载角色数据" : "角色更新时间"}</span>
             <strong>{roleLoading ? "…" : roleUpdatedAt ? timeAgo(roleUpdatedAt) : "暂无时间"}</strong>

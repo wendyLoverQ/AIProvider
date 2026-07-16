@@ -18,5 +18,6 @@ public class ComfyPresetController {
     }
     @PutMapping("/{id}") public Result<Void> update(@PathVariable long id, @RequestBody ComfyPresetDTO dto) { service.update(id, dto); return Result.success(); }
     @PostMapping("/{id}/default") public Result<Void> setDefault(@PathVariable long id) { service.setDefault(id); return Result.success(); }
+    @DeleteMapping("/{id}/default") public Result<Void> clearDefault(@PathVariable long id) { service.clearDefault(); return Result.success(); }
     @DeleteMapping("/{id}") public Result<Void> delete(@PathVariable long id) { service.delete(id); return Result.success(); }
 }
