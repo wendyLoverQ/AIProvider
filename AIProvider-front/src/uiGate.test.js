@@ -57,4 +57,10 @@ describe("UI release gate", () => {
     expect(remoteCodex).toMatch(/aria-label=\{[\s\S]*"插话"\s*:\s*"发送消息"[\s\S]*\}/);
     expect(remoteCodex).not.toMatch(/<div[^>]+onClick=/);
   });
+
+  it("keeps content operation dialogs inside the desktop viewport", () => {
+    const css = read("ContentOperationsCenter.css");
+    expect(css).toMatch(/\.content-ops-dialog\{[^}]*max-height:\s*calc\(100vh\s*-\s*32px\)/);
+    expect(css).toMatch(/\.content-ops-dialog\{[^}]*overflow-y:\s*auto/);
+  });
 });
