@@ -104,7 +104,7 @@ body { background: var(--bg-page); }
 .prompt-command-center .negative-prompt textarea { min-height: 54px; }
 .prompt-command-center .primary-generate-action { position: sticky; top: -12px; z-index: 5; margin: 0; padding: 12px !important; }
 .configuration-toolbar { display: grid; gap: 8px; padding: 4px 0; }
-.system-settings-view { max-width: 1120px; margin: 0 auto; }
+.system-settings-view { width: 100%; max-width: none; margin: 0; }
 .persistent-view-hidden { display: none !important; }
 .system-settings-shell { margin-top: 18px; }
 .settings-folder-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }

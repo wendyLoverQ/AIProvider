@@ -83,15 +83,17 @@ export default function PromptOptionManager({ onBack, initialCategory = "" }) {
       <main className="prompt-option-editor">
         <header><div><span>{draft.persisted ? "编辑词条" : "新词条"}</span><h3>{draft.name || "未命名词条"}</h3></div><div><button onClick={save} disabled={busy}><FloppyDisk />保存</button><button className="danger" onClick={remove} disabled={busy || !draft.persisted}><Trash />删除</button></div></header>
         <div className="prompt-option-form">
-          <label>词条 ID <small>小写字母、数字、下划线；创建后不可修改</small><input aria-label="词条 ID" value={draft.id} readOnly={draft.persisted} maxLength="64" onChange={(event) => set("id", event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))} placeholder="black_pantyhose" /></label>
-          <label>分类 <small>决定词条在组合器中的位置</small><select aria-label="词条分类" value={draft.category} onChange={(event) => changeCategory(event.target.value)}>{definitions.map((item) => <option key={item.category} value={item.category}>{item.label}</option>)}</select></label>
-          <label>中文名称<input aria-label="中文名称" value={draft.name} maxLength="100" onChange={(event) => set("name", event.target.value)} placeholder="黑丝袜 / 黑色连裤袜" /></label>
-          <label>排序<input aria-label="词条排序" type="number" min="0" max="100000" value={draft.sortOrder} onChange={(event) => set("sortOrder", event.target.value)} /></label>
-          <label>类型<select aria-label="词条类型" value={draft.type} onChange={(event) => changeType(event.target.value)}><option value="positive">正向</option><option value="negative">反向</option></select></label>
-          <label>关联反向词条 ID <small>正向词条可留空</small><input aria-label="关联反向词条 ID" value={draft.reverseId || ""} disabled={draft.type === "negative"} onChange={(event) => set("reverseId", event.target.value)} placeholder="neg_black_thighhighs" /></label>
-          <label className="wide">Prompt 词<textarea aria-label="词条 Prompt" rows="4" maxLength="500" value={draft.prompt ?? draft.positivePrompt ?? ""} onChange={(event) => set("prompt", event.target.value)} placeholder="black pantyhose, sheer black tights" /></label>
-          <label className="check"><input aria-label="词条是否启用" type="checkbox" checked={draft.enabled} onChange={(event) => set("enabled", event.target.checked)} /><span>启用词条</span></label>
-          <label className="check"><input aria-label="词条允许多选" type="checkbox" checked={draft.allowMultiple} disabled /><span>{draft.allowMultiple ? "分类允许多选" : "分类为单选"}</span></label>
+          <label><span className="prompt-option-field-label">词条 ID <small>创建后不可修改</small></span><input aria-label="词条 ID" value={draft.id} readOnly={draft.persisted} maxLength="64" onChange={(event) => set("id", event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))} placeholder="小写字母、数字或下划线" /></label>
+          <label><span className="prompt-option-field-label">分类 <small>决定组合器中的位置</small></span><select aria-label="词条分类" value={draft.category} onChange={(event) => changeCategory(event.target.value)}>{definitions.map((item) => <option key={item.category} value={item.category}>{item.label}</option>)}</select></label>
+          <label><span className="prompt-option-field-label">中文名称</span><input aria-label="中文名称" value={draft.name} maxLength="100" onChange={(event) => set("name", event.target.value)} placeholder="黑丝袜 / 黑色连裤袜" /></label>
+          <label><span className="prompt-option-field-label">排序</span><input aria-label="词条排序" type="number" min="0" max="100000" value={draft.sortOrder} onChange={(event) => set("sortOrder", event.target.value)} /></label>
+          <label><span className="prompt-option-field-label">类型</span><select aria-label="词条类型" value={draft.type} onChange={(event) => changeType(event.target.value)}><option value="positive">正向</option><option value="negative">反向</option></select></label>
+          <label><span className="prompt-option-field-label">关联反向词条 ID <small>正向词条可留空</small></span><input aria-label="关联反向词条 ID" value={draft.reverseId || ""} disabled={draft.type === "negative"} onChange={(event) => set("reverseId", event.target.value)} placeholder="neg_black_thighhighs" /></label>
+          <label className="wide"><span className="prompt-option-field-label">Prompt 词</span><textarea aria-label="词条 Prompt" rows="4" maxLength="500" value={draft.prompt ?? draft.positivePrompt ?? ""} onChange={(event) => set("prompt", event.target.value)} placeholder="black pantyhose, sheer black tights" /></label>
+          <div className="prompt-option-checks wide">
+            <label className="check"><input aria-label="词条是否启用" type="checkbox" checked={draft.enabled} onChange={(event) => set("enabled", event.target.checked)} /><span><b>启用词条</b><small>停用后不再出现在组合器中</small></span></label>
+            <label className="check"><input aria-label="词条允许多选" type="checkbox" checked={draft.allowMultiple} disabled /><span><b>{draft.allowMultiple ? "分类允许多选" : "分类为单选"}</b><small>由当前分类规则自动决定</small></span></label>
+          </div>
         </div>
       </main>
     </section>

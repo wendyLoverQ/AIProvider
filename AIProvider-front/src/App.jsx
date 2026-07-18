@@ -270,7 +270,6 @@ function App() {
   const [promptOptionCategory, setPromptOptionCategory] = useState("");
   const dashboard = useDashboardData();
   const current = NAV.find((item) => item.key === (view === "promptOptions" ? "prompts" : view));
-  const compactShell = view === "workshop";
   useEffect(() => {
     const path = ({ workshop: "/workshop", manualEditor: "/manual-editor", videoEditor: "/video-editor", market: "/market", prompts: "/prompts", promptOptions: "/prompt-options", maid: "/maid", monitor: "/admin/monitor", remoteCodex: "/remote-codex", foundry: "/foundry", camera: "/camera", twitter: "/twitter", contentOperations: "/content-operations", appearance: "/appearance", settings: "/settings" })[view] || "/";
     if (window.location.pathname !== path) window.history.replaceState({}, "", path);
@@ -280,8 +279,8 @@ function App() {
     window.addEventListener("popstate", onPop); return () => window.removeEventListener("popstate", onPop);
   }, []);
   return (
-    <div className={`neural-shell ${compactShell ? "shell-compact" : "shell-expanded"}`}>
-      <aside className={`rail ${compactShell ? "rail-compact" : "rail-expanded"}`}>
+    <div className="neural-shell shell-expanded">
+      <aside className="rail rail-expanded">
         <button
           type="button"
           className={view === "home" ? "rail-brand active" : "rail-brand"}
@@ -308,10 +307,10 @@ function App() {
             </section>
           ))}
         </nav>
-        {!compactShell && <div className="rail-release" aria-label={`前端版本 ${RELEASE_VERSION.frontend}，后端版本 ${RELEASE_VERSION.backend}`}>
+        <div className="rail-release" aria-label={`前端版本 ${RELEASE_VERSION.frontend}，后端版本 ${RELEASE_VERSION.backend}`}>
           <span><b>前端</b>{RELEASE_VERSION.frontend}</span>
           <span><b>后端</b>{RELEASE_VERSION.backend}</span>
-        </div>}
+        </div>
       </aside>
       <header className="mobile-head">
         <div className="mobile-logo">
@@ -321,7 +320,7 @@ function App() {
           <i /> LIVE
         </span>
       </header>
-      <main className={`workspace workspace-${view} ${compactShell ? "workspace-compact-shell" : "workspace-expanded-shell"}`}>
+      <main className={`workspace workspace-${view} workspace-expanded-shell`}>
         {view === "workshop" && <KawaiiPageAtmosphere soft />}
         {view !== "home" && current && (
           <div className="section-head">

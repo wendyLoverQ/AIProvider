@@ -56,15 +56,22 @@ describe("UI release gate", () => {
   it("keeps the desktop shell labeled, grouped, and workshop-safe", () => {
     const app = read("App.jsx");
     const shell = read("DesktopShell.css");
+    const codexTheme = read("CodexTheme.css");
     expect(app).toContain('const NAV_GROUPS = [');
     expect(app).toContain('aria-label="一级工作区"');
     expect(app).toContain('aria-current={active ? "page" : undefined}');
-    expect(app).toContain('const compactShell = view === "workshop"');
+    expect(app).toContain('<div className="neural-shell shell-expanded">');
+    expect(app).toContain('<aside className="rail rail-expanded">');
+    expect(app).not.toContain('const compactShell = view === "workshop"');
     expect(app).toContain('RELEASE_VERSION.frontend');
     expect(app).toContain('RELEASE_VERSION.backend');
     expect(shell).toContain('.rail-expanded .nav-button > span');
     expect(shell).toContain('.workspace-expanded-shell');
-    expect(shell).not.toMatch(/\.workspace-workshop\s/);
+    expect(shell).toContain('--workspace-inline-gutter: 12px');
+    expect(shell).toContain('padding: 0 var(--workspace-inline-gutter) 28px !important');
+    expect(shell).not.toMatch(/\.workspace-workshop\.workspace-expanded-shell\s*\{[^}]*padding/);
+    expect(codexTheme).toMatch(/\.system-settings-view\s*\{[^}]*width:\s*100%[^}]*max-width:\s*none[^}]*margin:\s*0/);
+    expect(codexTheme).not.toMatch(/\.system-settings-view\s*\{[^}]*max-width:\s*1120px/);
     expect(shell).not.toMatch(/\.comfy-local-workbench|\.workflow-panel/);
   });
 

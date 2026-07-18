@@ -1,7 +1,8 @@
-/* Desktop application shell. Image workshop internals are intentionally excluded. */
+/* Shared desktop application shell for every first-level workspace. */
 .neural-shell {
   --shell-rail-expanded: 216px;
   --shell-rail-compact: 76px;
+  --workspace-inline-gutter: 12px;
   --surface-raised: color-mix(in srgb, var(--bg-card) 88%, var(--text-primary));
 }
 
@@ -193,7 +194,7 @@
 
 .workspace-expanded-shell {
   min-width: 0;
-  padding: 0 24px 28px !important;
+  padding: 0 var(--workspace-inline-gutter) 28px !important;
   overflow-x: hidden;
   background: var(--bg-page) !important;
 }
@@ -259,15 +260,15 @@
   border-color: var(--border-interactive) !important;
 }
 
-.workspace-expanded-shell :is(button, input, select, textarea) {
+.workspace-expanded-shell:not(.workspace-workshop) :is(button, input, select, textarea) {
   font-size: 11px !important;
 }
 
-.workspace-expanded-shell label {
+.workspace-expanded-shell:not(.workspace-workshop) label {
   font-size: 11px;
 }
 
-.workspace-expanded-shell small {
+.workspace-expanded-shell:not(.workspace-workshop) small {
   font-size: 10px !important;
   line-height: 1.45;
 }
@@ -276,7 +277,7 @@
   color: var(--text-muted-readable);
 }
 
-.workspace-expanded-shell:not(.workspace-videoEditor):not(.workspace-manualEditor) button {
+.workspace-expanded-shell:not(.workspace-videoEditor):not(.workspace-manualEditor):not(.workspace-workshop) button {
   min-height: 36px;
 }
 
@@ -344,10 +345,13 @@
   transform: none;
 }
 
+.workspace-workshop.workspace-expanded-shell .compact-home {
+  height: calc(100vh - 68px) !important;
+}
+
 @media (max-width: 1100px) and (min-width: 701px) {
   .neural-shell { --shell-rail-expanded: 196px; }
   .rail-expanded { padding-inline: 10px; }
-  .workspace-expanded-shell { padding-inline: 18px !important; }
 }
 
 @media (max-width: 700px) {

@@ -88,12 +88,15 @@ function GeminiSettings({onError}) {
   return <form className="content-ops-panel wide gemini-form" onSubmit={submit}>
     <header><div><span>GEMINI PROVIDER</span><h3>Gemini 内容生成</h3></div><span className={config.apiKeyConfigured?"gemini-key ready":"gemini-key"}>{config.apiKeyConfigured?`密钥已配置 ${config.apiKeyHint || ""}`:"密钥未配置"}</span></header>
     <label className="check-line"><input name="enabled" type="checkbox" defaultChecked={config.enabled}/><span><b>启用 Gemini 生成</b><small>用于相关性判断、小红书内容改写和评论回复</small></span></label>
-    <div className="gemini-field-row"><label>API Key<div className="secret-input"><input name="apiKey" type={showKey?"text":"password"} autoComplete="new-password" placeholder={config.apiKeyConfigured?"留空则保留现有密钥":"输入 Gemini API Key"}/><button type="button" onClick={()=>setShowKey(v=>!v)}>{showKey?"隐藏":"显示"}</button></div><small>仅提交给后端加密保存，页面不会读取现有明文</small></label><label>模型<input name="model" required defaultValue={config.model}/></label></div>
-    <label>API 地址<input name="apiBaseUrl" type="url" required defaultValue={config.apiBaseUrl}/></label>
-    <div className="gemini-field-row compact"><label>生成温度<input name="temperature" type="number" min="0" max="2" step="0.05" required defaultValue={config.temperature}/></label><label>最大输出 Token<input name="maxOutputTokens" type="number" min="128" max="65536" required defaultValue={config.maxOutputTokens}/></label></div>
-    <label>AI 内容相关性判断提示词<textarea name="relevancePrompt" required minLength="20" maxLength="12000" defaultValue={config.relevancePrompt}/><small>Gemini 会先按此规则判断；非 AI 内容不会进入后续改写与发布。</small></label>
-    <label>小红书内容改写提示词<textarea name="contentRewritePrompt" required minLength="20" maxLength="12000" defaultValue={config.contentRewritePrompt}/></label>
-    <label>评论回复提示词<textarea name="commentReplyPrompt" required minLength="20" maxLength="12000" defaultValue={config.commentReplyPrompt}/></label>
+    <fieldset className="gemini-section gemini-provider-section"><legend>连接配置</legend>
+      <div className="gemini-provider-grid"><label className="gemini-api-key">API Key<div className="secret-input"><input name="apiKey" type={showKey?"text":"password"} autoComplete="new-password" placeholder={config.apiKeyConfigured?"留空则保留现有密钥":"输入 Gemini API Key"}/><button type="button" onClick={()=>setShowKey(v=>!v)}>{showKey?"隐藏":"显示"}</button></div><small>仅提交给后端加密保存，页面不会读取现有明文</small></label><label>模型<input name="model" required defaultValue={config.model}/></label><label className="gemini-api-base">API 地址<input name="apiBaseUrl" type="url" required defaultValue={config.apiBaseUrl}/></label></div>
+      <div className="gemini-parameter-grid"><label>生成温度<input name="temperature" type="number" min="0" max="2" step="0.05" required defaultValue={config.temperature}/><small>0 更稳定，2 更发散</small></label><label>最大输出 Token<input name="maxOutputTokens" type="number" min="128" max="65536" required defaultValue={config.maxOutputTokens}/><small>限制单次生成长度</small></label></div>
+    </fieldset>
+    <fieldset className="gemini-section gemini-prompt-section"><legend>提示词模板</legend><div className="gemini-prompt-grid">
+      <label className="gemini-relevance-prompt">AI 内容相关性判断提示词<textarea name="relevancePrompt" required minLength="20" maxLength="12000" defaultValue={config.relevancePrompt}/><small>非 AI 内容不会进入后续改写与发布。</small></label>
+      <label>小红书内容改写提示词<textarea name="contentRewritePrompt" required minLength="20" maxLength="12000" defaultValue={config.contentRewritePrompt}/></label>
+      <label>评论回复提示词<textarea name="commentReplyPrompt" required minLength="20" maxLength="12000" defaultValue={config.commentReplyPrompt}/></label>
+    </div></fieldset>
     <footer><button type="submit">保存 Gemini 配置</button><button type="button" onClick={test} disabled={testing||!config.enabled||!config.apiKeyConfigured}>{testing?"测试中…":"测试连接"}</button>{saved&&<span>{saved}</span>}</footer>
   </form>;
 }

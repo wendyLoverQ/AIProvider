@@ -26,7 +26,7 @@ export default function UiControl() {
     </section>
     <div className="ui-control-layout">
       <section className="ui-token-panel">
-        <div className="ui-token-group ui-preset-group"><h3>主题预设</h3><p>点击即可全站切换，选择后仍可继续微调。</p><div className="ui-preset-grid">
+        <div className="ui-token-group ui-preset-group"><h3>精选主题</h3><p>保留 10 套区分清晰的色彩家族，点击即可全站切换，选择后仍可继续微调。</p><div className="ui-preset-grid">
           {UI_THEME_PRESETS.map((preset) => { const active = isUiThemePreset(theme, preset); return <button type="button" className={active ? "active" : ""} aria-pressed={active} onClick={() => selectPreset(preset)} key={preset.id}>
             <span className="ui-preset-colors">{["--bg-page", "--bg-card", "--accent-primary", "--accent-secondary", "--accent-cyan"].map((name) => <i key={name} style={{ background: preset.theme[name] }} />)}</span>
             <strong>{preset.name}</strong><small>{preset.description}</small>{active && <b><CheckCircle />正在使用</b>}
