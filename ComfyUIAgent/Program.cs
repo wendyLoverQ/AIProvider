@@ -248,47 +248,26 @@ app.MapPost("/api/comfy/restart", async (HttpContext context, IHttpClientFactory
     return Results.Problem("ComfyUI failed to restart before timeout", statusCode: 504);
 });
 
-app.MapPost("/api/tasks/{promptId}/cancel", async (string promptId, IHttpClientFactory factory) => {
+app.MapPost("/api/tasks/{promptId}/cancel", async (string promptId) => {
     promptId = (promptId ?? "").Trim();
     if (promptId.Length == 0 || promptId.Length > 200)
         return Results.BadRequest(new { success = false, message = "任务 ID 不合法" });
-    if (await CancelBridgeQueuedGeneration(promptId))
-        return Results.Ok(new { success = true, promptId, cancelled = true, wasPending = true, wasRunning = false, queueOwner = "BRIDGE" });
-    var client = factory.CreateClient("comfy");
-    async Task<(bool Pending, bool Running)> FindTask() {
-        using var response = await client.GetAsync("queue");
-        response.EnsureSuccessStatusCode();
-        var queue = JsonNode.Parse(await response.Content.ReadAsStringAsync()) as JsonObject
-            ?? throw new InvalidOperationException("ComfyUI queue 返回格式无效");
-        bool Contains(string key) => queue[key] is JsonArray rows && rows.Any(row =>
-            row is JsonArray cells && cells.Count > 1 && string.Equals(cells[1]?.ToString(), promptId, StringComparison.Ordinal));
-        return (Contains("queue_pending"), Contains("queue_running"));
+    if (await CancelPendingBridgeGeneration(promptId))
+        return Results.Json(new { success = true, promptId, state = "CANCELLED", cancelled = true, cancellationRequested = false, queueOwner = "BRIDGE" }, statusCode: StatusCodes.Status202Accepted);
+    var bridgeTask = await FindBridgeQueuedGeneration(promptId);
+    if (bridgeTask?.State is "FAILED" or "SUCCEEDED" or "CANCELLED")
+        return Results.Ok(new { success = true, promptId, cancelled = false, wasPending = false, wasRunning = false, queueOwner = "BRIDGE" });
+    if (bridgeTask == null) {
+        await EnqueueBridgeGeneration(new BridgeQueuedGeneration {
+            PromptId = promptId,
+            CreatedAt = DateTimeOffset.Now,
+            State = "CANCEL_REQUESTED"
+        });
+    } else {
+        await SetBridgeGenerationState(promptId, "CANCEL_REQUESTED");
+        generationQueueSignal.Release();
     }
-    var initial = await FindTask();
-    var pending = initial.Pending;
-    var runningTask = initial.Running;
-    if (!pending && !runningTask)
-        return Results.Ok(new { success = true, promptId, cancelled = false, wasPending = false, wasRunning = false });
-    if (pending) {
-        using var deleteResponse = await client.PostAsJsonAsync("queue", new { delete = new[] { promptId } });
-        deleteResponse.EnsureSuccessStatusCode();
-    }
-    if (runningTask) {
-        using var interruptResponse = await client.PostAsJsonAsync("interrupt", new { prompt_id = promptId });
-        interruptResponse.EnsureSuccessStatusCode();
-    }
-    for (var attempt = 0; attempt < 120; attempt++) {
-        await Task.Delay(250);
-        var current = await FindTask();
-        if (!current.Pending && !current.Running)
-            return Results.Ok(new { success = true, promptId, cancelled = true, wasPending = pending, wasRunning = runningTask });
-        if (current.Running && attempt % 8 == 7) {
-            using var retryResponse = await client.PostAsJsonAsync("interrupt", new { prompt_id = promptId });
-            retryResponse.EnsureSuccessStatusCode();
-        }
-    }
-    return Results.Json(new { success = false, promptId, cancelled = false, wasPending = pending, wasRunning = runningTask,
-        message = "任务已收到中断请求，但当前节点在 30 秒内没有停止，请稍后重试" }, statusCode: StatusCodes.Status409Conflict);
+    return Results.Json(new { success = true, promptId, state = "CANCEL_REQUESTED", cancelled = false, cancellationRequested = true, queueOwner = "BRIDGE" }, statusCode: StatusCodes.Status202Accepted);
 }).DisableAntiforgery();
 
 app.MapGet("/api/tasks/{promptId}/state", async (string promptId, IHttpClientFactory factory) => {
@@ -297,8 +276,7 @@ app.MapGet("/api/tasks/{promptId}/state", async (string promptId, IHttpClientFac
         return Results.BadRequest(new { success = false, message = "生成任务 ID 无效" });
     var bridgeQueued = await FindBridgeQueuedGeneration(promptId);
     if (bridgeQueued != null) {
-        var bridgeState = string.Equals(bridgeQueued.State, "FAILED", StringComparison.Ordinal) ? "FAILED" : "QUEUED";
-        return Results.Ok(new { success = true, promptId, state = bridgeState, tracked = true,
+        return Results.Ok(new { success = true, promptId, state = bridgeQueued.State, tracked = true,
             createdAt = bridgeQueued.CreatedAt, filesConfirmed = false, queueOwner = "BRIDGE", message = bridgeQueued.Error });
     }
     var client = factory.CreateClient("comfy");
@@ -578,6 +556,7 @@ app.MapPost("/api/generate", async (HttpRequest request, IHttpClientFactory fact
         CreatedAt = DateTimeOffset.Now,
         PositivePrompt = form["positivePrompt"].ToString(),
         NegativePrompt = form["negativePrompt"].ToString(),
+        MainModel = Has("checkpoint") ? form["checkpoint"].ToString() : null,
         PromptSchemeName = form["promptSchemeName"].ToString(),
         Loras = ReadSelectedLoras(form["loras"].ToString()),
         WorkflowId = form["workflowId"].ToString(),
@@ -589,12 +568,12 @@ app.MapPost("/api/generate", async (HttpRequest request, IHttpClientFactory fact
         Sampler = form["sampler"].ToString(),
         Scheduler = form["scheduler"].ToString()
     }); } catch {
-        await CancelBridgeQueuedGeneration(promptId);
+        await CancelPendingBridgeGeneration(promptId);
         throw;
     }
-    return Results.Ok(new { success = true, promptId, finalOutputNodeId = finalId, queueOwner = "BRIDGE",
+    return Results.Json(new { success = true, promptId, state = "PENDING", finalOutputNodeId = finalId, queueOwner = "BRIDGE",
         actualSeed = returnedSeed,
-        width = Has("width") ? PostedInt("width") : null, height = Has("height") ? PostedInt("height") : null });
+        width = Has("width") ? PostedInt("width") : null, height = Has("height") ? PostedInt("height") : null }, statusCode: StatusCodes.Status202Accepted);
 }).DisableAntiforgery();
 
 app.MapGet("/api/gallery", async (int? maxItems, int? page, int? pageSize) => {
@@ -938,7 +917,8 @@ async Task WriteBridgeGenerationQueue() {
 async Task EnqueueBridgeGeneration(BridgeQueuedGeneration item) {
     await generationQueueLock.WaitAsync();
     try {
-        generationQueue.RemoveAll(entry => entry.State == "FAILED" && DateTimeOffset.Now - entry.CreatedAt > TimeSpan.FromDays(7));
+        generationQueue.RemoveAll(entry => entry.State is "FAILED" or "SUCCEEDED" or "CANCELLED" &&
+            DateTimeOffset.Now - (entry.CompletedAt ?? entry.CreatedAt) > TimeSpan.FromDays(7));
         if (generationQueue.Count(entry => entry.State == "PENDING") >= 2000)
             throw new InvalidOperationException("Bridge 待生成队列已达到 2000 个任务，请先处理现有队列");
         if (generationQueue.Any(entry => string.Equals(entry.PromptId, item.PromptId, StringComparison.OrdinalIgnoreCase)))
@@ -954,48 +934,65 @@ async Task<BridgeQueuedGeneration?> FindBridgeQueuedGeneration(string promptId) 
     try {
         var item = generationQueue.FirstOrDefault(entry => string.Equals(entry.PromptId, promptId, StringComparison.OrdinalIgnoreCase));
         return item == null ? null : new BridgeQueuedGeneration {
-            PromptId = item.PromptId, ClientId = item.ClientId, CreatedAt = item.CreatedAt, State = item.State, Error = item.Error
+            PromptId = item.PromptId, ClientId = item.ClientId, CreatedAt = item.CreatedAt,
+            SubmittedAt = item.SubmittedAt, CompletedAt = item.CompletedAt, State = item.State, Error = item.Error
         };
     } finally { generationQueueLock.Release(); }
 }
 
-async Task<bool> CancelBridgeQueuedGeneration(string promptId) {
+async Task<bool> CancelPendingBridgeGeneration(string promptId) {
     await generationQueueLock.WaitAsync();
     try {
-        var removed = generationQueue.RemoveAll(entry => string.Equals(entry.PromptId, promptId, StringComparison.OrdinalIgnoreCase)) > 0;
-        if (removed) await WriteBridgeGenerationQueue();
-        return removed;
+        var item = generationQueue.FirstOrDefault(entry => string.Equals(entry.PromptId, promptId, StringComparison.OrdinalIgnoreCase));
+        if (item?.State != "PENDING") return false;
+        item.State = "CANCELLED";
+        item.CompletedAt = DateTimeOffset.Now;
+        item.Error = null;
+        await WriteBridgeGenerationQueue();
+        return true;
     } finally { generationQueueLock.Release(); }
 }
 
-async Task RemoveBridgeQueuedGeneration(string promptId) {
+async Task SetBridgeGenerationState(string promptId, string state, string? error = null) {
     await generationQueueLock.WaitAsync();
     try {
-        if (generationQueue.RemoveAll(entry => string.Equals(entry.PromptId, promptId, StringComparison.OrdinalIgnoreCase)) > 0)
-            await WriteBridgeGenerationQueue();
+        var item = generationQueue.FirstOrDefault(entry => string.Equals(entry.PromptId, promptId, StringComparison.OrdinalIgnoreCase));
+        if (item == null || item.State == state && item.Error == error) return;
+        item.State = state;
+        item.Error = error;
+        if (state == "SUBMITTED" && item.SubmittedAt == null) item.SubmittedAt = DateTimeOffset.Now;
+        if (state is "FAILED" or "SUCCEEDED" or "CANCELLED") item.CompletedAt = DateTimeOffset.Now;
+        await WriteBridgeGenerationQueue();
     } finally { generationQueueLock.Release(); }
 }
 
 async Task FailBridgeQueuedGeneration(string promptId, string error) {
-    await generationQueueLock.WaitAsync();
-    try {
-        var item = generationQueue.FirstOrDefault(entry => string.Equals(entry.PromptId, promptId, StringComparison.OrdinalIgnoreCase));
-        if (item == null) return;
-        item.State = "FAILED";
-        item.Error = error;
-        await WriteBridgeGenerationQueue();
-    } finally { generationQueueLock.Release(); }
+    await SetBridgeGenerationState(promptId, "FAILED", error);
     await AppendAgentLog("error", "generation.queue.failed", error, new { promptId });
+}
+
+string? ReadComfyExecutionFailure(JsonNode? historyItem) {
+    if (historyItem == null) return null;
+    if (historyItem["status"]?["messages"] is JsonArray messages)
+        foreach (var message in messages)
+            if (message is JsonArray cells && cells.Count > 1 && cells[0]?.ToString() == "execution_error")
+                return cells[1]?["exception_message"]?.ToString() ?? cells[1]?["exception_type"]?.ToString() ?? "ComfyUI 执行失败";
+    return string.Equals(historyItem["status"]?["status_str"]?.ToString(), "error", StringComparison.OrdinalIgnoreCase)
+        ? "ComfyUI 执行失败" : null;
 }
 
 async Task ProcessBridgeGenerationQueue(CancellationToken cancellationToken) {
     var factory = app.Services.GetRequiredService<IHttpClientFactory>();
     while (!cancellationToken.IsCancellationRequested) {
-        BridgeQueuedGeneration? item;
+        List<BridgeQueuedGeneration> active;
         await generationQueueLock.WaitAsync(cancellationToken);
-        try { item = generationQueue.FirstOrDefault(entry => entry.State == "PENDING"); }
-        finally { generationQueueLock.Release(); }
-        if (item == null) {
+        try {
+            active = generationQueue
+                .Where(entry => entry.State is "PENDING" or "SUBMITTED" or "QUEUED" or "RUNNING" or "CANCEL_REQUESTED")
+                .OrderBy(entry => entry.CreatedAt)
+                .ToList();
+        } finally { generationQueueLock.Release(); }
+        if (active.Count == 0) {
             await generationQueueSignal.WaitAsync(TimeSpan.FromSeconds(1), cancellationToken);
             continue;
         }
@@ -1007,22 +1004,65 @@ async Task ProcessBridgeGenerationQueue(CancellationToken cancellationToken) {
                 ?? throw new InvalidOperationException("ComfyUI queue 返回格式无效");
             bool Contains(JsonObject source, string key, string id) => source[key] is JsonArray rows && rows.Any(row =>
                 row is JsonArray cells && cells.Count > 1 && string.Equals(cells[1]?.ToString(), id, StringComparison.Ordinal));
-            if (Contains(queue, "queue_running", item.PromptId) || Contains(queue, "queue_pending", item.PromptId)) {
-                await RemoveBridgeQueuedGeneration(item.PromptId);
-                continue;
-            }
-            using var historyResponse = await client.GetAsync($"history/{Uri.EscapeDataString(item.PromptId)}", cancellationToken);
-            historyResponse.EnsureSuccessStatusCode();
-            var history = JsonNode.Parse(await historyResponse.Content.ReadAsStringAsync(cancellationToken)) as JsonObject
-                ?? throw new InvalidOperationException("ComfyUI history 返回格式无效");
-            if (history[item.PromptId] != null) {
-                await RemoveBridgeQueuedGeneration(item.PromptId);
-                continue;
+            foreach (var tracked in active.Where(entry => entry.State != "PENDING")) {
+                if (tracked.State == "CANCEL_REQUESTED") {
+                    if (Contains(queue, "queue_pending", tracked.PromptId)) {
+                        using var deleteResponse = await client.PostAsJsonAsync("queue", new { delete = new[] { tracked.PromptId } }, cancellationToken);
+                        deleteResponse.EnsureSuccessStatusCode();
+                        await SetBridgeGenerationState(tracked.PromptId, "CANCELLED");
+                        continue;
+                    }
+                    if (Contains(queue, "queue_running", tracked.PromptId)) {
+                        using var interruptResponse = await client.PostAsJsonAsync("interrupt", new { prompt_id = tracked.PromptId }, cancellationToken);
+                        interruptResponse.EnsureSuccessStatusCode();
+                        continue;
+                    }
+                    using var cancelledHistoryResponse = await client.GetAsync($"history/{Uri.EscapeDataString(tracked.PromptId)}", cancellationToken);
+                    cancelledHistoryResponse.EnsureSuccessStatusCode();
+                    var cancelledHistory = JsonNode.Parse(await cancelledHistoryResponse.Content.ReadAsStringAsync(cancellationToken)) as JsonObject
+                        ?? throw new InvalidOperationException("ComfyUI history 返回格式无效");
+                    var cancelledHistoryItem = cancelledHistory[tracked.PromptId];
+                    if (cancelledHistoryItem != null && ReadComfyExecutionFailure(cancelledHistoryItem) == null)
+                        await SetBridgeGenerationState(tracked.PromptId, "SUCCEEDED");
+                    else
+                        await SetBridgeGenerationState(tracked.PromptId, "CANCELLED");
+                    continue;
+                }
+                if (Contains(queue, "queue_running", tracked.PromptId)) {
+                    await SetBridgeGenerationState(tracked.PromptId, "RUNNING");
+                    continue;
+                }
+                if (Contains(queue, "queue_pending", tracked.PromptId)) {
+                    await SetBridgeGenerationState(tracked.PromptId, "QUEUED");
+                    continue;
+                }
+                using var historyResponse = await client.GetAsync($"history/{Uri.EscapeDataString(tracked.PromptId)}", cancellationToken);
+                historyResponse.EnsureSuccessStatusCode();
+                var history = JsonNode.Parse(await historyResponse.Content.ReadAsStringAsync(cancellationToken)) as JsonObject
+                    ?? throw new InvalidOperationException("ComfyUI history 返回格式无效");
+                var historyItem = history[tracked.PromptId];
+                if (historyItem == null) continue;
+                var failure = ReadComfyExecutionFailure(historyItem);
+                if (failure != null) await FailBridgeQueuedGeneration(tracked.PromptId, failure);
+                else await SetBridgeGenerationState(tracked.PromptId, "SUCCEEDED");
             }
             var activeCount = (queue["queue_running"] as JsonArray)?.Count ?? 0;
             activeCount += (queue["queue_pending"] as JsonArray)?.Count ?? 0;
             if (activeCount >= ComfySubmissionWindow) {
                 await Task.Delay(750, cancellationToken);
+                continue;
+            }
+            var item = active.FirstOrDefault(entry => entry.State == "PENDING");
+            if (item == null) {
+                await Task.Delay(750, cancellationToken);
+                continue;
+            }
+            if (Contains(queue, "queue_running", item.PromptId)) {
+                await SetBridgeGenerationState(item.PromptId, "RUNNING");
+                continue;
+            }
+            if (Contains(queue, "queue_pending", item.PromptId)) {
+                await SetBridgeGenerationState(item.PromptId, "QUEUED");
                 continue;
             }
             if (await FindBridgeQueuedGeneration(item.PromptId) is not { State: "PENDING" }) continue;
@@ -1042,7 +1082,7 @@ async Task ProcessBridgeGenerationQueue(CancellationToken cancellationToken) {
                 await FailBridgeQueuedGeneration(item.PromptId, "ComfyUI 返回的任务 ID 与 Bridge 预分配 ID 不一致");
                 continue;
             }
-            await RemoveBridgeQueuedGeneration(item.PromptId);
+            await SetBridgeGenerationState(item.PromptId, "SUBMITTED");
         } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
             return;
         } catch (HttpRequestException) {
@@ -1050,7 +1090,8 @@ async Task ProcessBridgeGenerationQueue(CancellationToken cancellationToken) {
         } catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested) {
             await Task.Delay(1000, cancellationToken);
         } catch (Exception exception) {
-            await FailBridgeQueuedGeneration(item.PromptId, exception.Message);
+            await AppendAgentLog("error", "generation.queue.reconcile", exception.Message, new { exception = exception.ToString() });
+            await Task.Delay(1000, cancellationToken);
         }
     }
 }
@@ -1297,14 +1338,20 @@ JsonObject BuildLocalWorkflow(string relative, DateTime modifiedAtUtc, JsonObjec
     if (positiveInput != null) Bind("positivePrompt", positive, positiveInput);
     if (negativeInput != null) Bind("negativePrompt", negative, negativeInput);
 
-    var latent = Find(node => node["class_type"]?.GetValue<string>() == "EmptyLatentImage" && node["inputs"]?["width"] != null && node["inputs"]?["height"] != null);
+    var latent = Find(node => node["class_type"]?.GetValue<string>() is string type &&
+        (type.Equals("EmptyLatentImage", StringComparison.OrdinalIgnoreCase) ||
+         type.Equals("EmptySD3LatentImage", StringComparison.OrdinalIgnoreCase)) &&
+        node["inputs"]?["width"] != null && node["inputs"]?["height"] != null);
     Bind("width", latent, "width");
     Bind("height", latent, "height");
     if (latent?.Value["inputs"]?["batch_size"] != null) Bind("batchSize", latent, "batch_size");
 
     var sampler = Find(node => node["class_type"]?.GetValue<string>() is string type &&
         (type.Equals("KSampler", StringComparison.OrdinalIgnoreCase) || type.Equals("KSamplerAdvanced", StringComparison.OrdinalIgnoreCase)));
-    Bind("seed", sampler, sampler?.Value["inputs"]?["seed"] != null ? "seed" : "noise_seed");
+    var randomNoise = Find(node => node["class_type"]?.GetValue<string>()?.Equals("RandomNoise", StringComparison.OrdinalIgnoreCase) == true &&
+        node["inputs"]?["noise_seed"] != null);
+    var seedNode = sampler ?? randomNoise;
+    Bind("seed", seedNode, sampler != null && sampler.Value.Value["inputs"]?["seed"] != null ? "seed" : "noise_seed");
     Bind("steps", sampler, "steps");
     Bind("cfg", sampler, "cfg");
     Bind("sampler", sampler, "sampler_name");
@@ -1546,7 +1593,7 @@ List<GalleryItem> ScanMigratedAssets(int maxItems) {
             var embedded = ReadEmbeddedGeneration(path);
             return new GalleryItem {
                 Id = "asset-" + Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(relative.ToLowerInvariant()))).ToLowerInvariant(),
-                Source = "asset", Prompt = embedded?.PositivePrompt, NegativePrompt = embedded?.NegativePrompt,
+                Source = "asset", Prompt = embedded?.PositivePrompt, NegativePrompt = embedded?.NegativePrompt, MainModel = embedded?.MainModel,
                 CreatedAt = file.CreatedAt, Seed = embedded?.Seed, Steps = embedded?.Steps, Cfg = embedded?.Cfg,
                 Sampler = embedded?.Sampler, Scheduler = embedded?.Scheduler, Images = new List<GalleryImage> { ToGalleryImage(file) }
             };
@@ -1660,10 +1707,14 @@ async Task<List<GalleryItem>> ScanGallery(int maxItems, bool trashedOnly = false
             foreach (var file in matches) assigned.Add(file.Path);
             var confirmed = generation.Files.Select(NormalizeRelativePath).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             if (!confirmed.SequenceEqual(generation.Files, StringComparer.OrdinalIgnoreCase)) { generation.Files = confirmed; changed = true; }
+            if (string.IsNullOrWhiteSpace(generation.MainModel)) {
+                generation.MainModel = ReadEmbeddedGeneration(matches[0].FullPath)?.MainModel;
+                if (!string.IsNullOrWhiteSpace(generation.MainModel)) changed = true;
+            }
             items.Add(new GalleryItem {
                 Id = generation.PromptId, PromptId = generation.PromptId,
                 Prompt = generation.PositivePrompt,
-                NegativePrompt = generation.NegativePrompt, PromptSchemeName = generation.PromptSchemeName, CreatedAt = generation.CreatedAt,
+                NegativePrompt = generation.NegativePrompt, MainModel = generation.MainModel, PromptSchemeName = generation.PromptSchemeName, CreatedAt = generation.CreatedAt,
                 GenerationCompletedAt = generation.GenerationCompletedAt, GenerationDurationMs = generation.GenerationDurationMs,
                 Loras = generation.Loras,
                 Width = generation.Width, Height = generation.Height, Seed = generation.Seed, Steps = generation.Steps,
@@ -1675,7 +1726,7 @@ async Task<List<GalleryItem>> ScanGallery(int maxItems, bool trashedOnly = false
             var id = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(file.Path.ToLowerInvariant()))).ToLowerInvariant();
             var embedded = ReadEmbeddedGeneration(file.FullPath);
             items.Add(new GalleryItem {
-                Id = id, Prompt = embedded?.PositivePrompt, NegativePrompt = embedded?.NegativePrompt, Loras = embedded?.Loras ?? new List<GenerationLora>(),
+                Id = id, Prompt = embedded?.PositivePrompt, NegativePrompt = embedded?.NegativePrompt, MainModel = embedded?.MainModel, Loras = embedded?.Loras ?? new List<GenerationLora>(),
                 CreatedAt = file.CreatedAt, Width = embedded?.Width, Height = embedded?.Height, Seed = embedded?.Seed,
                 Steps = embedded?.Steps, Cfg = embedded?.Cfg, Sampler = embedded?.Sampler, Scheduler = embedded?.Scheduler,
                 Images = new List<GalleryImage> { ToGalleryImage(file) }
@@ -1743,8 +1794,13 @@ GalleryGenerationRecord? ReadEmbeddedGeneration(string path) {
         long? Long(string name) => long.TryParse(inputs[name]?.ToString(), out var value) ? value : null;
         int? Int(string name) => int.TryParse(inputs[name]?.ToString(), out var value) ? value : null;
         double? Double(string name) => double.TryParse(inputs[name]?.ToString(), out var value) ? value : null;
+        var modelEntry = prompt.FirstOrDefault(entry =>
+            entry.Value?["class_type"]?.ToString() is string nodeType &&
+            (nodeType.Contains("Checkpoint", StringComparison.OrdinalIgnoreCase) || nodeType.Contains("UNET", StringComparison.OrdinalIgnoreCase)) &&
+            (entry.Value?["inputs"]?["ckpt_name"] != null || entry.Value?["inputs"]?["unet_name"] != null));
         return new GalleryGenerationRecord {
             PositivePrompt = LinkedText("positive"), NegativePrompt = LinkedText("negative"),
+            MainModel = modelEntry.Value?["inputs"]?["ckpt_name"]?.ToString() ?? modelEntry.Value?["inputs"]?["unet_name"]?.ToString(),
             Seed = Long("seed") ?? Long("noise_seed"), Steps = Int("steps"), Cfg = Double("cfg"),
             Sampler = inputs["sampler_name"]?.ToString(), Scheduler = inputs["scheduler"]?.ToString()
         };
@@ -2023,6 +2079,8 @@ sealed class BridgeQueuedGeneration {
     public JsonObject Prompt { get; set; } = new();
     public string ClientId { get; set; } = "";
     public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? SubmittedAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
     public string State { get; set; } = "PENDING";
     public string? Error { get; set; }
 }
@@ -2034,6 +2092,7 @@ sealed class GalleryGenerationRecord {
     public long? GenerationDurationMs { get; set; }
     public string? PositivePrompt { get; set; }
     public string? NegativePrompt { get; set; }
+    public string? MainModel { get; set; }
     public string? PromptSchemeName { get; set; }
     public List<GenerationLora> Loras { get; set; } = new();
     public string? WorkflowId { get; set; }
@@ -2067,6 +2126,7 @@ sealed class GalleryItem {
     public string Source { get; set; } = "output";
     public string Prompt { get; set; } = "";
     public string? NegativePrompt { get; set; }
+    public string? MainModel { get; set; }
     public string? PromptSchemeName { get; set; }
     public List<GenerationLora> Loras { get; set; } = new();
     public DateTimeOffset CreatedAt { get; set; }

@@ -39,7 +39,7 @@ describe("ComfyUIAgent generation validation boundary", () => {
     expect(source).not.toContain("validationDetails");
     expect(source).toContain("lets ComfyUI perform the authoritative node/input validation");
     expect(source).toContain("await FailBridgeQueuedGeneration(item.PromptId, $\"ComfyUI 拒绝任务");
-    expect(source).toContain('state = bridgeState');
+    expect(source).toContain('state = bridgeQueued.State');
     expect(source).toContain('message = bridgeQueued.Error');
   });
 });
@@ -73,6 +73,30 @@ describe("ComfyUIAgent main model discovery", () => {
     expect(source).toContain('type.Contains("UNET"');
     expect(source).toContain('node["inputs"]?["unet_name"]');
     expect(source).toContain('Bind("checkpoint", primaryModel, checkpoint != null ? "ckpt_name" : "unet_name", "主模型")');
+    expect(source).toContain('MainModel = Has("checkpoint") ? form["checkpoint"].ToString() : null');
+    expect(source).toContain('public string? MainModel { get; set; }');
+  });
+});
+
+describe("ComfyUIAgent advanced sampler workflow discovery", () => {
+  it("maps Flux latent size and RandomNoise to the standard size and seed controls", () => {
+    const source = readFileSync(sourcePath, "utf8");
+    expect(source).toContain('type.Equals("EmptySD3LatentImage", StringComparison.OrdinalIgnoreCase)');
+    expect(source).toContain('?.Equals("RandomNoise", StringComparison.OrdinalIgnoreCase) == true');
+    expect(source).toContain('var seedNode = sampler ?? randomNoise;');
+    expect(source).toContain('Bind("seed", seedNode');
+  });
+});
+
+describe("ComfyUIAgent durable generation ownership", () => {
+  it("retains accepted tasks through terminal state and cancels asynchronously", () => {
+    const source = readFileSync(sourcePath, "utf8");
+    expect(source).toContain('await SetBridgeGenerationState(item.PromptId, "SUBMITTED")');
+    expect(source).toContain('entry.State is "PENDING" or "SUBMITTED" or "QUEUED" or "RUNNING" or "CANCEL_REQUESTED"');
+    expect(source).toContain('await SetBridgeGenerationState(tracked.PromptId, "SUCCEEDED")');
+    expect(source).toContain('state = "CANCEL_REQUESTED"');
+    expect(source).toContain('statusCode: StatusCodes.Status202Accepted');
+    expect(source).not.toContain('await RemoveBridgeQueuedGeneration(item.PromptId)');
   });
 });
 

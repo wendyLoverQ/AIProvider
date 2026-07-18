@@ -141,6 +141,12 @@ describe("Comfy image generation flow", () => {
       if (url === "blob:done") return new Response(new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], { type: "image/png" }), { headers: { "Content-Type": "image/png" } });
       if (url.endsWith("/api/folders")) return json({ folders: ["aimaid", "favorites"] });
       if (url.endsWith("/api/migration/settings")) return json({ directory: "C:\\Users\\49213\\Desktop\\A\\ai成品" });
+      if (url.includes("/api/tasks/") && url.endsWith("/state")) {
+        const promptId = decodeURIComponent(url.split("/api/tasks/")[1].replace("/state", ""));
+        if (promptId === PROMPT_ID) return json({ success: true, state: submitted ? "SUCCEEDED" : "QUEUED", tracked: true });
+        if (promptId === "external-prompt") return json({ success: true, state: externalGalleryReady ? "COMPLETED" : "RUNNING", tracked: true });
+        return json({ success: true, state: "UNKNOWN", tracked: false });
+      }
       if (url.includes("/api/tasks/") && url.endsWith("/cancel") && options.method === "POST") {
         cancelledTask = decodeURIComponent(url.split("/api/tasks/")[1].replace("/cancel", ""));
         return json({ success: true, cancelled: true, promptId: cancelledTask });
@@ -576,6 +582,7 @@ describe("Comfy image generation flow", () => {
     await screen.findByText("当前 4 个任务");
     const taskIds = Array.from(document.querySelectorAll(".queue-pill")).map((item) => item.title.split(" · ").pop());
     expect(taskIds).toEqual(["running-task", "queued-first", "queued-second", "queued-third"]);
+    expect(screen.getByRole("button", { name: "开始生成" }).disabled).toBe(false);
     expect(screen.getByText("读取中")).toBeTruthy();
     expect(screen.queryByText(/查询当前任务失败/)).toBeNull();
   });

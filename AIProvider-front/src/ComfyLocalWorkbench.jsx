@@ -33,7 +33,7 @@ const BRIDGE = "http://127.0.0.1:32145";
 const BRIDGE_LAUNCH_URL = "aiprovider-bridge://start";
 const initial = FALLBACK_FORM;
 const VIEWER_ZOOM_STEP = 0.2;
-const taskStateRank = { RUNNING: 0, QUEUED: 1 };
+const taskStateRank = { RUNNING: 0, CANCEL_REQUESTED: 1, QUEUED: 2, FAILED: 3 };
 function PromptViewToggle({ value, onChange }) {
   return <div className="prompt-view-toggle" aria-label="Prompt 显示方式">
     <button type="button" aria-pressed={value === "zh"} onClick={() => onChange("zh")}>中文映射</button>
@@ -144,7 +144,7 @@ const loraDisplayName = (value) => String(value || "").replace(/\\/g, "/").split
 const assetRecordToGalleryEntry = (item) => ({
   id: `asset-${item.id}`, assetId: item.id, source: "asset", platform: item.platform,
   status: item.status, trashOriginalStatus: item.trashOriginalStatus,
-  prompt: item.prompt, negativePrompt: item.negativePrompt, loras: parseLoras(item.lorasJson), seed: item.seed, steps: item.steps,
+  prompt: item.prompt, negativePrompt: item.negativePrompt, mainModel: item.mainModel, loras: parseLoras(item.lorasJson), seed: item.seed, steps: item.steps,
   cfg: item.cfg, sampler: item.sampler, scheduler: item.scheduler, workflowId: item.workflowId,
   width: item.width, height: item.height, createdAt: item.generatedAt || item.createdAt,
   generationCompletedAt: item.generationCompletedAt, generationDurationMs: item.generationDurationMs,
@@ -448,9 +448,11 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     if (timer) clearInterval(timer);
     polling.current.delete(id);
     taskMissingChecks.current.delete(id);
-    setTasks((current) => current.map((task) => String(task.id) === id ? { ...task, state: "FAILED", failureMessage: message, reconciling: false } : task));
-    const saved = JSON.parse(localStorage.getItem("comfy_active_tasks") || "[]");
-    localStorage.setItem("comfy_active_tasks", JSON.stringify((Array.isArray(saved) ? saved : []).filter((task) => String(task.id) !== id)));
+    setTasks((current) => {
+      const next = current.map((task) => String(task.id) === id ? { ...task, state: "FAILED", failureMessage: message, reconciling: false } : task);
+      localStorage.setItem("comfy_active_tasks", JSON.stringify(next.filter((task) => !task.external && task.state !== "SUCCEEDED")));
+      return next;
+    });
     setError(`任务失败：${message}`);
   };
   const cancelTask = async (task) => {
@@ -458,12 +460,21 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     setCancelingTask(promptId);
     setError("");
     try {
-      const response = await call(`/api/tasks/${encodeURIComponent(promptId)}/cancel`, { method: "POST" }, 45000);
+      const response = await call(`/api/tasks/${encodeURIComponent(promptId)}/cancel`, { method: "POST" }, 10000);
       const data = await readJson(response, "取消本机任务接口");
       if (!response.ok || !data.success) throw new Error(data.message || `取消任务失败（HTTP ${response.status}）`);
-      removeActiveTask(promptId);
-      externalTaskIds.current.delete(promptId);
-      setNotice(data.cancelled ? "任务已取消" : "任务已结束，已从列表移除");
+      if (data.state === "CANCEL_REQUESTED") {
+        setTasks((current) => {
+          const next = current.map((item) => String(item.id) === promptId ? { ...item, state: "CANCEL_REQUESTED", bridgeState: "CANCEL_REQUESTED", reconciling: true } : item);
+          localStorage.setItem("comfy_active_tasks", JSON.stringify(next.filter((item) => !item.external && item.state !== "SUCCEEDED")));
+          return next;
+        });
+        setNotice("Bridge 已接收取消请求");
+      } else {
+        removeActiveTask(promptId);
+        externalTaskIds.current.delete(promptId);
+        setNotice(data.cancelled ? "任务已取消" : "任务已结束，已从列表移除");
+      }
     } catch (e) {
       setError(`取消任务失败：${e.message}`);
     } finally {
@@ -489,9 +500,8 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       setLauncher("ready");
       setRunning(Boolean(status.running));
       setError("");
-      if (!status.running) {
-        clearActiveTasks();
-      }
+      if (!status.running)
+        setTasks((current) => current.map((task) => ["QUEUED", "RUNNING"].includes(task.state) ? { ...task, reconciling: true } : task));
       if (!historyLoaded.current) {
         historyLoaded.current = true;
         loadGalleryPage(config.token, "output", 1).catch((e) => {
@@ -939,7 +949,8 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         progress: null,
       })),
     );
-    saved.forEach((item) => poll(item.id, authToken, item.finalOutputNodeId, item.progressPlan, item));
+    saved.filter((item) => !["FAILED", "SUCCEEDED", "CANCELLED"].includes(item.state))
+      .forEach((item) => poll(item.id, authToken, item.finalOutputNodeId, item.progressPlan, item));
     localStorage.removeItem("comfy_active_task");
   };
   const editCurrentPreset = () => {
@@ -1426,7 +1437,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       const activeIds = new Set(activeTasks.map((task) => String(task.id)));
       const retainedLocalTasks = current.filter((task) => !task.external && !activeIds.has(String(task.id)) && task.state !== "SUCCEEDED");
       const next = sortActiveTasks([...activeTasks, ...retainedLocalTasks]);
-      localStorage.setItem("comfy_active_tasks", JSON.stringify(next.filter((task) => !task.external && !["SUCCEEDED", "FAILED"].includes(task.state))));
+      localStorage.setItem("comfy_active_tasks", JSON.stringify(next.filter((task) => !task.external && task.state !== "SUCCEEDED")));
       return next;
     });
     if (completedExternalTasks.length)
@@ -1535,7 +1546,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         );
         return next;
       });
-      fetch("/api/comfy-tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ promptId: nextTask.id, workflowId: nextTask.workflowId, workflowName: nextTask.workflowName, promptSchemeName: nextTask.promptSchemeName, positivePrompt: submissionForm.positivePrompt || "", negativePrompt: submissionForm.negativePrompt || "", parametersJson: JSON.stringify(submissionForm), inputFile: nextTask.inputImages?.[0]?.name || null, inputFileName: nextTask.inputImages?.[0]?.name || null, inputSha256, status: "QUEUED" }) }).catch((exception) => reportLocalError("comfy-task-record", exception, { promptId: nextTask.id }));
+      fetch("/api/comfy-tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ promptId: nextTask.id, workflowId: nextTask.workflowId, workflowName: nextTask.workflowName, promptSchemeName: nextTask.promptSchemeName, positivePrompt: submissionForm.positivePrompt || "", negativePrompt: submissionForm.negativePrompt || "", mainModel: submissionForm.checkpoint || "", parametersJson: JSON.stringify(submissionForm), inputFile: nextTask.inputImages?.[0]?.name || null, inputFileName: nextTask.inputImages?.[0]?.name || null, inputSha256, status: "QUEUED" }) }).catch((exception) => reportLocalError("comfy-task-record", exception, { promptId: nextTask.id }));
       poll(data.promptId, token, data.finalOutputNodeId, progressPlan, nextTask);
       return nextTask;
   };
@@ -1598,6 +1609,30 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     if (polling.current.has(promptId)) return;
     const timer = setInterval(async () => {
       try {
+        const authoritativeResponse = await call(`/api/tasks/${encodeURIComponent(promptId)}/state`, {}, 5000, authToken);
+        const authoritativeState = await readJson(authoritativeResponse, "Bridge 任务状态接口");
+        if (!authoritativeResponse.ok)
+          throw new Error(authoritativeState.message || `Bridge 任务状态查询失败（HTTP ${authoritativeResponse.status}）`);
+        if (authoritativeState.state === "FAILED") {
+          failActiveTask(promptId, authoritativeState.message || "Bridge 已明确报告任务执行失败");
+          return;
+        }
+        if (authoritativeState.state === "CANCELLED") {
+          removeActiveTask(promptId);
+          setNotice("任务已取消");
+          return;
+        }
+        if (["PENDING", "SUBMITTED", "QUEUED", "TRACKED", "CANCEL_REQUESTED"].includes(authoritativeState.state)) {
+          taskMissingChecks.current.delete(String(promptId));
+          setTasks((current) => current.map((task) => String(task.id) === String(promptId) ? {
+            ...task,
+            state: authoritativeState.state === "CANCEL_REQUESTED" ? "CANCEL_REQUESTED" : "QUEUED",
+            bridgeState: authoritativeState.state,
+            progress: 0,
+            reconciling: authoritativeState.state === "SUBMITTED",
+          } : task));
+          return;
+        }
         const historyResponse = await call(
             `/comfy/history/${encodeURIComponent(promptId)}`,
             {},
@@ -2056,6 +2091,17 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         return {
           ...asset,
           status: sourceStatus,
+          prompt: source?.prompt,
+          negativePrompt: source?.negativePrompt,
+          mainModel: source?.mainModel,
+          lorasJson: JSON.stringify(parseLoras(source?.loras)),
+          seed: source?.seed,
+          steps: source?.steps,
+          cfg: source?.cfg,
+          sampler: source?.sampler,
+          scheduler: source?.scheduler,
+          workflowId: source?.workflowId,
+          generatedAt: source?.createdAt,
           generationCompletedAt: source?.generationCompletedAt,
           generationDurationMs: source?.generationDurationMs,
         };
@@ -2481,6 +2527,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   const sortedTasks = sortActiveTasks(tasks);
   const runningTaskCount = tasks.filter((task) => task.state === "RUNNING").length;
   const queuedTaskCount = tasks.filter((task) => task.state === "QUEUED").length;
+  const failedTaskCount = tasks.filter((task) => task.state === "FAILED").length;
   const activeTask = sortedTasks[0] || null;
   const activeTaskWorkflowName = activeTask
     ? activeTask.workflowName || workflows.find((workflow) => workflow.id === (activeTask.workflowId || activeTask.form?.workflowId))?.name || (activeTask.external ? "外部 ComfyUI 工作流" : "当前工作流")
@@ -2634,7 +2681,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
             appliedPresetTitle={appliedPresetTitle} presetSaveName={presetSaveName} onPresetSaveNameChange={setPresetSaveName}
             onSavePreset={savePromptPreset} onReloadPreset={reloadCurrentPreset} onEditPreset={editCurrentPreset} presetSaving={presetSaving} presetReloading={presetReloading}
             onLuckyGenerate={luckyGenerate} luckyLoading={luckyLoading} onBatchGenerate={batchPromptGenerate} onGenerate={generate}
-            disabled={{ blocked: busy || batchScheduling || !running || !token || !activeWorkflow, busy: busy || batchScheduling }}
+            disabled={{ blocked: batchScheduling || !running || !token || !activeWorkflow, busy: batchScheduling }}
           />
         </section>
         <section className="comfy-history">
@@ -2737,35 +2784,35 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
           </div>
           {tasks.length > 0 && (
             <div className="task-queue-area">
-              <div className="task-queue-overview"><strong>当前 {tasks.length} 个任务</strong><span>执行中 {runningTaskCount}</span><span>排队 {queuedTaskCount}</span>{batchProgress && <span>Bridge 已接收 {batchProgress.submitted} / {batchProgress.total}</span>}{batchScheduling && <button type="button" onClick={() => { batchStopRequested.current = true; }}>停止加入 Bridge</button>}</div>
+              <div className="task-queue-overview"><strong>当前 {tasks.length} 个任务</strong><span>执行中 {runningTaskCount}</span><span>排队 {queuedTaskCount}</span>{failedTaskCount > 0 && <span>失败 {failedTaskCount}</span>}{batchProgress && <span>Bridge 已接收 {batchProgress.submitted} / {batchProgress.total}</span>}{batchScheduling && <button type="button" onClick={() => { batchStopRequested.current = true; }}>停止加入 Bridge</button>}</div>
               <div className="task-queue-strip">
               {sortedTasks.map((task) => (
-                <div
+                <article
                   key={task.id}
                   className={`queue-pill ${task.state.toLowerCase()}`}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setTaskDetail(task)}
-                  onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setTaskDetail(task); } }}
                   title={`${task.workflowName || workflows.find((workflow) => workflow.id === (task.workflowId || task.form?.workflowId))?.name || (task.external ? "外部 ComfyUI 工作流" : "当前工作流")} · ${task.id}`}
                 >
-                  <div className="queue-pill__info">
-                    <span>
-                      {task.external
-                        ? task.state === "QUEUED" ? "ComfyUI 排队" : "ComfyUI 运行"
-                        : task.state === "QUEUED"
-                        ? "排队"
-                        : task.state === "RUNNING"
-                          ? "生成中"
-                          : task.state === "FAILED" ? "失败" : "完成"}
+                  <button type="button" className="queue-pill__detail" onClick={() => setTaskDetail(task)} aria-label={`查看任务 ${task.id}`}>
+                    <span className="queue-pill__info">
+                      <span>
+                        {task.external
+                          ? task.state === "QUEUED" ? "ComfyUI 排队" : "ComfyUI 运行"
+                          : task.state === "CANCEL_REQUESTED" ? "取消中"
+                            : task.state === "QUEUED" && task.bridgeState === "PENDING" ? "Bridge 排队"
+                              : task.state === "QUEUED" && task.bridgeState === "SUBMITTED" ? "等待 ComfyUI 确认"
+                                : task.state === "QUEUED" ? "ComfyUI 排队"
+                                  : task.state === "RUNNING" ? "生成中"
+                                    : task.state === "FAILED" ? "失败" : "完成"}
+                      </span>
+                      <small>{task.workflowName || workflows.find((workflow) => workflow.id === (task.workflowId || task.form?.workflowId))?.name || (task.external ? "外部 ComfyUI 工作流" : "当前工作流")}</small>
+                      <em>已运行 {formatTaskElapsed(task, taskClock)}</em>
                     </span>
-                    <small>{task.workflowName || workflows.find((workflow) => workflow.id === (task.workflowId || task.form?.workflowId))?.name || (task.external ? "外部 ComfyUI 工作流" : "当前工作流")}</small>
-                    <em>已运行 {formatTaskElapsed(task, taskClock)}</em>
-                  </div>
-                  <strong>{task.progress === null ? "读取中" : `${task.progress}%`}</strong>
+                    <strong>{task.progress === null ? "读取中" : `${task.progress}%`}</strong>
+                  </button>
                   {["QUEUED", "RUNNING"].includes(task.state) && <button className="queue-pill__cancel" type="button" aria-label={`取消任务 ${task.id}`} title="取消任务" disabled={cancelingTask === String(task.id)} onClick={(event) => { event.stopPropagation(); cancelTask(task); }}><X /></button>}
+                  {task.state === "FAILED" && <button className="queue-pill__cancel" type="button" aria-label={`移除失败任务 ${task.id}`} title="移除失败任务" onClick={() => removeActiveTask(String(task.id))}><X /></button>}
                   <i style={{ width: `${task.progress ?? 0}%` }} />
-                </div>
+                </article>
               ))}
               </div>
             </div>
@@ -2883,15 +2930,16 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       {batchOperation.open && <div className="history-modal batch-operation-modal" onMouseDown={(event) => event.target === event.currentTarget && !batchOperation.busy && setBatchOperation({ open: false, workflowId: "", busy: false })}>
         <div className="batch-operation-panel"><header><div><span>批量操作</span><h3>为 {selectedImages.size} 张图片创建任务</h3></div><button type="button" disabled={batchOperation.busy} onClick={() => setBatchOperation({ open: false, workflowId: "", busy: false })}><X /></button></header><label><span>选择输入图片工作流</span><select value={batchOperation.workflowId} onChange={(event) => setBatchOperation((current) => ({ ...current, workflowId: event.target.value }))}>{batchInputWorkflows.map((workflow) => <option key={workflow.id} value={workflow.id}>{workflow.name || workflow.id}</option>)}</select></label><p>每张图片会建立一个独立任务；提交前会使用图片 SHA-256 和工作流检查是否已经生成过。</p><footer><button disabled={batchOperation.busy} onClick={() => setBatchOperation({ open: false, workflowId: "", busy: false })}>取消</button><button className="confirm-batch-operation" disabled={batchOperation.busy || !batchOperation.workflowId} onClick={runBatchOperation}>{batchOperation.busy ? "检查并提交中…" : "开始批量操作"}</button></footer></div>
       </div>}
-      {taskDetail && <div className="history-modal task-detail-modal" onMouseDown={(event) => event.target === event.currentTarget && setTaskDetail(null)}>
+      {taskDetail && <div className="history-modal task-detail-modal" role="dialog" aria-modal="true" aria-labelledby="task-detail-title" onMouseDown={(event) => event.target === event.currentTarget && setTaskDetail(null)}>
         <div className="task-detail-panel">
-          <header><div><span>任务详情</span><h3>{taskDetail.workflowName || "当前工作流"}</h3></div><PromptViewToggle value={detailPromptView} onChange={setDetailPromptView} /><button type="button" onClick={() => setTaskDetail(null)} aria-label="关闭任务详情"><X /></button></header>
+          <header><div className="detail-header-title"><span>任务详情</span><h3 id="task-detail-title">{taskDetail.workflowName || "当前工作流"}</h3></div><div className="detail-header-actions"><PromptViewToggle value={detailPromptView} onChange={setDetailPromptView} /><button className="detail-close-button" type="button" onClick={() => setTaskDetail(null)} aria-label="关闭任务详情"><X /></button></div></header>
           <div className="task-detail-summary">
             <span><small>状态</small>{taskDetail.state === "RUNNING" ? "生成中" : taskDetail.state === "QUEUED" ? "排队中" : taskDetail.state === "FAILED" ? "失败" : taskDetail.state}</span>
             <span><small>任务类型</small>{taskDetail.sourceType === "COMFYUI" || taskDetail.external ? "ComfyUI 外部任务" : "AIProvider 创建任务"}</span>
             <span><small>已运行</small>{formatTaskElapsed(taskDetail, taskClock)}</span>
             <span><small>进度</small>{taskDetail.progress == null ? "读取中" : `${Math.round(taskDetail.progress)}%`}</span>
             <span><small>Prompt 方案</small>{taskDetail.promptSchemeName || taskDetail.form?.promptSchemeName || "未使用方案"}</span>
+            <span><small>主模型</small>{taskDetail.mainModel || taskDetail.form?.checkpoint || "未记录"}</span>
             <span><small>任务 ID</small>{taskDetail.id}</span>
           </div>
           {taskDetail.progressDetail && <div className="task-detail-progress"><strong>{taskDetail.progressDetail.currentNode?.name || "当前节点"}</strong><span>{taskDetail.progressDetail.completedNodes || 0} / {taskDetail.progressDetail.totalNodes || 0} 个节点</span></div>}
@@ -2908,12 +2956,13 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
           <footer><button onClick={() => setDeleteConfirm(null)}>取消</button><button className="danger" onClick={confirmDelete}>确认删除</button></footer>
         </div>
       </div>}
-      {infoDetail && <div className="history-modal image-info-modal" onMouseDown={(event) => event.target === event.currentTarget && setInfoDetail(null)}>
+      {infoDetail && <div className="history-modal image-info-modal" role="dialog" aria-modal="true" aria-labelledby="image-info-title" onMouseDown={(event) => event.target === event.currentTarget && setInfoDetail(null)}>
         <div className="image-info-panel">
-          <header><div><span>{infoDetail.item.source === "asset" ? "资产详情" : "本机图片详情"}</span><h3>{infoDetail.image.filename || "图片信息"}</h3></div><PromptViewToggle value={detailPromptView} onChange={setDetailPromptView} /><button onClick={() => setInfoDetail(null)}><X /></button></header>
+          <header><div className="detail-header-title"><span>{infoDetail.item.source === "asset" ? "资产详情" : "本机图片详情"}</span><h3 id="image-info-title">{infoDetail.image.filename || "图片信息"}</h3></div><div className="detail-header-actions"><PromptViewToggle value={detailPromptView} onChange={setDetailPromptView} /><button className="detail-close-button" type="button" aria-label="关闭图片详情" onClick={() => setInfoDetail(null)}><X /></button></div></header>
           <div className="image-info-summary">
             <span><small>工作流</small>{infoDetail.item.workflowName || workflows.find((entry) => entry.id === infoDetail.item.workflowId)?.name || infoDetail.item.workflowId || "未记录"}</span>
             <span><small>Prompt 方案</small>{infoDetail.item.promptSchemeName || "未使用方案"}</span>
+            <span><small>主模型</small>{infoDetail.item.mainModel || "未记录"}</span>
             <span><small>分辨率</small>{infoDetail.image.width || infoDetail.item.width || "-"} × {infoDetail.image.height || infoDetail.item.height || "-"}</span>
             <span><small>生成平台</small>{infoDetail.item.platform || platform || "未记录"}</span>
             <span><small>任务创建时间</small>{infoDetail.item.createdAt ? new Date(infoDetail.item.createdAt).toLocaleString("zh-CN", { hour12: false }) : "未记录"}</span>

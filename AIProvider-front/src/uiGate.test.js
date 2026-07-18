@@ -63,4 +63,26 @@ describe("UI release gate", () => {
     expect(css).toMatch(/\.content-ops-dialog\{[^}]*max-height:\s*calc\(100vh\s*-\s*32px\)/);
     expect(css).toMatch(/\.content-ops-dialog\{[^}]*overflow-y:\s*auto/);
   });
+
+  it("keeps image-workshop detail actions grouped and keyboard accessible", () => {
+    const workbench = read("ComfyLocalWorkbench.jsx");
+    const workbenchCss = read("ComfyLocalWorkbench.css");
+    const workflowCss = read("WorkflowPanel.css");
+    expect(workbench).toContain('className="detail-header-actions"');
+    expect(workbench).toContain('aria-label="关闭任务详情"');
+    expect(workbench).toContain('aria-label="关闭图片详情"');
+    expect(workbench).toContain('aria-modal="true"');
+    expect(workbenchCss).toMatch(/\.detail-header-actions\{[^}]*display:flex/);
+    expect(workbenchCss).toMatch(/\.detail-close-button:focus-visible/);
+    expect(workflowCss).toMatch(/\.workflow-panel__main-model\{grid-column:1\/-1\}/);
+  });
+
+  it("keeps Bridge task cards native, non-nested interactions", () => {
+    const workbench = read("ComfyLocalWorkbench.jsx");
+    const workbenchCss = read("ComfyLocalWorkbench.css");
+    expect(workbench).toContain('<article\n                  key={task.id}\n                  className={`queue-pill');
+    expect(workbench).toContain('className="queue-pill__detail"');
+    expect(workbench).not.toContain('className={`queue-pill ${task.state.toLowerCase()}`}\n                  role="button"');
+    expect(workbenchCss).toMatch(/\.queue-pill__detail:focus-visible/);
+  });
 });
