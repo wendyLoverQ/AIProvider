@@ -10,6 +10,7 @@ import com.aiprovider.service.ContentSourceService;
 import com.aiprovider.service.ContentRelevanceService;
 import com.aiprovider.service.ContentPipelineService;
 import com.aiprovider.service.XiaohongshuAccountService;
+import com.aiprovider.service.XiaohongshuPublicationService;
 import java.util.List;
 import org.springframework.web.bind.annotation.*;
 
@@ -23,7 +24,8 @@ public class ContentOperationsController {
     private final ContentRelevanceService relevanceService;
     private final ContentPipelineService pipelineService;
     private final XiaohongshuAccountService xhsAccountService;
-    public ContentOperationsController(ContentOperationsService service,ContentAiConfigService aiConfigService,ContentGenerationService generationService,ContentSourceService sourceService,ContentRelevanceService relevanceService,ContentPipelineService pipelineService,XiaohongshuAccountService xhsAccountService){this.service=service;this.aiConfigService=aiConfigService;this.generationService=generationService;this.sourceService=sourceService;this.relevanceService=relevanceService;this.pipelineService=pipelineService;this.xhsAccountService=xhsAccountService;}
+    private final XiaohongshuPublicationService publicationService;
+    public ContentOperationsController(ContentOperationsService service,ContentAiConfigService aiConfigService,ContentGenerationService generationService,ContentSourceService sourceService,ContentRelevanceService relevanceService,ContentPipelineService pipelineService,XiaohongshuAccountService xhsAccountService,XiaohongshuPublicationService publicationService){this.service=service;this.aiConfigService=aiConfigService;this.generationService=generationService;this.sourceService=sourceService;this.relevanceService=relevanceService;this.pipelineService=pipelineService;this.xhsAccountService=xhsAccountService;this.publicationService=publicationService;}
     @GetMapping("/overview") public Result<ContentOperationsOverviewVO> overview(){return Result.success(service.overview());}
     @PostMapping("/accounts") public Result<ContentAccountVO> createAccount(@RequestBody ContentAccountCreateDTO dto){return Result.success(service.createAccount(dto));}
     @PatchMapping("/accounts/{id}") public Result<ContentAccountVO> updateAccount(@PathVariable long id,@RequestBody ContentAccountModeDTO dto){return Result.success(service.updateAccount(id,dto));}
@@ -35,6 +37,7 @@ public class ContentOperationsController {
     @GetMapping("/accounts/{id}/sources") public Result<List<Long>> accountSources(@PathVariable long id){return Result.success(sourceService.accountSourceIds(id));}
     @PutMapping("/accounts/{id}/sources") public Result<List<Long>> bindAccountSources(@PathVariable long id,@RequestBody ContentAccountSourcesDTO dto){return Result.success(sourceService.bindAccountSources(id,dto));}
     @PostMapping("/accounts/{id}/test-pipeline") public Result<List<ContentPipelineTestVO>> testPipeline(@PathVariable long id){return Result.success(pipelineService.testAccount(id));}
+    @PostMapping("/publications/{id}/retry") public Result<XhsPublicationResultVO> retryPublication(@PathVariable long id){return Result.success(publicationService.publish(id));}
     @PostMapping("/accounts/{id}/xhs-login") public Result<XhsLoginSessionVO> startXhsLogin(@PathVariable long id){return Result.success(xhsAccountService.startLogin(id));}
     @GetMapping("/accounts/{id}/xhs-login/{sessionId}") public Result<XhsLoginSessionVO> pollXhsLogin(@PathVariable long id,@PathVariable String sessionId){return Result.success(xhsAccountService.poll(id,sessionId));}
     @PutMapping("/settings") public Result<ContentOperationSettingsVO> updateSettings(@RequestBody ContentOperationSettingsDTO dto){return Result.success(service.updateSettings(dto));}
