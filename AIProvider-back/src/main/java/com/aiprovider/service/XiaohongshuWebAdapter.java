@@ -25,7 +25,8 @@ public class XiaohongshuWebAdapter {
     private static final Pattern SAFE_RESPONSE_FIELD = Pattern.compile("\\\"(codeStatus|code|result|success)\\\"\\s*:\\s*(\\\"[^\\\"]{0,80}\\\"|-?\\d+|true|false|null)");
     private static final String CAPTURE_WEBPACK_REQUIRE = "() => new Promise((resolve, reject) => { try { let captured; self.webpackChunkugc.push([[\"aiprovider_\" + Date.now()], {}, require => { captured = require; }]); if (!captured) throw new Error(\"webpack runtime unavailable\"); window.__aiproviderWebpackRequire = captured; resolve(true); } catch (error) { reject(error); } })";
     private static final String DIRECT_UPLOAD = "data => new Promise(async (resolve, reject) => { try { const api = window.__aiproviderWebpackRequire(407); if (!api || typeof api.ku !== 'function') throw new Error('official image uploader unavailable'); const uploaded = await api.ku(data.imageDataUrl); const fileId = uploaded && (uploaded.fileId || uploaded.Key || uploaded.key); if (!fileId) throw new Error('upload response missing fileId'); resolve({fileId, keys:Object.keys(uploaded).sort()}); } catch (error) { reject(error); } })";
-    private static final String DIRECT_POST_NOTE = "payload => new Promise(async (resolve, reject) => { try { const api = window.__aiproviderWebpackRequire(99519); if (!api || typeof api.E !== 'function') throw new Error('official note api unavailable'); const result = await api.E(payload); resolve({noteId:(result && (result.noteId || result.note_id || result.id)) || '', keys:result ? Object.keys(result).sort() : []}); } catch (error) { reject(error); } })";
+    private static final String PREPARE_DIRECT_POST = "() => { const module = window.__aiproviderWebpackRequire(21069); const http = module && module.LV; if (!http || typeof http.post !== 'function') throw new Error('official http client unavailable'); window.__aiproviderXhsHttp = http; return true; }";
+    private static final String DIRECT_POST_NOTE = "payload => new Promise(async (resolve, reject) => { try { const snakeKey = key => key.replace(/[A-Z]/g, letter => '_' + letter.toLowerCase()); const snake = value => Array.isArray(value) ? value.map(snake) : value && Object.prototype.toString.call(value) === '[object Object]' ? Object.keys(value).reduce((out, key) => { out[snakeKey(key)] = snake(value[key]); return out; }, {}) : value; const request = snake(payload); const trace = request.common && request.common.capa_trace_info; if (trace && trace.context_json) { trace.contextJson = trace.context_json; delete trace.context_json; } const result = await window.__aiproviderXhsHttp.post('https://edith.xiaohongshu.com/web_api/sns/v2/note', request, {transform:false, extractData:false, timeout:15000}); resolve({noteId:(result && (result.noteId || result.note_id || result.id)) || '', keys:result ? Object.keys(result).sort() : []}); } catch (error) { reject(error); } })";
     private final boolean headless;
     private final double timeoutMs;
     private final long loginSessionTtlMs;
@@ -139,6 +140,8 @@ public class XiaohongshuWebAdapter {
             if (fileId == null) throw new XiaohongshuAutomationException("小红书图片上传接口未返回 fileId");
             log.info("XHS_DIRECT_UPLOAD success page={} responseKeys={}", pageLocation, upload.get("keys"));
             Map<String,Object> payload = buildNotePayload(title, body, tags, fileId, image.getWidth(), image.getHeight(), bytes.length);
+            stage = "准备笔记 POST 客户端";
+            page.evaluate(PREPARE_DIRECT_POST);
             stage = "调用笔记发布 POST 接口";
             Object postRaw = page.evaluate(DIRECT_POST_NOTE, payload);
             if (!(postRaw instanceof Map)) throw new XiaohongshuAutomationException("小红书笔记发布接口返回格式异常", true);
