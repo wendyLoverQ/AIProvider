@@ -1,0 +1,11 @@
+CREATE TABLE IF NOT EXISTS c_CloudTrafficCounters (
+  Provider VARCHAR(32) NOT NULL,
+  PeriodKey CHAR(7) NOT NULL,
+  AccumulatedInboundBytes BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  AccumulatedOutboundBytes BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  LastInboundCounter BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  LastOutboundCounter BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  SampledSince DATETIME(6) NOT NULL,
+  UpdatedAt DATETIME(6) NOT NULL,
+  PRIMARY KEY (Provider)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
