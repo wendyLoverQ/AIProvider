@@ -54,6 +54,7 @@ describe("ContentOperationsCenter", () => {
     render(<ContentOperationsCenter/>);fireEvent.click(await screen.findByRole("button",{name:"账号"}));vi.useFakeTimers();
     await act(async()=>{fireEvent.click(screen.getByRole("button",{name:"扫码登录小红书"}));await Promise.resolve();await Promise.resolve();});
     expect(screen.getByAltText("小红书登录二维码")).toBeTruthy();
+    expect(screen.getByRole("button",{name:"等待扫码确认…"}).disabled).toBe(true);
     await act(async()=>{await vi.advanceTimersByTimeAsync(8000);});expect(pollCalls).toBe(1);
     await act(async()=>{finishPoll(ok({sessionId:"qr-session",status:"WAITING_SCAN",qrImageDataUrl:null}));await Promise.resolve();});
     expect(screen.getByAltText("小红书登录二维码")).toBeTruthy();

@@ -13,4 +13,10 @@ class XiaohongshuWebAdapterTest {
         assertTrue(XiaohongshuWebAdapter.isLoginUrl("https://creator.xiaohongshu.com/login?source=official"));
         assertFalse(XiaohongshuWebAdapter.isLoginUrl("https://creator.xiaohongshu.com/publish/publish?source=official"));
     }
+
+    @Test void readsCurrentCreatorQrProtocolStatusWithoutReadingTokens() {
+        assertEquals(2, XiaohongshuWebAdapter.qrCodeStatus("{\"data\":{\"codeStatus\":2,\"ticket\":\"secret\"}}"));
+        assertEquals(1, XiaohongshuWebAdapter.qrCodeStatus("{\"codeStatus\":1}"));
+        assertEquals(-1, XiaohongshuWebAdapter.qrCodeStatus("{\"result\":0}"));
+    }
 }
