@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import ContentOperationsCenter from "./ContentOperationsCenter";
 
 const ok = (data) => new Response(JSON.stringify({ code:200, data }), { status:200, headers:{"Content-Type":"application/json"} });
+const fail = (message) => new Response(JSON.stringify({ code:400, message }), { status:400, headers:{"Content-Type":"application/json"} });
 const overview = { settings:{automationEnabled:true,defaultPublishMode:"AUTO",crawlIntervalMinutes:240,commentIntervalMinutes:30,contentModel:"gemini"}, counters:{collectedToday:3,readyDrafts:2,publishedToday:1,pendingComments:4,failedPublications:0}, accounts:[{id:1,displayName:"主账号",accountHandle:"operator",publishMode:"AUTO",enabled:true,adapterStatus:"NOT_CONFIGURED"}], sources:[], recentPublications:[] };
 
 describe("ContentOperationsCenter", () => {
@@ -28,6 +29,12 @@ describe("ContentOperationsCenter", () => {
     render(<ContentOperationsCenter/>);fireEvent.click(await screen.findByRole("button",{name:"自动化设置"}));
     expect(await screen.findByText("Gemini 内容生成")).toBeTruthy();expect(screen.getByText("密钥已配置 ••••1234")).toBeTruthy();
     const keyInput=screen.getByPlaceholderText("留空则保留现有密钥");expect(keyInput.value).toBe("");expect(keyInput.type).toBe("password");
+  });
+  it("shows request failures as a dismissible foreground alert", async()=>{
+    vi.stubGlobal("fetch",vi.fn(async()=>fail("X Cookie 导入失败")));render(<ContentOperationsCenter/>);
+    expect((await screen.findByRole("alert")).textContent).toContain("X Cookie 导入失败");
+    fireEvent.click(screen.getByRole("button",{name:"关闭错误提示"}));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
   it("classifies the latest fetched item before showing it as relevant", async()=>{
     const withSource={...overview,sources:[{id:3,name:"Elon Musk",adapterType:"TWITTER_API",externalUid:"44196397",pollIntervalMinutes:240,credentialConfigured:true,credentialHint:"••••abcd",lastStatus:"SUCCESS"}]};

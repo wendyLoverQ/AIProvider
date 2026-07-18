@@ -55,6 +55,7 @@ public class TwitterPublicWebClient {
         Map<String, String> cookies = new LinkedHashMap<>();
         try {
             if (value.startsWith("[") || value.startsWith("{")) readJsonCookies(json.readTree(value), cookies);
+            else if (value.startsWith("# Netscape HTTP Cookie File") || value.contains("\t")) readNetscapeCookies(value, cookies);
             else readCookieHeader(value, cookies);
         } catch (ContentSourceException e) {
             throw e;
@@ -168,6 +169,16 @@ public class TwitterPublicWebClient {
             int equals = part.indexOf('=');
             if (equals <= 0) continue;
             putCookie(result, part.substring(0, equals).trim(), part.substring(equals + 1).trim());
+        }
+    }
+
+    private void readNetscapeCookies(String value, Map<String, String> result) {
+        for (String rawLine : value.split("\\R")) {
+            String line = rawLine.trim();
+            if (line.isEmpty() || (line.startsWith("#") && !line.startsWith("#HttpOnly_"))) continue;
+            String[] fields = line.split("\\t", 7);
+            if (fields.length != 7) continue;
+            putCookie(result, fields[5].trim(), fields[6].trim());
         }
     }
 

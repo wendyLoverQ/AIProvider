@@ -27,6 +27,18 @@ class TwitterPublicWebClientTest {
     }
 
     @Test
+    void acceptsNetscapeCookieFile() throws Exception {
+        String exported = "# Netscape HTTP Cookie File\n"
+                + ".x.com\tTRUE\t/\tTRUE\t1900000000\tauth_token\tdummy-auth\n"
+                + ".x.com\tTRUE\t/\tTRUE\t1900000000\tct0\tdummy-csrf\n"
+                + ".x.com\tTRUE\t/\tTRUE\t1900000000\tguest_id\tignored";
+        JsonNode result = json.readTree(client.normalizeCredential(exported));
+        assertEquals("dummy-auth", result.path("auth_token").asText());
+        assertEquals("dummy-csrf", result.path("ct0").asText());
+        assertEquals(2, result.size());
+    }
+
+    @Test
     void rejectsIncompleteSessionWithoutEchoingSecret() {
         ContentSourceException error = assertThrows(ContentSourceException.class, () -> client.normalizeCredential("auth_token=do-not-echo"));
         assertTrue(error.getMessage().contains("auth_token 和 ct0"));

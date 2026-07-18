@@ -42,7 +42,7 @@ export default function ContentOperationsCenter() {
       <div><span>CONTENT OPERATIONS</span><h2>小红书运营控制台</h2><p>采集、生成、发布、评论维护与运行审计集中管理</p></div>
       <div className={`automation-state ${data.settings.automationEnabled ? "on" : "off"}`}><Robot weight="duotone"/><b>{data.settings.automationEnabled ? "自动运行中" : "自动化已暂停"}</b><small>默认 {data.settings.defaultPublishMode === "AUTO" ? "全自动" : "手动"} · 每 {data.settings.crawlIntervalMinutes || 240} 分钟采集</small></div>
     </header>
-    {error && <div className="content-ops-error"><Warning/> {error}<button type="button" onClick={() => setError("")}>关闭</button></div>}
+    {error && <div className="content-ops-error" role="alert" aria-live="assertive"><Warning aria-hidden="true"/><span>{error}</span><button type="button" aria-label="关闭错误提示" onClick={() => setError("")}>关闭</button></div>}
     <nav className="content-ops-tabs" aria-label="内容运营分区">{tabs.map(([key,label]) => <button type="button" key={key} className={tab===key?"active":""} onClick={() => setTab(key)}>{label}</button>)}</nav>
 
     {tab === "overview" && <>
