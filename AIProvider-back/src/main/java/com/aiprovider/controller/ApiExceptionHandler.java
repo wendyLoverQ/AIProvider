@@ -2,6 +2,7 @@ package com.aiprovider.controller;
 
 import com.aiprovider.common.Result;
 import com.aiprovider.service.TwitterAutomationException;
+import com.aiprovider.service.RemoteCodexException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.bind.annotation.*;
@@ -23,4 +24,12 @@ public class ApiExceptionHandler {
     public Result<Void> twitterAutomation(TwitterAutomationException exception) {
         return Result.error(502, exception.getMessage());
     }
+
+    @ExceptionHandler(SecurityException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public Result<Void> unauthorized(SecurityException exception) { return Result.error(401, exception.getMessage()); }
+
+    @ExceptionHandler(RemoteCodexException.class)
+    @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
+    public Result<Void> remoteCodex(RemoteCodexException exception) { return Result.error(503, exception.getMessage()); }
 }

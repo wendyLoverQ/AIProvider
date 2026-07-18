@@ -89,6 +89,25 @@ class ComfyPresetServiceTest {
         when(presets.delete(3)).thenReturn(true); service.delete(3);
         when(presets.delete(4)).thenReturn(false);
         assertThatThrownBy(() -> service.delete(4)).isInstanceOf(IllegalArgumentException.class).hasMessage("Prompt 方案不存在");
+        service.clearDefault();
+        verify(presets, atLeast(2)).clearDefault();
+    }
+
+    @Test void rejectsEmptyCatalogAndMergesRepeatedCategoryMultiplicity() {
+        when(catalog.findEnabledOptions()).thenReturn(Collections.emptyList());
+        assertThatThrownBy(() -> service.create(valid())).isInstanceOf(IllegalStateException.class).hasMessage("Prompt 词条分类为空");
+
+        List<Map<String, Object>> repeated = new ArrayList<>();
+        boolean[] values = { false, false, true, false, true };
+        for (int index = 0; index < values.length; index++) {
+            Map<String, Object> row = new HashMap<>();
+            row.put("id", "Merged-" + index); row.put("category", "Merged"); row.put("allowMultiple", values[index]); repeated.add(row);
+        }
+        when(catalog.findEnabledOptions()).thenReturn(repeated);
+        ComfyPresetDTO dto = valid();
+        Map<String, List<String>> selected = new LinkedHashMap<>(); selected.put("Merged", new ArrayList<>()); dto.setSelectedOptions(selected);
+        service.create(dto);
+        verify(presets).insert(any());
     }
 
     @Test void validatesSchemeShapeSelectionsAndLengths() {

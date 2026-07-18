@@ -4,8 +4,10 @@ import com.aiprovider.common.Result;
 import com.aiprovider.model.dto.ComfyPresetDTO;
 import com.aiprovider.model.vo.ComfyPresetVO;
 import com.aiprovider.model.vo.ComfyWorkflowVO;
+import com.aiprovider.model.vo.PromptCatalogVO;
 import com.aiprovider.service.ComfyPresetService;
 import com.aiprovider.service.ComfyWorkflowService;
+import com.aiprovider.service.PromptCatalogService;
 import org.junit.jupiter.api.Test;
 import java.util.*;
 import static org.assertj.core.api.Assertions.*;
@@ -15,13 +17,20 @@ class ComfyControllerTest {
     @Test void presetEndpointsDelegateToService() {
         ComfyPresetService service = mock(ComfyPresetService.class);
         ComfyPresetController controller = new ComfyPresetController(service);
-        ComfyPresetVO preset = new ComfyPresetVO(1L, "A", "aimaid", Collections.emptyMap());
+        ComfyPresetVO preset = new ComfyPresetVO(1L, "A", Collections.emptyMap(), "", "", "p", "n", null, false);
         when(service.list()).thenReturn(Collections.singletonList(preset)); when(service.create(any())).thenReturn(5L);
         assertThat(controller.list().getData()).containsExactly(preset);
         ComfyPresetDTO dto = new ComfyPresetDTO();
         assertThat(controller.create(dto).getData()).containsEntry("id", 5L);
         assertThat(controller.delete(7).getCode()).isEqualTo(200);
-        verify(service).create(dto); verify(service).delete(7);
+        assertThat(controller.update(5, dto).getCode()).isEqualTo(200); assertThat(controller.setDefault(5).getCode()).isEqualTo(200);
+        verify(service).create(dto); verify(service).delete(7); verify(service).update(5, dto); verify(service).setDefault(5);
+    }
+
+    @Test void promptCatalogEndpointDelegatesToService() {
+        PromptCatalogService service = mock(PromptCatalogService.class); PromptCatalogController controller = new PromptCatalogController(service);
+        PromptCatalogVO catalog = new PromptCatalogVO(Collections.emptyList(), "negative"); when(service.get()).thenReturn(catalog);
+        assertThat(controller.get().getData()).isSameAs(catalog);
     }
 
     @Test void workflowEndpointDelegatesToService() {

@@ -50,3 +50,8 @@ twitter:
   headless: ${TWITTER_HEADLESS:true}
   navigation-timeout-ms: ${TWITTER_NAVIGATION_TIMEOUT_MS:60000}
   browser-executable-path: ${TWITTER_BROWSER_EXECUTABLE_PATH:}
+
+remote-codex:
+  command: ${REMOTE_CODEX_COMMAND:codex}
+  working-directory: ${REMOTE_CODEX_WORKING_DIRECTORY:}
+  access-token: ${REMOTE_CODEX_ACCESS_TOKEN:}

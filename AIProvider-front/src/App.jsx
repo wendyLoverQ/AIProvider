@@ -47,6 +47,7 @@ import {
   Star,
   PawPrint,
   LockKey,
+  ChatsCircle,
 } from "@phosphor-icons/react";
 import {
   Area,
@@ -69,6 +70,7 @@ import PromptOptionManager from "./PromptOptionManager";
 import UiControl from "./UiControl";
 import TwitterPublisher from "./TwitterPublisher";
 import CuteHomeBackground from "./CuteHomeBackground";
+import RemoteCodex from "./RemoteCodex";
 import "./App.css";
 import "./CodexTheme.css";
 import "./SemanticTheme.css";
@@ -80,6 +82,7 @@ const NAV = [
   { key: "prompts", label: "Prompt 管理", icon: SlidersHorizontal },
   { key: "maid", label: "我的女仆", icon: Heart },
   { key: "monitor", label: "监控中心", icon: Pulse },
+  { key: "remoteCodex", label: "远程 Codex", icon: ChatsCircle },
   { key: "camera", label: "手机监控", icon: VideoCamera, closed: true, hidden: true },
   { key: "twitter", label: "Twitter 发布", icon: XLogo },
   { key: "appearance", label: "UI 控制", icon: Palette },
@@ -226,13 +229,13 @@ function useDashboardData() {
 }
 
 function App() {
-  const viewFromPath = () => ({ "/workshop": "workshop", "/prompts": "prompts", "/prompt-options": "promptOptions", "/maid": "maid", "/admin/monitor": "monitor", "/camera": "camera", "/twitter": "twitter", "/appearance": "appearance", "/settings": "settings" })[window.location.pathname] || "home";
+  const viewFromPath = () => ({ "/workshop": "workshop", "/prompts": "prompts", "/prompt-options": "promptOptions", "/maid": "maid", "/admin/monitor": "monitor", "/remote-codex": "remoteCodex", "/camera": "camera", "/twitter": "twitter", "/appearance": "appearance", "/settings": "settings" })[window.location.pathname] || "home";
   const [view, setView] = useState(viewFromPath);
   const [promptOptionCategory, setPromptOptionCategory] = useState("");
   const dashboard = useDashboardData();
   const current = NAV.find((item) => item.key === (view === "promptOptions" ? "prompts" : view));
   useEffect(() => {
-    const path = ({ workshop: "/workshop", prompts: "/prompts", promptOptions: "/prompt-options", maid: "/maid", monitor: "/admin/monitor", camera: "/camera", twitter: "/twitter", appearance: "/appearance", settings: "/settings" })[view] || "/";
+    const path = ({ workshop: "/workshop", prompts: "/prompts", promptOptions: "/prompt-options", maid: "/maid", monitor: "/admin/monitor", remoteCodex: "/remote-codex", camera: "/camera", twitter: "/twitter", appearance: "/appearance", settings: "/settings" })[view] || "/";
     if (window.location.pathname !== path) window.history.replaceState({}, "", path);
   }, [view]);
   useEffect(() => {
@@ -305,6 +308,7 @@ function App() {
           ))}
         {view === "camera" && <SealedFeature title="手机监控" message="这片频道正在休眠，暂时不对外开放。" />}
         {view === "monitor" && <MonitorCenter />}
+        {view === "remoteCodex" && <RemoteCodex />}
         {view === "twitter" && <TwitterPublisher />}
         {view === "appearance" && <UiControl />}
         {view === "settings" && <div className="tool-home system-settings-view"><ComfyConsole mode="settings" /></div>}

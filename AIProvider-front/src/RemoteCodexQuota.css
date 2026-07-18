@@ -1,0 +1,5 @@
+.remote-codex-quota{display:grid;grid-template-columns:repeat(4,minmax(90px,1fr));align-items:center;gap:7px;width:min(680px,62%);margin-left:auto;padding:0 10px;border-left:1px solid var(--border-subtle);border-right:1px solid var(--border-subtle)}
+.remote-codex-quota>div{display:grid;gap:2px;min-width:0}
+.remote-codex-quota span{color:var(--text-muted)!important;font-size:7px!important;letter-spacing:.04em!important}
+.remote-codex-quota strong{overflow:hidden;color:var(--text-primary);font-size:9px!important;text-overflow:ellipsis;white-space:nowrap}
+.remote-codex-quota>small{grid-column:1/-1;color:var(--danger);font-size:7px}
