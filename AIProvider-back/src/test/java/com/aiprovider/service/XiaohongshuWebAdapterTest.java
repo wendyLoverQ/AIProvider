@@ -8,7 +8,14 @@ import org.junit.jupiter.api.Test;
 class XiaohongshuWebAdapterTest {
     @Test void recognizesCreatorHomeAsCompletedQrLogin() {
         assertTrue(XiaohongshuWebAdapter.isCreatorHomeUrl("https://creator.xiaohongshu.com/creator/home?source=official"));
+        assertTrue(XiaohongshuWebAdapter.isCreatorHomeUrl("https://creator.xiaohongshu.com/new/home"));
         assertFalse(XiaohongshuWebAdapter.isCreatorHomeUrl("https://creator.xiaohongshu.com/login?source=official"));
+    }
+
+    @Test void recognizesCurrentCreatorAuthenticationCookie() {
+        assertTrue(XiaohongshuWebAdapter.isAuthenticatedCookieName("access-token-creator.xiaohongshu.com"));
+        assertTrue(XiaohongshuWebAdapter.isAuthenticatedCookieName("web_session"));
+        assertFalse(XiaohongshuWebAdapter.isAuthenticatedCookieName("a1"));
     }
 
     @Test void recognizesOnlyCreatorLoginRouteAsExpiredSession() {

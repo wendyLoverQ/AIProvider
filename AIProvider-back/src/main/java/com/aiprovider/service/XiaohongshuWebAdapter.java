@@ -145,11 +145,18 @@ public class XiaohongshuWebAdapter {
     }
 
     private boolean authenticated(BrowserContext context) {
-        return context.cookies().stream().anyMatch(c -> ("web_session".equals(c.name) || "access-token".equals(c.name)) && !blank(c.value));
+        return context.cookies().stream().anyMatch(c -> isAuthenticatedCookieName(c.name) && !blank(c.value));
     }
 
     static boolean isCreatorHomeUrl(String url) {
-        return url != null && url.startsWith("https://creator.xiaohongshu.com/creator/home");
+        return url != null && (url.startsWith("https://creator.xiaohongshu.com/creator/home")
+                || url.startsWith("https://creator.xiaohongshu.com/new/home"));
+    }
+
+    static boolean isAuthenticatedCookieName(String name) {
+        return "web_session".equals(name)
+                || "access-token".equals(name)
+                || "access-token-creator.xiaohongshu.com".equals(name);
     }
 
     static boolean isLoginUrl(String url) {
