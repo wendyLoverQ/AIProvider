@@ -47,6 +47,8 @@ import {
   Star,
   PawPrint,
   LockKey,
+  PaintBrush,
+  Cube,
   ChatsCircle,
 } from "@phosphor-icons/react";
 import {
@@ -69,7 +71,12 @@ import PromptManager from "./PromptManager";
 import PromptOptionManager from "./PromptOptionManager";
 import UiControl from "./UiControl";
 import TwitterPublisher from "./TwitterPublisher";
+import ContentOperationsCenter from "./ContentOperationsCenter";
 import CuteHomeBackground from "./CuteHomeBackground";
+import ManualImageEditor from "./ManualImageEditor";
+import VideoEditor from "./VideoEditor";
+import FoundryWorkbench from "./FoundryWorkbench";
+import CryptoMarket from "./CryptoMarket";
 import RemoteCodex from "./RemoteCodex";
 import "./App.css";
 import "./CodexTheme.css";
@@ -80,16 +87,21 @@ const API = "/api";
 const NAV = [
   { key: "workshop", label: "图像工坊", icon: ImageSquare },
   { key: "prompts", label: "Prompt 管理", icon: SlidersHorizontal },
+  { key: "manualEditor", label: "图片编辑", icon: PaintBrush },
+  { key: "videoEditor", label: "视频编辑", icon: FilmSlate },
+  { key: "market", label: "市场行情", icon: ChartLineUp },
   { key: "maid", label: "我的女仆", icon: Heart },
   { key: "monitor", label: "监控中心", icon: Pulse },
   { key: "remoteCodex", label: "远程 Codex", icon: ChatsCircle },
+  { key: "foundry", label: "链上工具", icon: Cube },
   { key: "camera", label: "手机监控", icon: VideoCamera, closed: true, hidden: true },
   { key: "twitter", label: "Twitter 发布", icon: XLogo },
+  { key: "contentOperations", label: "内容运营", icon: Broadcast },
   { key: "appearance", label: "UI 控制", icon: Palette },
   { key: "settings", label: "系统设置", icon: GearSix },
 ];
 const VISIBLE_NAV = NAV.filter((item) => !item.hidden);
-const MOBILE_NAV = VISIBLE_NAV;
+const MOBILE_NAV = [{ key: "home", label: "首页", icon: House }, ...VISIBLE_NAV];
 
 const fmt = (value) => Number(value || 0).toLocaleString("zh-CN");
 const compact = (value) =>
@@ -229,13 +241,13 @@ function useDashboardData() {
 }
 
 function App() {
-  const viewFromPath = () => ({ "/workshop": "workshop", "/prompts": "prompts", "/prompt-options": "promptOptions", "/maid": "maid", "/admin/monitor": "monitor", "/remote-codex": "remoteCodex", "/camera": "camera", "/twitter": "twitter", "/appearance": "appearance", "/settings": "settings" })[window.location.pathname] || "home";
+  const viewFromPath = () => ({ "/workshop": "workshop", "/manual-editor": "manualEditor", "/video-editor": "videoEditor", "/market": "market", "/prompts": "prompts", "/prompt-options": "promptOptions", "/maid": "maid", "/admin/monitor": "monitor", "/remote-codex": "remoteCodex", "/foundry": "foundry", "/camera": "camera", "/twitter": "twitter", "/content-operations": "contentOperations", "/appearance": "appearance", "/settings": "settings" })[window.location.pathname] || "home";
   const [view, setView] = useState(viewFromPath);
   const [promptOptionCategory, setPromptOptionCategory] = useState("");
   const dashboard = useDashboardData();
   const current = NAV.find((item) => item.key === (view === "promptOptions" ? "prompts" : view));
   useEffect(() => {
-    const path = ({ workshop: "/workshop", prompts: "/prompts", promptOptions: "/prompt-options", maid: "/maid", monitor: "/admin/monitor", remoteCodex: "/remote-codex", camera: "/camera", twitter: "/twitter", appearance: "/appearance", settings: "/settings" })[view] || "/";
+    const path = ({ workshop: "/workshop", manualEditor: "/manual-editor", videoEditor: "/video-editor", market: "/market", prompts: "/prompts", promptOptions: "/prompt-options", maid: "/maid", monitor: "/admin/monitor", remoteCodex: "/remote-codex", foundry: "/foundry", camera: "/camera", twitter: "/twitter", contentOperations: "/content-operations", appearance: "/appearance", settings: "/settings" })[view] || "/";
     if (window.location.pathname !== path) window.history.replaceState({}, "", path);
   }, [view]);
   useEffect(() => {
@@ -245,24 +257,18 @@ function App() {
   return (
     <div className="neural-shell">
       <aside className="rail">
-        <div
-          className="rail-brand"
+        <button
+          type="button"
+          className={view === "home" ? "rail-brand active" : "rail-brand"}
           onClick={() => setView("home")}
-          style={{ cursor: "pointer" }}
+          aria-label="首页"
+          aria-current={view === "home" ? "page" : undefined}
+          title="首页"
         >
           <span className="rail-mascot"><i className="mascot-ear ear-left" /><i className="mascot-ear ear-right" /><Cat weight="fill" /><b>•ᴗ•</b><em>✦</em></span>
           <span className="rail-brand-label">MAID</span>
-        </div>
+        </button>
         <nav>
-          <button
-            className={view === "home" ? "nav-button active" : "nav-button"}
-            data-nav-key="home"
-            onClick={() => setView("home")}
-            title="首页"
-          >
-            <House size={22} weight={view === "home" ? "duotone" : "regular"} />
-            <span>首页</span>
-          </button>
           {VISIBLE_NAV.map((item) => (
             <NavButton
               key={item.key}
@@ -282,7 +288,7 @@ function App() {
         </span>
       </header>
       <main className={`workspace workspace-${view}`}>
-        {!["home", "appearance", "settings"].includes(view) && <KawaiiPageAtmosphere soft={["workshop", "prompts"].includes(view)} />}
+        {!["home", "appearance", "settings"].includes(view) && <KawaiiPageAtmosphere soft={["workshop", "manualEditor", "videoEditor", "prompts"].includes(view)} />}
         {view !== "home" && current && (
           <div className="section-head">
             <div>
@@ -296,6 +302,9 @@ function App() {
         <div className={`tool-home compact-home persistent-workshop ${view === "workshop" ? "" : "persistent-view-hidden"}`} aria-hidden={view !== "workshop"}>
           <ComfyConsole embedded active={view === "workshop"} />
         </div>
+        {view === "manualEditor" && <ManualImageEditor />}
+        {view === "videoEditor" && <VideoEditor />}
+        {view === "market" && <CryptoMarket />}
         {view === "prompts" && <PromptManager onEditOptions={(category = "") => { setPromptOptionCategory(category); setView("promptOptions"); }} />}
         {view === "promptOptions" && <PromptOptionManager initialCategory={promptOptionCategory} onBack={() => setView("prompts")} />}
         {view === "maid" &&
@@ -309,7 +318,9 @@ function App() {
         {view === "camera" && <SealedFeature title="手机监控" message="这片频道正在休眠，暂时不对外开放。" />}
         {view === "monitor" && <MonitorCenter />}
         {view === "remoteCodex" && <RemoteCodex />}
+        {view === "foundry" && <FoundryWorkbench />}
         {view === "twitter" && <TwitterPublisher />}
+        {view === "contentOperations" && <ContentOperationsCenter />}
         {view === "appearance" && <UiControl />}
         {view === "settings" && <div className="tool-home system-settings-view"><ComfyConsole mode="settings" /></div>}
       </main>
@@ -318,8 +329,9 @@ function App() {
           <NavButton
             key={item.key}
             item={item}
-            active={view === item.key}
-            onClick={() => setView(item.key)}
+             active={view === item.key}
+             onClick={() => setView(item.key)}
+             mobile
           />
         ))}
       </nav>
@@ -327,10 +339,15 @@ function App() {
   );
 }
 
-function NavButton({ item, active, onClick }) {
+function NavButton({ item, active, onClick, mobile = false }) {
   const Icon = item.icon;
+  const buttonRef = useRef(null);
+  useEffect(() => {
+    if (mobile && active) buttonRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+  }, [active, mobile]);
   return (
     <button
+      ref={buttonRef}
       className={active ? "nav-button active" : "nav-button"}
       disabled={item.closed}
       data-nav-key={item.key}

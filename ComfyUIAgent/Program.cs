@@ -6,8 +6,11 @@ using System.Text.Json.Nodes;
 using System.Text.Json;
 using System.Buffers.Binary;
 
+var builderArgs = args
+    .Where(argument => !string.Equals(argument.TrimEnd('/'), "aiprovider-bridge://start", StringComparison.OrdinalIgnoreCase))
+    .ToArray();
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions {
-    Args = args,
+    Args = builderArgs,
     ContentRootPath = AppContext.BaseDirectory
 });
 builder.WebHost.UseUrls("http://127.0.0.1:32145");
@@ -21,8 +24,14 @@ builder.Services.AddHttpClient("comfy", client => {
 });
 var app = builder.Build();
 Process? comfyProcess = null;
+var bridgeInstanceId = Guid.NewGuid().ToString("N");
+var bridgeExitMode = 0; // 0 = keep running, 1 = stop, 2 = restart
 var galleryIndexLock = new SemaphoreSlim(1, 1);
 var agentLogLock = new SemaphoreSlim(1, 1);
+var generationQueueLock = new SemaphoreSlim(1, 1);
+var generationQueueSignal = new SemaphoreSlim(0);
+var generationQueue = ReadBridgeGenerationQueue();
+const int ComfySubmissionWindow = 2;
 
 app.UseExceptionHandler(errorApp => errorApp.Run(async context => {
     var error = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
@@ -86,6 +95,7 @@ app.Use(async (context, next) => {
 app.MapGet("/api/config", () => Results.Ok(new {
     success = true,
     token = settings.LocalToken,
+    instanceId = bridgeInstanceId,
     platform = settings.PlatformName,
     configured = settings.IsPlatformConfigured,
     expectedComfyDirectory = settings.ExpectedComfyDirectory
@@ -141,9 +151,11 @@ app.MapPost("/api/comfy/start", async (IHttpClientFactory factory) => {
     }
     return Results.Problem("ComfyUI failed to start before timeout", statusCode: 504);
 });
-app.MapPost("/api/comfy/stop", async (IHttpClientFactory factory) => {
-    if (!await IsComfyRunning(factory))
-        return Results.Ok(new { success = true, running = false, message = "ComfyUI is already stopped" });
+app.MapPost("/api/comfy/stop", async (HttpContext context, IHttpClientFactory factory, IHostApplicationLifetime lifetime) => {
+    if (!await IsComfyRunning(factory)) {
+        ScheduleBridgeExit(context, lifetime, restart: false);
+        return Results.Ok(new { success = true, running = false, bridgeStopping = true, message = "ComfyUI is already stopped; bridge is stopping" });
+    }
 
     // The cmd process launched from a .bat file can exit while its Python child keeps
     // serving ComfyUI. The bridge may also be restarted while ComfyUI stays alive.
@@ -158,11 +170,17 @@ app.MapPost("/api/comfy/stop", async (IHttpClientFactory factory) => {
     processToStop.Kill(true);
     processToStop.Dispose();
     comfyProcess = null;
-    for (var i = 0; i < 15; i++) { if (!await IsComfyRunning(factory)) return Results.Ok(new { success = true, running = false, message = "ComfyUI stopped" }); await Task.Delay(500); }
+    for (var i = 0; i < 15; i++) {
+        if (!await IsComfyRunning(factory)) {
+            ScheduleBridgeExit(context, lifetime, restart: false);
+            return Results.Ok(new { success = true, running = false, bridgeStopping = true, message = "ComfyUI and bridge stopped" });
+        }
+        await Task.Delay(500);
+    }
     return Results.Problem("ComfyUI process was stopped but the API is still reachable", statusCode: 500);
 });
 
-app.MapPost("/api/comfy/restart", async (IHttpClientFactory factory) => {
+app.MapPost("/api/comfy/restart", async (HttpContext context, IHttpClientFactory factory, IHostApplicationLifetime lifetime) => {
     if (!settings.IsPlatformConfigured)
         return Results.BadRequest(new { success = false, running = false, message = $"请先把 ComfyUI 放到 {settings.ExpectedComfyDirectory} 并完成 {settings.PlatformName} 配置" });
 
@@ -189,7 +207,10 @@ app.MapPost("/api/comfy/restart", async (IHttpClientFactory factory) => {
     comfyProcess = Process.Start(startInfo);
     for (var i = 0; i < settings.StartTimeoutSeconds; i += 2) {
         await Task.Delay(2000);
-        if (await IsComfyRunning(factory)) return Results.Ok(new { success = true, running = true, message = "ComfyUI restarted" });
+        if (await IsComfyRunning(factory)) {
+            ScheduleBridgeExit(context, lifetime, restart: true);
+            return Results.Ok(new { success = true, running = true, bridgeRestarting = true, message = "ComfyUI and bridge restarted" });
+        }
         if (comfyProcess?.HasExited == true) break;
     }
     return Results.Problem("ComfyUI failed to restart before timeout", statusCode: 504);
@@ -199,6 +220,8 @@ app.MapPost("/api/tasks/{promptId}/cancel", async (string promptId, IHttpClientF
     promptId = (promptId ?? "").Trim();
     if (promptId.Length == 0 || promptId.Length > 200)
         return Results.BadRequest(new { success = false, message = "任务 ID 不合法" });
+    if (await CancelBridgeQueuedGeneration(promptId))
+        return Results.Ok(new { success = true, promptId, cancelled = true, wasPending = true, wasRunning = false, queueOwner = "BRIDGE" });
     var client = factory.CreateClient("comfy");
     async Task<(bool Pending, bool Running)> FindTask() {
         using var response = await client.GetAsync("queue");
@@ -235,6 +258,36 @@ app.MapPost("/api/tasks/{promptId}/cancel", async (string promptId, IHttpClientF
     return Results.Json(new { success = false, promptId, cancelled = false, wasPending = pending, wasRunning = runningTask,
         message = "任务已收到中断请求，但当前节点在 30 秒内没有停止，请稍后重试" }, statusCode: StatusCodes.Status409Conflict);
 }).DisableAntiforgery();
+
+app.MapGet("/api/tasks/{promptId}/state", async (string promptId, IHttpClientFactory factory) => {
+    promptId = (promptId ?? "").Trim();
+    if (promptId.Length == 0 || promptId.Length > 200)
+        return Results.BadRequest(new { success = false, message = "生成任务 ID 无效" });
+    var bridgeQueued = await FindBridgeQueuedGeneration(promptId);
+    if (bridgeQueued != null) {
+        var bridgeState = string.Equals(bridgeQueued.State, "FAILED", StringComparison.Ordinal) ? "FAILED" : "QUEUED";
+        return Results.Ok(new { success = true, promptId, state = bridgeState, tracked = true,
+            createdAt = bridgeQueued.CreatedAt, filesConfirmed = false, queueOwner = "BRIDGE", message = bridgeQueued.Error });
+    }
+    var client = factory.CreateClient("comfy");
+    using var historyResponse = await client.GetAsync($"history/{Uri.EscapeDataString(promptId)}");
+    historyResponse.EnsureSuccessStatusCode();
+    var history = JsonNode.Parse(await historyResponse.Content.ReadAsStringAsync()) as JsonObject
+        ?? throw new InvalidOperationException("ComfyUI history 返回格式无效");
+    using var queueResponse = await client.GetAsync("queue");
+    queueResponse.EnsureSuccessStatusCode();
+    var queue = JsonNode.Parse(await queueResponse.Content.ReadAsStringAsync()) as JsonObject
+        ?? throw new InvalidOperationException("ComfyUI queue 返回格式无效");
+    bool Contains(string key) => queue[key] is JsonArray rows && rows.Any(row =>
+        row is JsonArray cells && cells.Count > 1 && string.Equals(cells[1]?.ToString(), promptId, StringComparison.Ordinal));
+    var tracked = await FindGenerationRecord(promptId);
+    var historyItem = history[promptId];
+    var historyFailed = string.Equals(historyItem?["status"]?["status_str"]?.ToString(), "error", StringComparison.OrdinalIgnoreCase) ||
+        historyItem?["status"]?["messages"] is JsonArray messages && messages.Any(message => message is JsonArray cells && cells[0]?.ToString() == "execution_error");
+    var recentlyTracked = tracked != null && DateTimeOffset.Now - tracked.CreatedAt < TimeSpan.FromSeconds(30);
+    var state = historyFailed ? "FAILED" : historyItem != null ? "COMPLETED" : Contains("queue_running") ? "RUNNING" : Contains("queue_pending") ? "QUEUED" : recentlyTracked ? "TRACKED" : tracked != null ? "MISSING" : "UNKNOWN";
+    return Results.Ok(new { success = true, promptId, state, tracked = tracked != null, createdAt = tracked?.CreatedAt, filesConfirmed = tracked?.FilesConfirmed ?? false });
+});
 
 app.MapGet("/api/twitter/status", (TwitterLocalPublisher twitter) => Results.Ok(new { success = true, data = twitter.Status() }));
 app.MapPost("/api/twitter/connect", async (TwitterLocalLoginRequest request, TwitterLocalPublisher twitter) => {
@@ -352,13 +405,29 @@ app.MapPost("/api/generate", async (HttpRequest request, IHttpClientFactory fact
         if (!inputs.ContainsKey(name)) throw new InvalidOperationException($"绑定节点 {binding} 缺少输入 {name}");
         inputs[name] = value;
     }
-    string Required(string key) => form[key].ToString().Trim() is { Length: > 0 } value
-        ? value : throw new InvalidOperationException($"缺少生成参数 {key}");
     void Write(string key, JsonNode? value) { var field = Field(key); SetInput(field.Node, field.Input, value, key); }
     void WriteIf(string key, JsonNode? value) { if (Has(key)) Write(key, value); }
+    JsonNode PostedScalar(string key) {
+        var field = Field(key);
+        var original = field.Node["inputs"]?[field.Input];
+        var raw = form[key].ToString();
+        if (original is JsonValue value) {
+            if (value.TryGetValue<bool>(out _) && bool.TryParse(raw, out var boolValue)) return JsonValue.Create(boolValue)!;
+            if (value.TryGetValue<long>(out _) && long.TryParse(raw, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var longValue)) return JsonValue.Create(longValue)!;
+            if (value.TryGetValue<double>(out _) && double.TryParse(raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var doubleValue)) return JsonValue.Create(doubleValue)!;
+        }
+        // Do not reject malformed frontend values here. Keeping the original value
+        // lets ComfyUI perform the authoritative node/input validation.
+        return JsonValue.Create(raw)!;
+    }
+    int? PostedInt(string key) => int.TryParse(form[key].ToString(), System.Globalization.NumberStyles.Integer,
+        System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : null;
+    double? PostedDouble(string key) => double.TryParse(form[key].ToString(), System.Globalization.NumberStyles.Float,
+        System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : null;
     foreach (var key in new[] { "sourceImage", "styleReference1", "styleReference2", "styleReference3", "styleReference4", "poseReference" }) {
         if (!Has(key)) continue;
-        var file = form.Files.GetFile(key) ?? throw new InvalidOperationException($"当前工作流缺少参考图 {key}");
+        var file = form.Files.GetFile(key);
+        if (file == null) continue;
         using var content = new MultipartFormDataContent();
         using var stream = file.OpenReadStream();
         using var image = new StreamContent(stream);
@@ -367,29 +436,30 @@ app.MapPost("/api/generate", async (HttpRequest request, IHttpClientFactory fact
         content.Add(new StringContent("true"), "overwrite");
         using var uploadResponse = await factory.CreateClient("comfy").PostAsync("upload/image", content);
         var uploadText = await uploadResponse.Content.ReadAsStringAsync();
+        if (!uploadResponse.IsSuccessStatusCode)
+            return Results.Content(uploadText, uploadResponse.Content.Headers.ContentType?.ToString() ?? "application/json",
+                statusCode: (int)uploadResponse.StatusCode);
         JsonNode? uploadJson;
         try { uploadJson = JsonNode.Parse(uploadText); }
         catch (Exception ex) { throw new InvalidOperationException($"上传参考图 {key} 失败（HTTP {(int)uploadResponse.StatusCode}）：{uploadText[..Math.Min(uploadText.Length, 300)]}", ex); }
-        if (!uploadResponse.IsSuccessStatusCode || uploadJson?["name"] == null) throw new InvalidOperationException($"上传参考图 {key} 失败");
+        if (uploadJson?["name"] == null) throw new InvalidOperationException($"ComfyUI 上传成功响应缺少图片名称：{uploadText[..Math.Min(uploadText.Length, 300)]}");
         Write(key, uploadJson["name"]!.GetValue<string>());
     }
-    if (Has("positivePrompt")) Write("positivePrompt", Required("positivePrompt"));
-    if (Has("negativePrompt")) Write("negativePrompt", Required("negativePrompt"));
+    if (Has("positivePrompt")) Write("positivePrompt", PostedScalar("positivePrompt"));
+    if (Has("negativePrompt")) Write("negativePrompt", PostedScalar("negativePrompt"));
     if (Has("loras")) ApplyDynamicLoras(prompt, form["loras"].ToString());
-    var outputWidth = Has("width") ? int.Parse(Required("width")) : 0;
-    var outputHeight = Has("height") ? int.Parse(Required("height")) : 0;
+    var outputWidth = Has("width") ? PostedInt("width") : null;
+    var outputHeight = Has("height") ? PostedInt("height") : null;
     var tileUpscaleNodeIds = prompt
         .Where(entry => entry.Value?["class_type"]?.GetValue<string>()?.Contains("UltimateSDUpscale", StringComparison.OrdinalIgnoreCase) == true &&
                         entry.Value?["inputs"]?["upscale_by"] != null)
         .Select(entry => entry.Key)
         .ToHashSet(StringComparer.Ordinal);
     var usesTileUpscale = tileUpscaleNodeIds.Count > 0 && Has("width") && Has("height");
-    if (usesTileUpscale && (outputWidth <= 0 || outputHeight <= 0 || outputWidth % 4 != 0 || outputHeight % 4 != 0))
-        throw new InvalidOperationException("最终输出宽高必须是大于 0 且能被 4 整除的整数");
-    if (Has("width")) Write("width", usesTileUpscale ? outputWidth * 3 / 4 : outputWidth);
-    if (Has("height")) Write("height", usesTileUpscale ? outputHeight * 3 / 4 : outputHeight);
-    if (Has("batchSize")) Write("batchSize", int.Parse(Required("batchSize")));
-    if (usesTileUpscale) {
+    if (Has("width")) Write("width", usesTileUpscale && outputWidth.HasValue ? outputWidth.Value * 3 / 4 : PostedScalar("width"));
+    if (Has("height")) Write("height", usesTileUpscale && outputHeight.HasValue ? outputHeight.Value * 3 / 4 : PostedScalar("height"));
+    if (Has("batchSize")) Write("batchSize", PostedScalar("batchSize"));
+    if (usesTileUpscale && outputWidth.HasValue && outputHeight.HasValue) {
         foreach (var entry in prompt.Where(entry => tileUpscaleNodeIds.Contains(entry.Key)))
             if (entry.Value?["inputs"] is JsonObject tileInputs) tileInputs["upscale_by"] = 4.0 / 3.0;
         foreach (var entry in prompt) {
@@ -398,41 +468,33 @@ app.MapPost("/api/generate", async (HttpRequest request, IHttpClientFactory fact
                 scaleInputs["image"] is not JsonArray imageLink || imageLink.Count == 0 ||
                 imageLink[0] is not JsonValue sourceValue || !sourceValue.TryGetValue<string>(out var sourceId) ||
                 !tileUpscaleNodeIds.Contains(sourceId)) continue;
-            if (scaleInputs.ContainsKey("width")) scaleInputs["width"] = outputWidth;
-            if (scaleInputs.ContainsKey("height")) scaleInputs["height"] = outputHeight;
+            if (scaleInputs.ContainsKey("width")) scaleInputs["width"] = outputWidth.Value;
+            if (scaleInputs.ContainsKey("height")) scaleInputs["height"] = outputHeight.Value;
         }
     }
-    if (Has("width")) WriteIf("finalWidth", outputWidth);
-    if (Has("height")) WriteIf("finalHeight", outputHeight);
-    var actualSeed = Has("seed")
+    if (Has("width")) WriteIf("finalWidth", PostedScalar("width"));
+    if (Has("height")) WriteIf("finalHeight", PostedScalar("height"));
+    JsonNode? actualSeed = Has("seed")
         ? (string.Equals(form["randomSeed"], "true", StringComparison.OrdinalIgnoreCase)
-            ? Random.Shared.NextInt64(0, long.MaxValue) : long.Parse(Required("seed")))
-        : 0L;
-    WriteIf("seed", actualSeed);
-    WriteIf("secondPassSeed", actualSeed);
-    WriteIf("faceDetailerSeed", actualSeed);
-    if (Has("steps")) Write("steps", int.Parse(Required("steps")));
-    if (Has("cfg")) Write("cfg", double.Parse(Required("cfg")));
-    if (Has("sampler")) Write("sampler", Required("sampler"));
-    if (Has("scheduler")) Write("scheduler", Required("scheduler"));
-    if (Has("checkpoint") && fields["checkpoint"]?["fixedValue"] == null) Write("checkpoint", Required("checkpoint"));
-    if (Has("denoise")) Write("denoise", double.Parse(Required("denoise")));
-    if (Has("styleStrength")) Write("styleStrength", double.Parse(Required("styleStrength")));
-    if (Has("openPoseStrength")) Write("openPoseStrength", double.Parse(Required("openPoseStrength")));
-    if (Has("secondPassSteps")) Write("secondPassSteps", int.Parse(Required("secondPassSteps")));
-    if (Has("secondPassDenoise")) Write("secondPassDenoise", double.Parse(Required("secondPassDenoise")));
-    if (Has("faceDetailerSteps")) Write("faceDetailerSteps", int.Parse(Required("faceDetailerSteps")));
-    if (Has("faceDetailerDenoise")) Write("faceDetailerDenoise", double.Parse(Required("faceDetailerDenoise")));
-    JsonNode PostedScalar(string key) {
-        var field = Field(key);
-        var original = field.Node["inputs"]?[field.Input];
-        var raw = form[key].ToString();
-        if (original is JsonValue value) {
-            if (value.TryGetValue<bool>(out _)) return JsonValue.Create(bool.Parse(string.IsNullOrWhiteSpace(raw) ? Required(key) : raw))!;
-            if (value.TryGetValue<long>(out _)) return JsonValue.Create(long.Parse(string.IsNullOrWhiteSpace(raw) ? Required(key) : raw, System.Globalization.CultureInfo.InvariantCulture))!;
-            if (value.TryGetValue<double>(out _)) return JsonValue.Create(double.Parse(string.IsNullOrWhiteSpace(raw) ? Required(key) : raw, System.Globalization.CultureInfo.InvariantCulture))!;
-        }
-        return JsonValue.Create(raw)!;
+            ? JsonValue.Create(Random.Shared.NextInt64(0, long.MaxValue)) : PostedScalar("seed"))
+        : null;
+    if (actualSeed != null) {
+        WriteIf("seed", actualSeed.DeepClone());
+        WriteIf("secondPassSeed", actualSeed.DeepClone());
+        WriteIf("faceDetailerSeed", actualSeed.DeepClone());
+    }
+    foreach (var key in new[] { "steps", "cfg", "sampler", "scheduler", "denoise", "styleStrength", "openPoseStrength",
+                 "secondPassSteps", "secondPassDenoise", "faceDetailerSteps", "faceDetailerDenoise" })
+        if (Has(key)) Write(key, PostedScalar(key));
+    if (Has("checkpoint") && fields["checkpoint"]?["fixedValue"] == null) Write("checkpoint", PostedScalar("checkpoint"));
+    if (Has("cutoutTarget")) {
+        var target = form["cutoutTarget"].ToString();
+        var binding = fields["cutoutTarget"] as JsonObject
+            ?? throw new InvalidOperationException("抠图目标绑定无效");
+        var field = Field("cutoutTarget");
+        var linkKey = target == "person" ? "personAlpha" : target == "background" ? "backgroundAlpha" : null;
+        SetInput(field.Node, field.Input, linkKey != null && binding[linkKey] is JsonArray alphaLink
+            ? alphaLink.DeepClone() : JsonValue.Create(target), "cutoutTarget");
     }
     foreach (var dynamicField in fields.Where(field => field.Key.StartsWith("node_", StringComparison.Ordinal)))
         Write(dynamicField.Key, PostedScalar(dynamicField.Key));
@@ -469,46 +531,38 @@ app.MapPost("/api/generate", async (HttpRequest request, IHttpClientFactory fact
         : prompt.FirstOrDefault(x => x.Value?["_meta"]?["title"]?.GetValue<string>() == outputTitle && x.Value?["class_type"]?.GetValue<string>() == "SaveImage");
     if (finalEntry.Value == null) throw new InvalidOperationException("找不到标题为“最终输出”的 SaveImage 节点");
     var finalId = finalEntry.Key;
-    using var submit = await factory.CreateClient("comfy").PostAsJsonAsync("prompt", new { prompt, client_id = form["clientId"].ToString() });
-    var submitText = await submit.Content.ReadAsStringAsync();
-    JsonNode? result;
-    try { result = JsonNode.Parse(submitText); }
-    catch (Exception ex) { throw new InvalidOperationException($"ComfyUI 提交接口返回非 JSON（HTTP {(int)submit.StatusCode}）：{submitText[..Math.Min(submitText.Length, 500)]}", ex); }
-    if (!submit.IsSuccessStatusCode || result?["prompt_id"] == null) {
-        var validationDetails = new List<string>();
-        if (result?["node_errors"] is JsonObject nodeErrors)
-            foreach (var nodeError in nodeErrors)
-                if (nodeError.Value?["errors"] is JsonArray errors)
-                    foreach (var error in errors.OfType<JsonObject>()) {
-                        var nodeTitle = nodeError.Value?["_meta"]?["title"]?.ToString();
-                        var nodeType = nodeError.Value?["class_type"]?.ToString();
-                        var detail = error["details"]?.ToString();
-                        var description = error["message"]?.ToString();
-                        validationDetails.Add($"{nodeTitle ?? nodeType ?? nodeError.Key}：{description}{(string.IsNullOrWhiteSpace(detail) ? "" : $"（{detail}）")}");
-                    }
-        var baseMessage = result?["error"]?["message"]?.ToString() ?? "ComfyUI 提交失败";
-        var message = validationDetails.Count == 0 ? baseMessage : $"{baseMessage}：{string.Join("；", validationDetails.Take(4))}";
-        return Results.Json(new { success = false, message, nodeErrors = result?["node_errors"]?.DeepClone() }, statusCode: (int)submit.StatusCode);
-    }
-    var promptId = result["prompt_id"]!.GetValue<string>();
-    await AddGenerationRecord(new GalleryGenerationRecord {
+    var promptId = Guid.NewGuid().ToString("D");
+    var returnedSeed = actualSeed is JsonValue returnedSeedValue && returnedSeedValue.TryGetValue<long>(out var parsedSeed) ? parsedSeed : (long?)null;
+    await EnqueueBridgeGeneration(new BridgeQueuedGeneration {
+        PromptId = promptId,
+        Prompt = prompt,
+        ClientId = form["clientId"].ToString(),
+        CreatedAt = DateTimeOffset.Now,
+        State = "PENDING"
+    });
+    try { await AddGenerationRecord(new GalleryGenerationRecord {
         PromptId = promptId,
         FilenamePrefix = NormalizeRelativePath(filenamePrefix),
         CreatedAt = DateTimeOffset.Now,
         PositivePrompt = form["positivePrompt"].ToString(),
         NegativePrompt = form["negativePrompt"].ToString(),
+        PromptSchemeName = form["promptSchemeName"].ToString(),
         Loras = ReadSelectedLoras(form["loras"].ToString()),
         WorkflowId = form["workflowId"].ToString(),
-        Seed = actualSeed,
-        Width = Has("width") ? int.Parse(Required("width")) : 0,
-        Height = Has("height") ? int.Parse(Required("height")) : 0,
-        Steps = Has("steps") ? int.Parse(Required("steps")) : 0,
-        Cfg = Has("cfg") ? double.Parse(Required("cfg")) : 0,
+        Seed = actualSeed is JsonValue seedValue && seedValue.TryGetValue<long>(out var seed) ? seed : null,
+        Width = Has("width") ? PostedInt("width") : null,
+        Height = Has("height") ? PostedInt("height") : null,
+        Steps = Has("steps") ? PostedInt("steps") : null,
+        Cfg = Has("cfg") ? PostedDouble("cfg") : null,
         Sampler = form["sampler"].ToString(),
         Scheduler = form["scheduler"].ToString()
-    });
-    return Results.Ok(new { success = true, promptId, finalOutputNodeId = finalId, actualSeed,
-        width = Has("width") ? int.Parse(Required("width")) : 0, height = Has("height") ? int.Parse(Required("height")) : 0 });
+    }); } catch {
+        await CancelBridgeQueuedGeneration(promptId);
+        throw;
+    }
+    return Results.Ok(new { success = true, promptId, finalOutputNodeId = finalId, queueOwner = "BRIDGE",
+        actualSeed = returnedSeed,
+        width = Has("width") ? PostedInt("width") : null, height = Has("height") ? PostedInt("height") : null });
 }).DisableAntiforgery();
 
 app.MapGet("/api/gallery", async (int? maxItems, int? page, int? pageSize) => {
@@ -567,19 +621,15 @@ app.MapPost("/api/assets/move", (GalleryPathsRequest request) => {
     if (paths.Length == 0) return Results.BadRequest(new { success = false, message = "请选择要迁移的资产" });
     var destination = Path.GetFullPath(GetMigrationDirectory());
     Directory.CreateDirectory(destination);
-    var planned = new List<(string Source, string Target)>();
-    var reservedTargets = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
-    foreach (var path in paths) {
+    var sources = paths.Select(path => {
         var source = Path.GetFullPath(path);
         if (!File.Exists(source) || !IsGalleryImage(source)) throw new InvalidOperationException($"资产图片不存在：{path}");
-        var target = Path.Combine(destination, Path.GetFileName(source));
-        if (string.Equals(source, target, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) ||
-            File.Exists(target) || !reservedTargets.Add(target))
-            return Results.Conflict(new { success = false, message = $"{Path.GetFileName(source)} 已经迁移了" });
-        planned.Add((source, target));
-    }
+        return source;
+    }).ToArray();
+    var migrationPlan = PlanImageMigrations(sources, destination);
+    if (migrationPlan.Error != null) return Results.Conflict(new { success = false, message = migrationPlan.Error });
     var assets = new List<object>();
-    foreach (var (source, target) in planned) {
+    foreach (var (source, target, _) in migrationPlan.Files) {
         File.Move(source, target);
         var image = ToGalleryImage(new GalleryFile { FullPath = target, Path = target, Filename = Path.GetFileName(target), CreatedAt = new DateTimeOffset(File.GetLastWriteTime(target)) });
         assets.Add(new { oldPath = source, localPath = target,
@@ -649,18 +699,20 @@ app.MapPost("/api/gallery/move", async (GalleryMoveRequest request) => {
     var gallery = await ScanGallery(1000);
     var metadataByPath = gallery.SelectMany(item => item.Images.Select(image => new { image.Path, Item = item }))
         .ToDictionary(x => x.Path, x => x.Item, StringComparer.OrdinalIgnoreCase);
-    var planned = new List<(string OldPath, string NewPath, string Source, string Target)>();
-    var reservedTargets = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+    var sourceFiles = new List<(string OldPath, string Source)>();
     foreach (var oldPath in paths) {
         var source = ResolveGalleryPath(oldPath, mustExist: true);
         if (!IsGalleryImage(source)) throw new InvalidOperationException($"不是可迁移的图片：{oldPath}");
-        var target = Path.Combine(destination, Path.GetFileName(source));
-        if (string.Equals(source, target, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) ||
-            File.Exists(target) || !reservedTargets.Add(target))
-            return Results.Conflict(new { success = false, message = $"{Path.GetFileName(source)} 已经迁移了" });
-        var newPath = externalDestination ? target : NormalizeRelativePath(Path.GetRelativePath(root, target));
-        planned.Add((oldPath, newPath, source, target));
+        sourceFiles.Add((oldPath, source));
     }
+    var migrationPlan = PlanImageMigrations(sourceFiles.Select(file => file.Source), destination);
+    if (migrationPlan.Error != null) return Results.Conflict(new { success = false, message = migrationPlan.Error });
+    var oldPathBySource = sourceFiles.GroupBy(file => file.Source, PathComparer())
+        .ToDictionary(group => group.Key, group => group.First().OldPath, PathComparer());
+    var planned = migrationPlan.Files.Select(file => {
+        var newPath = externalDestination ? file.Target : NormalizeRelativePath(Path.GetRelativePath(root, file.Target));
+        return (OldPath: oldPathBySource[file.Source], NewPath: newPath, file.Source, file.Target);
+    }).ToList();
     var moved = new List<(string OldPath, string NewPath, string Source, string Target)>();
     try {
         foreach (var (oldPath, newPath, source, target) in planned) {
@@ -724,8 +776,7 @@ app.MapPost("/api/history/move", async (HistoryMoveRequest request, IHttpClientF
         return Results.BadRequest(new { success = false, message = "目标文件夹不存在" });
 
     var client = factory.CreateClient("comfy");
-    var planned = new List<(string Source, string Target)>();
-    var reservedTargets = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+    var sourceFiles = new List<string>();
     foreach (var promptId in promptIds) {
         var history = await client.GetFromJsonAsync<JsonObject>($"history/{promptId}");
         var item = history?[promptId];
@@ -738,20 +789,17 @@ app.MapPost("/api/history/move", async (HistoryMoveRequest request, IHttpClientF
                 if (string.IsNullOrWhiteSpace(filename)) continue;
                 var source = Path.GetFullPath(Path.Combine(root, subfolder, filename));
                 if (!source.StartsWith(rootPrefix, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) || !File.Exists(source)) continue;
-                var target = Path.Combine(destination, Path.GetFileName(filename));
-                if (string.Equals(source, target, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) ||
-                    File.Exists(target) || reservedTargets.Contains(target))
-                    return Results.Conflict(new { success = false, message = $"{Path.GetFileName(source)} 已经迁移了" });
-                reservedTargets.Add(target);
-                planned.Add((source, target));
+                sourceFiles.Add(source);
             }
         }
     }
-    if (planned.Count == 0) return Results.BadRequest(new { success = false, message = "选中任务没有可迁移的图片，或图片已经在目标文件夹" });
+    if (sourceFiles.Count == 0) return Results.BadRequest(new { success = false, message = "选中任务没有可迁移的图片" });
+    var migrationPlan = PlanImageMigrations(sourceFiles.Distinct(PathComparer()), destination);
+    if (migrationPlan.Error != null) return Results.Conflict(new { success = false, message = migrationPlan.Error });
 
     var moved = new List<(string Source, string Target)>();
     try {
-        foreach (var file in planned) { File.Move(file.Source, file.Target); moved.Add(file); }
+        foreach (var file in migrationPlan.Files) { File.Move(file.Source, file.Target); moved.Add((file.Source, file.Target)); }
         using var deleteResponse = await client.PostAsJsonAsync("history", new { delete = promptIds });
         deleteResponse.EnsureSuccessStatusCode();
     } catch {
@@ -803,7 +851,180 @@ app.MapMethods("/comfy/{**path}", new[] { "GET", "POST" }, async (string? path, 
     await response.Content.CopyToAsync(context.Response.Body, context.RequestAborted);
 });
 
+_ = ProcessBridgeGenerationQueue(app.Lifetime.ApplicationStopping);
 app.Run();
+
+if (Volatile.Read(ref bridgeExitMode) == 2) {
+    var startInfo = CreateBridgeStartInfo();
+    _ = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to restart Local ComfyUI Bridge");
+}
+
+string BridgeGenerationQueuePath() => Path.Combine(AppContext.BaseDirectory, "data", "generation-queue.json");
+
+List<BridgeQueuedGeneration> ReadBridgeGenerationQueue() {
+    var path = BridgeGenerationQueuePath();
+    if (!File.Exists(path)) return new List<BridgeQueuedGeneration>();
+    try {
+        return JsonSerializer.Deserialize<List<BridgeQueuedGeneration>>(File.ReadAllText(path), GalleryJsonOptions())
+            ?? throw new InvalidDataException($"Bridge 生成队列为空：{path}");
+    } catch (JsonException exception) {
+        throw new InvalidDataException($"Bridge 生成队列损坏，已停止启动以避免丢失任务：{path}", exception);
+    }
+}
+
+async Task WriteBridgeGenerationQueue() {
+    var path = BridgeGenerationQueuePath();
+    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+    var temporary = path + ".tmp";
+    await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(generationQueue, GalleryJsonOptions(writeIndented: true)));
+    File.Move(temporary, path, true);
+}
+
+async Task EnqueueBridgeGeneration(BridgeQueuedGeneration item) {
+    await generationQueueLock.WaitAsync();
+    try {
+        generationQueue.RemoveAll(entry => entry.State == "FAILED" && DateTimeOffset.Now - entry.CreatedAt > TimeSpan.FromDays(7));
+        if (generationQueue.Count(entry => entry.State == "PENDING") >= 2000)
+            throw new InvalidOperationException("Bridge 待生成队列已达到 2000 个任务，请先处理现有队列");
+        if (generationQueue.Any(entry => string.Equals(entry.PromptId, item.PromptId, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException($"Bridge 队列中已存在任务 {item.PromptId}");
+        generationQueue.Add(item);
+        await WriteBridgeGenerationQueue();
+    } finally { generationQueueLock.Release(); }
+    generationQueueSignal.Release();
+}
+
+async Task<BridgeQueuedGeneration?> FindBridgeQueuedGeneration(string promptId) {
+    await generationQueueLock.WaitAsync();
+    try {
+        var item = generationQueue.FirstOrDefault(entry => string.Equals(entry.PromptId, promptId, StringComparison.OrdinalIgnoreCase));
+        return item == null ? null : new BridgeQueuedGeneration {
+            PromptId = item.PromptId, ClientId = item.ClientId, CreatedAt = item.CreatedAt, State = item.State, Error = item.Error
+        };
+    } finally { generationQueueLock.Release(); }
+}
+
+async Task<bool> CancelBridgeQueuedGeneration(string promptId) {
+    await generationQueueLock.WaitAsync();
+    try {
+        var removed = generationQueue.RemoveAll(entry => string.Equals(entry.PromptId, promptId, StringComparison.OrdinalIgnoreCase)) > 0;
+        if (removed) await WriteBridgeGenerationQueue();
+        return removed;
+    } finally { generationQueueLock.Release(); }
+}
+
+async Task RemoveBridgeQueuedGeneration(string promptId) {
+    await generationQueueLock.WaitAsync();
+    try {
+        if (generationQueue.RemoveAll(entry => string.Equals(entry.PromptId, promptId, StringComparison.OrdinalIgnoreCase)) > 0)
+            await WriteBridgeGenerationQueue();
+    } finally { generationQueueLock.Release(); }
+}
+
+async Task FailBridgeQueuedGeneration(string promptId, string error) {
+    await generationQueueLock.WaitAsync();
+    try {
+        var item = generationQueue.FirstOrDefault(entry => string.Equals(entry.PromptId, promptId, StringComparison.OrdinalIgnoreCase));
+        if (item == null) return;
+        item.State = "FAILED";
+        item.Error = error;
+        await WriteBridgeGenerationQueue();
+    } finally { generationQueueLock.Release(); }
+    await AppendAgentLog("error", "generation.queue.failed", error, new { promptId });
+}
+
+async Task ProcessBridgeGenerationQueue(CancellationToken cancellationToken) {
+    var factory = app.Services.GetRequiredService<IHttpClientFactory>();
+    while (!cancellationToken.IsCancellationRequested) {
+        BridgeQueuedGeneration? item;
+        await generationQueueLock.WaitAsync(cancellationToken);
+        try { item = generationQueue.FirstOrDefault(entry => entry.State == "PENDING"); }
+        finally { generationQueueLock.Release(); }
+        if (item == null) {
+            await generationQueueSignal.WaitAsync(TimeSpan.FromSeconds(1), cancellationToken);
+            continue;
+        }
+        try {
+            var client = factory.CreateClient("comfy");
+            using var queueResponse = await client.GetAsync("queue", cancellationToken);
+            queueResponse.EnsureSuccessStatusCode();
+            var queue = JsonNode.Parse(await queueResponse.Content.ReadAsStringAsync(cancellationToken)) as JsonObject
+                ?? throw new InvalidOperationException("ComfyUI queue 返回格式无效");
+            bool Contains(JsonObject source, string key, string id) => source[key] is JsonArray rows && rows.Any(row =>
+                row is JsonArray cells && cells.Count > 1 && string.Equals(cells[1]?.ToString(), id, StringComparison.Ordinal));
+            if (Contains(queue, "queue_running", item.PromptId) || Contains(queue, "queue_pending", item.PromptId)) {
+                await RemoveBridgeQueuedGeneration(item.PromptId);
+                continue;
+            }
+            using var historyResponse = await client.GetAsync($"history/{Uri.EscapeDataString(item.PromptId)}", cancellationToken);
+            historyResponse.EnsureSuccessStatusCode();
+            var history = JsonNode.Parse(await historyResponse.Content.ReadAsStringAsync(cancellationToken)) as JsonObject
+                ?? throw new InvalidOperationException("ComfyUI history 返回格式无效");
+            if (history[item.PromptId] != null) {
+                await RemoveBridgeQueuedGeneration(item.PromptId);
+                continue;
+            }
+            var activeCount = (queue["queue_running"] as JsonArray)?.Count ?? 0;
+            activeCount += (queue["queue_pending"] as JsonArray)?.Count ?? 0;
+            if (activeCount >= ComfySubmissionWindow) {
+                await Task.Delay(750, cancellationToken);
+                continue;
+            }
+            if (await FindBridgeQueuedGeneration(item.PromptId) is not { State: "PENDING" }) continue;
+            using var submit = await client.PostAsJsonAsync("prompt", new {
+                prompt = item.Prompt,
+                client_id = item.ClientId,
+                prompt_id = item.PromptId
+            }, cancellationToken);
+            var submitText = await submit.Content.ReadAsStringAsync(cancellationToken);
+            if (!submit.IsSuccessStatusCode) {
+                await FailBridgeQueuedGeneration(item.PromptId, $"ComfyUI 拒绝任务（HTTP {(int)submit.StatusCode}）：{submitText[..Math.Min(submitText.Length, 500)]}");
+                continue;
+            }
+            var result = JsonNode.Parse(submitText) as JsonObject
+                ?? throw new InvalidOperationException($"ComfyUI 提交接口返回非 JSON：{submitText[..Math.Min(submitText.Length, 500)]}");
+            if (!string.Equals(result["prompt_id"]?.ToString(), item.PromptId, StringComparison.OrdinalIgnoreCase)) {
+                await FailBridgeQueuedGeneration(item.PromptId, "ComfyUI 返回的任务 ID 与 Bridge 预分配 ID 不一致");
+                continue;
+            }
+            await RemoveBridgeQueuedGeneration(item.PromptId);
+        } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
+            return;
+        } catch (HttpRequestException) {
+            await Task.Delay(1000, cancellationToken);
+        } catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested) {
+            await Task.Delay(1000, cancellationToken);
+        } catch (Exception exception) {
+            await FailBridgeQueuedGeneration(item.PromptId, exception.Message);
+        }
+    }
+}
+
+void ScheduleBridgeExit(HttpContext context, IHostApplicationLifetime lifetime, bool restart) {
+    Interlocked.Exchange(ref bridgeExitMode, restart ? 2 : 1);
+    context.Response.OnCompleted(() => {
+        lifetime.StopApplication();
+        return Task.CompletedTask;
+    });
+}
+
+ProcessStartInfo CreateBridgeStartInfo() {
+    var processPath = Environment.ProcessPath
+        ?? throw new InvalidOperationException("Cannot resolve the Local ComfyUI Bridge executable path");
+    var startInfo = new ProcessStartInfo(processPath) {
+        WorkingDirectory = AppContext.BaseDirectory,
+        UseShellExecute = false,
+        CreateNoWindow = true
+    };
+    var commandLine = Environment.GetCommandLineArgs();
+    if (string.Equals(Path.GetFileNameWithoutExtension(processPath), "dotnet", StringComparison.OrdinalIgnoreCase)) {
+        if (commandLine.Length == 0 || !File.Exists(commandLine[0]))
+            throw new InvalidOperationException("Cannot resolve the Local ComfyUI Bridge assembly path");
+        startInfo.ArgumentList.Add(commandLine[0]);
+    }
+    foreach (var argument in commandLine.Skip(1)) startInfo.ArgumentList.Add(argument);
+    return startInfo;
+}
 
 void CopySafeResponseHeader(HttpResponse target, string name, IEnumerable<string> values) {
     var safeValues = values.Where(value => value.All(character => character == '\t' || character is >= ' ' and <= '~')).ToArray();
@@ -847,16 +1068,31 @@ async Task<LocalWorkflowScanResult> ScanLocalWorkflows(IHttpClientFactory factor
             ?? throw new InvalidOperationException("ComfyUI 节点定义不是有效 JSON");
         return cachedObjectInfo;
     }
+    var bundledDirectory = Path.Combine(AppContext.BaseDirectory, "Resources", "ComfyUI", "BuiltInWorkflows");
     var files = Directory.EnumerateFiles(directory, "*.json", SearchOption.AllDirectories)
-        .OrderBy(path => path, StringComparer.OrdinalIgnoreCase).Take(200).ToArray();
-    foreach (var path in files) {
-        var relative = NormalizeRelativePath(Path.GetRelativePath(directory, path));
+        .Select(path => (Path: path, Root: directory, Prefix: ""))
+        .Concat(Directory.Exists(bundledDirectory)
+            ? Directory.EnumerateFiles(bundledDirectory, "*.json", SearchOption.AllDirectories).Select(path => (Path: path, Root: bundledDirectory, Prefix: "内置/"))
+            : Enumerable.Empty<(string Path, string Root, string Prefix)>())
+        .OrderBy(item => item.Prefix, StringComparer.OrdinalIgnoreCase)
+        .ThenBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
+        .Take(200).ToArray();
+    foreach (var item in files) {
+        var path = item.Path;
+        var relative = item.Prefix + NormalizeRelativePath(Path.GetRelativePath(item.Root, path));
         try {
             var info = new FileInfo(path);
             if (info.Length > 5 * 1024 * 1024) throw new InvalidOperationException("文件超过 5 MB");
             var raw = await File.ReadAllTextAsync(path);
             var source = JsonNode.Parse(raw) as JsonObject ?? throw new InvalidOperationException("JSON 根节点不是对象");
             var prompt = IsApiWorkflow(source) ? source : await ConvertLocalWorkflow(factory, raw, GetObjectInfo);
+            foreach (var node in prompt.Select(entry => entry.Value).OfType<JsonObject>().Where(node => node["class_type"]?.GetValue<string>() == "CheckpointLoaderSimple")) {
+                if (node["inputs"]?["ckpt_name"]?.GetValue<string>() != "__AIPROVIDER_FIRST_CHECKPOINT__") continue;
+                var choices = (await GetObjectInfo())["CheckpointLoaderSimple"]?["input"]?["required"]?["ckpt_name"]?[0] as JsonArray;
+                var checkpointName = choices?.FirstOrDefault()?.GetValue<string>();
+                if (string.IsNullOrWhiteSpace(checkpointName)) throw new InvalidOperationException("ComfyUI 没有可用的 checkpoint 模型");
+                node["inputs"]!["ckpt_name"] = checkpointName;
+            }
             result.Workflows.Add(BuildLocalWorkflow(relative, info.LastWriteTimeUtc, prompt));
         } catch (Exception ex) {
             result.Rejected.Add(new LocalWorkflowRejection { Path = relative, Message = ex.Message });
@@ -1040,6 +1276,29 @@ JsonObject BuildLocalWorkflow(string relative, DateTime modifiedAtUtc, JsonObjec
     }
     var sourceImage = Find(node => node["class_type"]?.GetValue<string>() == "LoadImage" && node["inputs"]?["image"] != null);
     if (sourceImage != null) Bind("sourceImage", sourceImage, "image");
+    var cutoutJoin = Find(node => node["class_type"]?.GetValue<string>()?.Contains("JoinImageWithAlpha", StringComparison.OrdinalIgnoreCase) == true);
+    var supportsCutoutTarget = false;
+    if (cutoutJoin is { } join && join.Value["inputs"]?["alpha"] is JsonArray personAlpha && personAlpha.Count >= 2 &&
+        personAlpha[0] is JsonValue invertIdValue && invertIdValue.TryGetValue<string>(out var invertId) &&
+        entries.TryGetValue(invertId, out var invertNode) &&
+        invertNode["class_type"]?.GetValue<string>()?.Equals("InvertMask", StringComparison.OrdinalIgnoreCase) == true &&
+        invertNode["inputs"]?["mask"] is JsonArray backgroundAlpha && backgroundAlpha.Count >= 2 &&
+        backgroundAlpha[0] is JsonValue removalIdValue && removalIdValue.TryGetValue<string>(out var removalId) &&
+        entries.TryGetValue(removalId, out var removalNode) &&
+        removalNode["class_type"]?.GetValue<string>()?.Contains("RemoveBackground", StringComparison.OrdinalIgnoreCase) == true) {
+        fields["cutoutTarget"] = new JsonObject {
+            ["nodeId"] = join.Key,
+            ["nodeTitle"] = Title(join.Key, join.Value),
+            ["nodeType"] = "CutoutTarget",
+            ["input"] = "alpha",
+            ["label"] = "抠图目标",
+            ["personAlpha"] = personAlpha.DeepClone(),
+            ["backgroundAlpha"] = backgroundAlpha.DeepClone()
+        };
+        defaults["cutoutTarget"] = "person";
+        exposed.Add("cutoutTarget");
+        supportsCutoutTarget = true;
+    }
     var secondPass = Find(node => node["class_type"]?.GetValue<string>()?.Contains("UltimateSDUpscale", StringComparison.OrdinalIgnoreCase) == true);
     KeyValuePair<string, JsonObject>? exactOutputScale = null;
     if (secondPass != null) {
@@ -1086,26 +1345,28 @@ JsonObject BuildLocalWorkflow(string relative, DateTime modifiedAtUtc, JsonObjec
     }
 
     var isTextGeneration = latent != null || sampler != null;
-    var required = isTextGeneration
-        ? new[] { "positivePrompt", "negativePrompt", "width", "height", "seed", "steps", "cfg", "sampler", "scheduler", "filenamePrefix" }
-        : sourceImage != null
-            ? new[] { "sourceImage", "filenamePrefix" }
-            : new[] { "filenamePrefix" };
-    var missing = required.Where(key => !fields.ContainsKey(key)).ToArray();
-    if (missing.Length > 0) throw new InvalidOperationException("无法自动识别字段：" + string.Join("、", missing));
-    if (output == null) throw new InvalidOperationException("找不到 SaveImage 输出节点");
-    var primaryOutput = output.Value;
+    var usesZeroNegative = entries.Values.Any(node => node["class_type"]?.GetValue<string>()?.Equals("ConditioningZeroOut", StringComparison.OrdinalIgnoreCase) == true);
+    // Workflow discovery is deliberately permissive: a valid ComfyUI graph may omit
+    // semantic fields (for example ConditioningZeroOut has no negative text input)
+    // and should still be listed. Bind only the fields that can be identified.
+    var primaryOutput = output;
 
     var id = "local-" + Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(relative.ToLowerInvariant())))[..16].ToLowerInvariant();
     defaults["workflowId"] = id;
     var hasControlNet = entries.Values.Any(node => node["class_type"]?.GetValue<string>()?.Contains("ControlNet", StringComparison.OrdinalIgnoreCase) == true);
     var needsSourceImage = sourceImage != null;
+    var hasInpaintPipeline = needsSourceImage && entries.Values.Any(node => {
+        var classType = node["class_type"]?.GetValue<string>() ?? "";
+        return classType.Contains("VAEEncodeForInpaint", StringComparison.OrdinalIgnoreCase)
+            || classType.Contains("InpaintModelConditioning", StringComparison.OrdinalIgnoreCase)
+            || classType.Contains("SetLatentNoiseMask", StringComparison.OrdinalIgnoreCase);
+    });
     var hasBackgroundModel = entries.Values.Any(node => node["class_type"]?.GetValue<string>()?.Contains("BackgroundRemovalModel", StringComparison.OrdinalIgnoreCase) == true);
     var hasBackgroundRemoval = entries.Values.Any(node => node["class_type"]?.GetValue<string>()?.Contains("RemoveBackground", StringComparison.OrdinalIgnoreCase) == true);
     var hasAlphaJoin = entries.Values.Any(node => node["class_type"]?.GetValue<string>()?.Contains("JoinImageWithAlpha", StringComparison.OrdinalIgnoreCase) == true);
     var autoCutout = hasBackgroundModel && hasBackgroundRemoval && hasAlphaJoin && transparentOutput != null;
     var transparentOutputId = transparentOutput?.Key;
-    var generationAndCutout = isTextGeneration && autoCutout && transparentOutputId != primaryOutput.Key;
+    var generationAndCutout = primaryOutput != null && isTextGeneration && autoCutout && transparentOutputId != primaryOutput.Value.Key;
     defaults["generateTransparent"] = generationAndCutout;
     return new JsonObject {
         ["id"] = id,
@@ -1115,14 +1376,14 @@ JsonObject BuildLocalWorkflow(string relative, DateTime modifiedAtUtc, JsonObjec
         ["definition"] = prompt.DeepClone(),
         ["binding"] = new JsonObject {
             ["fields"] = fields,
-            ["outputNode"] = new JsonObject { ["nodeId"] = primaryOutput.Key, ["title"] = Title(primaryOutput.Key, primaryOutput.Value) },
+            ["outputNode"] = primaryOutput == null ? null : new JsonObject { ["nodeId"] = primaryOutput.Value.Key, ["title"] = Title(primaryOutput.Value.Key, primaryOutput.Value.Value) },
             ["optionalOutputs"] = generationAndCutout ? new JsonObject { ["transparent"] = transparentOutputId } : null,
-            ["capabilities"] = new JsonObject { ["controlNet"] = hasControlNet, ["styleReference"] = false, ["poseReference"] = false, ["inputImage"] = needsSourceImage, ["autoCutout"] = autoCutout, ["generationAndCutout"] = generationAndCutout }
+            ["capabilities"] = new JsonObject { ["controlNet"] = hasControlNet, ["styleReference"] = false, ["poseReference"] = false, ["inputImage"] = needsSourceImage, ["inpaint"] = hasInpaintPipeline, ["outpaint"] = hasInpaintPipeline, ["autoCutout"] = autoCutout, ["generationAndCutout"] = generationAndCutout, ["cutoutTarget"] = supportsCutoutTarget }
         },
         ["defaults"] = defaults,
         ["fields"] = exposed,
         ["models"] = checkpoint?.Value["inputs"]?["ckpt_name"] is JsonNode checkpointName ? new JsonArray(checkpointName.DeepClone()) : new JsonArray(),
-        ["capabilities"] = new JsonObject { ["controlNet"] = hasControlNet, ["styleReference"] = false, ["poseReference"] = false, ["inputImage"] = needsSourceImage, ["autoCutout"] = autoCutout, ["generationAndCutout"] = generationAndCutout }
+        ["capabilities"] = new JsonObject { ["controlNet"] = hasControlNet, ["styleReference"] = false, ["poseReference"] = false, ["inputImage"] = needsSourceImage, ["inpaint"] = hasInpaintPipeline, ["outpaint"] = hasInpaintPipeline, ["autoCutout"] = autoCutout, ["generationAndCutout"] = generationAndCutout, ["cutoutTarget"] = supportsCutoutTarget }
     };
 }
 
@@ -1140,6 +1401,54 @@ string GetMigrationDirectory() {
 }
 string NormalizeRelativePath(string? path) => (path ?? "").Replace('\\', '/').TrimStart('/');
 bool IsGalleryImage(string path) => new[] { ".png", ".jpg", ".jpeg", ".webp" }.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
+StringComparer PathComparer() => OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+ImageMigrationPlan PlanImageMigrations(IEnumerable<string> sourcePaths, string destination) {
+    var comparer = PathComparer();
+    var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+    var sources = sourcePaths.Select(Path.GetFullPath).Distinct(comparer).ToArray();
+    var sourceSet = sources.ToHashSet(comparer);
+    var existingHashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var existing in Directory.EnumerateFiles(destination, "*", SearchOption.AllDirectories).Where(IsGalleryImage)) {
+        var fullPath = Path.GetFullPath(existing);
+        if (sourceSet.Contains(fullPath)) continue;
+        var hash = FileSha256(fullPath);
+        existingHashes.TryAdd(hash, fullPath);
+    }
+
+    var selectedHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var reservedTargets = new HashSet<string>(comparer);
+    var files = new List<ImageMigrationFile>();
+    foreach (var source in sources) {
+        var sourceHash = FileSha256(source);
+        if (!selectedHashes.Add(sourceHash))
+            return new ImageMigrationPlan(files, $"选中的图片中存在内容重复项：{Path.GetFileName(source)}");
+        if (existingHashes.TryGetValue(sourceHash, out var duplicate))
+            return new ImageMigrationPlan(files, $"{Path.GetFileName(source)} 与迁移目录中的 {Path.GetFileName(duplicate)} 内容相同，不能重复迁移");
+
+        var target = Path.Combine(destination, Path.GetFileName(source));
+        if (string.Equals(source, target, comparison))
+            return new ImageMigrationPlan(files, $"{Path.GetFileName(source)} 已经在目标文件夹");
+        if (File.Exists(target) || reservedTargets.Contains(target)) {
+            var extension = Path.GetExtension(source);
+            var stem = Path.GetFileNameWithoutExtension(source);
+            target = Path.Combine(destination, $"{stem}_{sourceHash[..12].ToLowerInvariant()}{extension}");
+            if (File.Exists(target) || reservedTargets.Contains(target)) {
+                target = Path.Combine(destination, $"{stem}_{sourceHash.ToLowerInvariant()}{extension}");
+                if (File.Exists(target) || reservedTargets.Contains(target))
+                    return new ImageMigrationPlan(files, $"无法为 {Path.GetFileName(source)} 创建唯一的 hash 文件名");
+            }
+        }
+        reservedTargets.Add(target);
+        files.Add(new ImageMigrationFile(source, target, sourceHash.ToLowerInvariant()));
+    }
+    return new ImageMigrationPlan(files, null);
+}
+
+string FileSha256(string path) {
+    using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+    return Convert.ToHexString(SHA256.HashData(stream));
+}
 
 string ResolveGalleryPath(string relativePath, bool mustExist) {
     var root = GalleryRoot();
@@ -1177,7 +1486,7 @@ List<GalleryItem> ScanMigratedAssets(int maxItems) {
             var embedded = ReadEmbeddedGeneration(path);
             return new GalleryItem {
                 Id = "asset-" + Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(relative.ToLowerInvariant()))).ToLowerInvariant(),
-                Source = "asset", Prompt = embedded?.PositivePrompt ?? "已迁移图片资产", NegativePrompt = embedded?.NegativePrompt,
+                Source = "asset", Prompt = embedded?.PositivePrompt, NegativePrompt = embedded?.NegativePrompt,
                 CreatedAt = file.CreatedAt, Seed = embedded?.Seed, Steps = embedded?.Steps, Cfg = embedded?.Cfg,
                 Sampler = embedded?.Sampler, Scheduler = embedded?.Scheduler, Images = new List<GalleryImage> { ToGalleryImage(file) }
             };
@@ -1189,8 +1498,8 @@ async Task<GalleryIndex> ReadGalleryIndex() {
     if (!File.Exists(path)) return new GalleryIndex();
     try {
         return JsonSerializer.Deserialize<GalleryIndex>(await File.ReadAllTextAsync(path), GalleryJsonOptions()) ?? new GalleryIndex();
-    } catch (JsonException) {
-        return new GalleryIndex();
+    } catch (JsonException exception) {
+        throw new InvalidDataException($"Bridge 任务索引损坏，已停止覆盖原文件：{path}", exception);
     }
 }
 
@@ -1217,6 +1526,14 @@ async Task AddGenerationRecord(GalleryGenerationRecord record) {
         if (index.Generations.Count > 2000)
             index.Generations = index.Generations.OrderByDescending(item => item.CreatedAt).Take(2000).ToList();
         await WriteGalleryIndex(index);
+    } finally { galleryIndexLock.Release(); }
+}
+
+async Task<GalleryGenerationRecord?> FindGenerationRecord(string promptId) {
+    await galleryIndexLock.WaitAsync();
+    try {
+        var index = await ReadGalleryIndex();
+        return index.Generations.FirstOrDefault(item => string.Equals(item.PromptId, promptId, StringComparison.OrdinalIgnoreCase));
     } finally { galleryIndexLock.Release(); }
 }
 
@@ -1282,8 +1599,8 @@ async Task<List<GalleryItem>> ScanGallery(int maxItems) {
             if (!confirmed.SequenceEqual(generation.Files, StringComparer.OrdinalIgnoreCase)) { generation.Files = confirmed; changed = true; }
             items.Add(new GalleryItem {
                 Id = generation.PromptId, PromptId = generation.PromptId,
-                Prompt = string.IsNullOrWhiteSpace(generation.PositivePrompt) ? "本机生成图片" : generation.PositivePrompt,
-                NegativePrompt = generation.NegativePrompt, CreatedAt = generation.CreatedAt,
+                Prompt = generation.PositivePrompt,
+                NegativePrompt = generation.NegativePrompt, PromptSchemeName = generation.PromptSchemeName, CreatedAt = generation.CreatedAt,
                 GenerationCompletedAt = generation.GenerationCompletedAt, GenerationDurationMs = generation.GenerationDurationMs,
                 Loras = generation.Loras,
                 Width = generation.Width, Height = generation.Height, Seed = generation.Seed, Steps = generation.Steps,
@@ -1295,7 +1612,7 @@ async Task<List<GalleryItem>> ScanGallery(int maxItems) {
             var id = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(file.Path.ToLowerInvariant()))).ToLowerInvariant();
             var embedded = ReadEmbeddedGeneration(file.FullPath);
             items.Add(new GalleryItem {
-                Id = id, Prompt = embedded?.PositivePrompt ?? "本机历史图片", NegativePrompt = embedded?.NegativePrompt, Loras = embedded?.Loras ?? new List<GenerationLora>(),
+                Id = id, Prompt = embedded?.PositivePrompt, NegativePrompt = embedded?.NegativePrompt, Loras = embedded?.Loras ?? new List<GenerationLora>(),
                 CreatedAt = file.CreatedAt, Width = embedded?.Width, Height = embedded?.Height, Seed = embedded?.Seed,
                 Steps = embedded?.Steps, Cfg = embedded?.Cfg, Sampler = embedded?.Sampler, Scheduler = embedded?.Scheduler,
                 Images = new List<GalleryImage> { ToGalleryImage(file) }
@@ -1567,6 +1884,8 @@ sealed class BridgeSettings {
     }
 }
 sealed class FolderRequest { public string? Name { get; set; } }
+sealed record ImageMigrationFile(string Source, string Target, string Sha256);
+sealed record ImageMigrationPlan(List<ImageMigrationFile> Files, string? Error);
 sealed class AssetPathRequest { public string? Path { get; set; } }
 sealed class HistoryMoveRequest { public string[] PromptIds { get; set; } = Array.Empty<string>(); public string? Folder { get; set; } }
 class GalleryPathsRequest { public string[] Paths { get; set; } = Array.Empty<string>(); }
@@ -1592,6 +1911,14 @@ sealed class GalleryIndex {
     public int Version { get; set; } = 1;
     public List<GalleryGenerationRecord> Generations { get; set; } = new();
 }
+sealed class BridgeQueuedGeneration {
+    public string PromptId { get; set; } = "";
+    public JsonObject Prompt { get; set; } = new();
+    public string ClientId { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+    public string State { get; set; } = "PENDING";
+    public string? Error { get; set; }
+}
 sealed class GalleryGenerationRecord {
     public string PromptId { get; set; } = "";
     public string FilenamePrefix { get; set; } = "";
@@ -1600,6 +1927,7 @@ sealed class GalleryGenerationRecord {
     public long? GenerationDurationMs { get; set; }
     public string? PositivePrompt { get; set; }
     public string? NegativePrompt { get; set; }
+    public string? PromptSchemeName { get; set; }
     public List<GenerationLora> Loras { get; set; } = new();
     public string? WorkflowId { get; set; }
     public long? Seed { get; set; }
@@ -1632,6 +1960,7 @@ sealed class GalleryItem {
     public string Source { get; set; } = "output";
     public string Prompt { get; set; } = "";
     public string? NegativePrompt { get; set; }
+    public string? PromptSchemeName { get; set; }
     public List<GenerationLora> Loras { get; set; } = new();
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? GenerationCompletedAt { get; set; }

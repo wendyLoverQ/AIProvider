@@ -28,22 +28,19 @@ describe("workbench workflow state", () => {
 
   it("only applies Prompt fields that belong to the current workflow", () => {
     const workflow = { id: "futa01", binding: { fields: { positivePrompt: {}, width: {} } } };
-    expect(applySchemeToWorkflow({ workflowId: "futa01", positivePrompt: "old", width: 1 }, { parameters: { positivePrompt: "new", width: 1080 } }, workflow))
+    expect(applySchemeToWorkflow({ workflowId: "futa01", positivePrompt: "old", width: 1 }, { positivePrompt: "new", negativePrompt: "negative" }, workflow))
       .toEqual({ workflowId: "futa01", positivePrompt: "new", width: 1 });
-    expect(applySchemeToWorkflow({ workflowId: "futa01", width: 1 }, { parameters: { width: 2 } }, workflow))
-      .toEqual({ workflowId: "futa01", width: 1 });
     expect(applySchemeToWorkflow({ workflowId: "futa01", width: 1 }, null, workflow)).toEqual({ workflowId: "futa01", width: 1 });
-    expect(applySchemeToWorkflow({ workflowId: "futa01", width: 1 }, {}, workflow)).toEqual({ workflowId: "futa01", width: 1 });
-    expect(applySchemeToWorkflow({ workflowId: "futa01" }, { parameters: {} }, null)).toEqual({ workflowId: "futa01" });
+    expect(applySchemeToWorkflow({ workflowId: "futa01" }, { positivePrompt: "new" }, null)).toEqual({ workflowId: "futa01" });
   });
 
-  it("does not let an empty global scheme value erase a workflow Prompt", () => {
+  it("loads the saved final Prompt exactly, including an intentionally empty value", () => {
     const workflow = { id: "futa01", binding: { fields: { positivePrompt: {} } } };
     expect(applySchemeToWorkflow(
       { workflowId: "futa01", positivePrompt: "old" },
-      { parameters: { positivePrompt: "" } },
+      { positivePrompt: "" },
       workflow,
-    )).toEqual({ workflowId: "futa01", positivePrompt: "old" });
+    )).toEqual({ workflowId: "futa01", positivePrompt: "" });
   });
 
   it("keeps edits when the JSON is unchanged and reloads defaults when modifiedAt changes", () => {

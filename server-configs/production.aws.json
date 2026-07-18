@@ -1,0 +1,21 @@
+{
+  "host": "ec2-35-78-120-126.ap-northeast-1.compute.amazonaws.com",
+  "user": "ubuntu",
+  "identityFile": "C:\\Users\\49213\\Desktop\\A\\codex\\AIProvider\\server-configs\\aws-tokyo-main-key.pem",
+  "gitRemote": "origin",
+  "gitBranch": "master",
+  "sourcePath": "/opt/aiprovider/AIProvider",
+  "buildRoot": "/opt/aiprovider/builds",
+  "releaseBackupRoot": "/opt/aiprovider/releases",
+  "releaseBackupCount": 3,
+  "backendModule": "AIProvider-back",
+  "backendArtifact": "AIProvider-back/target/ai-provider-0.0.1-SNAPSHOT.jar",
+  "backendService": "aiprovider-backend.service",
+  "backendPath": "/opt/aiprovider/backend/app.jar",
+  "frontendModule": "AIProvider-front",
+  "frontendArtifact": "AIProvider-front/dist",
+  "frontendPath": "/opt/aiprovider/frontend",
+  "environmentFile": "/etc/aimaid/aimaid.env",
+  "healthUrl": "http://127.0.0.1:8888/api/health",
+  "publicBaseUrl": "http://35.78.120.126"
+}

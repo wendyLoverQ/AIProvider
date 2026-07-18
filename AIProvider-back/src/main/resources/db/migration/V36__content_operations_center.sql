@@ -1,0 +1,141 @@
+CREATE TABLE c_ContentOperationSettings (
+  Id TINYINT NOT NULL,
+  AutomationEnabled BOOLEAN NOT NULL DEFAULT TRUE,
+  DefaultPublishMode VARCHAR(20) NOT NULL DEFAULT 'AUTO',
+  CrawlIntervalMinutes INT NOT NULL DEFAULT 240,
+  CommentIntervalMinutes INT NOT NULL DEFAULT 30,
+  ContentModel VARCHAR(100) NOT NULL DEFAULT 'gemini',
+  UpdatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (Id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO c_ContentOperationSettings(Id, AutomationEnabled, DefaultPublishMode, CrawlIntervalMinutes, CommentIntervalMinutes, ContentModel)
+VALUES (1, TRUE, 'AUTO', 240, 30, 'gemini');
+
+CREATE TABLE c_ContentAccounts (
+  Id BIGINT NOT NULL AUTO_INCREMENT,
+  Platform VARCHAR(30) NOT NULL,
+  DisplayName VARCHAR(100) NOT NULL,
+  AccountHandle VARCHAR(120) NULL,
+  PublishMode VARCHAR(20) NOT NULL,
+  Enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  ConnectionStatus VARCHAR(30) NOT NULL DEFAULT 'NOT_CONFIGURED',
+  AdapterStatus VARCHAR(30) NOT NULL DEFAULT 'NOT_CONFIGURED',
+  LastError VARCHAR(500) NULL,
+  LastPublishedAt DATETIME(3) NULL,
+  CreatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UpdatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (Id),
+  KEY IX_ContentAccounts_PlatformEnabled (Platform, Enabled)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE c_ContentSources (
+  Id BIGINT NOT NULL AUTO_INCREMENT,
+  Platform VARCHAR(30) NOT NULL,
+  SourceType VARCHAR(30) NOT NULL,
+  Name VARCHAR(120) NOT NULL,
+  SourceUrl VARCHAR(1000) NOT NULL,
+  PollIntervalMinutes INT NOT NULL DEFAULT 240,
+  Enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  LastCollectedAt DATETIME(3) NULL,
+  LastStatus VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+  LastError VARCHAR(500) NULL,
+  CreatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UpdatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (Id),
+  UNIQUE KEY UX_ContentSources_PlatformUrl (Platform, SourceUrl(255)),
+  KEY IX_ContentSources_Due (Enabled, LastCollectedAt)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE c_ContentItems (
+  Id BIGINT NOT NULL AUTO_INCREMENT,
+  SourceId BIGINT NOT NULL,
+  ExternalId VARCHAR(255) NOT NULL,
+  SourceUrl VARCHAR(1000) NULL,
+  AuthorName VARCHAR(255) NULL,
+  RawText LONGTEXT NOT NULL,
+  RawPayloadJson JSON NULL,
+  PublishedAt DATETIME(3) NULL,
+  ProcessingStatus VARCHAR(30) NOT NULL DEFAULT 'COLLECTED',
+  CollectedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (Id),
+  UNIQUE KEY UX_ContentItems_SourceExternal (SourceId, ExternalId),
+  KEY IX_ContentItems_StatusCollected (ProcessingStatus, CollectedAt),
+  CONSTRAINT FK_ContentItems_Source FOREIGN KEY (SourceId) REFERENCES c_ContentSources(Id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE c_ContentDrafts (
+  Id BIGINT NOT NULL AUTO_INCREMENT,
+  ContentItemId BIGINT NULL,
+  Platform VARCHAR(30) NOT NULL,
+  Title VARCHAR(255) NOT NULL,
+  Body LONGTEXT NOT NULL,
+  TagsJson JSON NULL,
+  MediaJson JSON NULL,
+  ModelName VARCHAR(100) NULL,
+  PromptVersion VARCHAR(50) NULL,
+  ReviewStatus VARCHAR(30) NOT NULL DEFAULT 'READY',
+  CreatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UpdatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (Id),
+  KEY IX_ContentDrafts_Status (Platform, ReviewStatus, CreatedAt),
+  CONSTRAINT FK_ContentDrafts_Item FOREIGN KEY (ContentItemId) REFERENCES c_ContentItems(Id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE c_ContentPublications (
+  Id BIGINT NOT NULL AUTO_INCREMENT,
+  DraftId BIGINT NOT NULL,
+  AccountId BIGINT NOT NULL,
+  PublishMode VARCHAR(20) NOT NULL,
+  Status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+  ExternalPostId VARCHAR(255) NULL,
+  ExternalPostUrl VARCHAR(1000) NULL,
+  AttemptCount INT NOT NULL DEFAULT 0,
+  ScheduledAt DATETIME(3) NOT NULL,
+  StartedAt DATETIME(3) NULL,
+  PublishedAt DATETIME(3) NULL,
+  ErrorCode VARCHAR(80) NULL,
+  ErrorMessage VARCHAR(1000) NULL,
+  CreatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UpdatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (Id),
+  KEY IX_ContentPublications_Queue (Status, ScheduledAt),
+  KEY IX_ContentPublications_Account (AccountId, CreatedAt),
+  CONSTRAINT FK_ContentPublications_Draft FOREIGN KEY (DraftId) REFERENCES c_ContentDrafts(Id),
+  CONSTRAINT FK_ContentPublications_Account FOREIGN KEY (AccountId) REFERENCES c_ContentAccounts(Id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE c_ContentComments (
+  Id BIGINT NOT NULL AUTO_INCREMENT,
+  PublicationId BIGINT NOT NULL,
+  ExternalCommentId VARCHAR(255) NOT NULL,
+  ParentExternalCommentId VARCHAR(255) NULL,
+  AuthorName VARCHAR(255) NULL,
+  CommentText LONGTEXT NOT NULL,
+  ReceivedAt DATETIME(3) NOT NULL,
+  ReplyStatus VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+  GeneratedReply LONGTEXT NULL,
+  ReplyModel VARCHAR(100) NULL,
+  RepliedAt DATETIME(3) NULL,
+  ErrorMessage VARCHAR(1000) NULL,
+  CreatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UpdatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (Id),
+  UNIQUE KEY UX_ContentComments_PublicationExternal (PublicationId, ExternalCommentId),
+  KEY IX_ContentComments_ReplyQueue (ReplyStatus, ReceivedAt),
+  CONSTRAINT FK_ContentComments_Publication FOREIGN KEY (PublicationId) REFERENCES c_ContentPublications(Id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE c_ContentOperationRuns (
+  Id BIGINT NOT NULL AUTO_INCREMENT,
+  RunType VARCHAR(30) NOT NULL,
+  Platform VARCHAR(30) NOT NULL,
+  Status VARCHAR(30) NOT NULL,
+  TriggerType VARCHAR(30) NOT NULL,
+  MetricsJson JSON NULL,
+  ErrorMessage VARCHAR(1000) NULL,
+  StartedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  FinishedAt DATETIME(3) NULL,
+  PRIMARY KEY (Id),
+  KEY IX_ContentOperationRuns_Started (StartedAt)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

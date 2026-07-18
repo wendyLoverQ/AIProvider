@@ -31,6 +31,8 @@ public class LocalGeneratedImageService {
             item.setFileName(clean(item.getFileName(), 255));
             item.setWorkflowId(clean(item.getWorkflowId(), 100));
             item.setWorkflowName(clean(item.getWorkflowName(), 255));
+            item.setPrompt(clean(item.getPrompt(), 16000));
+            item.setNegativePrompt(clean(item.getNegativePrompt(), 16000));
             item.setLorasJson(clean(item.getLorasJson(), 16000));
             if (item.getGenerationDurationMs() != null && item.getGenerationDurationMs() < 0)
                 throw new IllegalArgumentException("生成耗时不能为负数");

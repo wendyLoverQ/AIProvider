@@ -68,11 +68,10 @@ export function refreshWorkflowForm(form, workflow, previousRevision) {
 export function applySchemeToWorkflow(form, scheme, workflow) {
   if (!scheme || !workflow) return form;
   const workflowFields = new Set(getWorkflowFieldKeys(workflow));
-  const allowed = new Set(["positivePrompt", "negativePrompt"].filter((key) => workflowFields.has(key)));
-  const parameters = Object.fromEntries(Object.entries(scheme.parameters || {}).filter(([key, value]) =>
-    allowed.has(key) && !(value === "" && form[key] !== undefined && form[key] !== ""),
-  ));
-  return { ...form, ...parameters, workflowId: workflow.id };
+  const prompts = {};
+  if (workflowFields.has("positivePrompt")) prompts.positivePrompt = scheme.positivePrompt ?? "";
+  if (workflowFields.has("negativePrompt")) prompts.negativePrompt = scheme.negativePrompt ?? "";
+  return { ...form, ...prompts, workflowId: workflow.id };
 }
 
 export function findFinalOutput(item, preferredNodeId) {

@@ -12,6 +12,9 @@ public class AssetItemDTO {
     private Long fileSize;
     private Integer width;
     private Integer height;
+    private String assetType;
+    private String mimeType;
+    private String status;
     private String prompt;
     private String negativePrompt;
     private String lorasJson;
@@ -37,6 +40,12 @@ public class AssetItemDTO {
     public void setWidth(Integer width) { this.width = width; }
     public Integer getHeight() { return height; }
     public void setHeight(Integer height) { this.height = height; }
+    public String getAssetType() { return assetType; }
+    public void setAssetType(String assetType) { this.assetType = assetType; }
+    public String getMimeType() { return mimeType; }
+    public void setMimeType(String mimeType) { this.mimeType = mimeType; }
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
     public String getPrompt() { return prompt; }
     public void setPrompt(String prompt) { this.prompt = prompt; }
     public String getNegativePrompt() { return negativePrompt; }

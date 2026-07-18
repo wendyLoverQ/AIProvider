@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle,
   Copy,
@@ -6,6 +6,7 @@ import {
   CaretRight,
   ArrowCounterClockwise,
   ArrowClockwise,
+  ArrowsLeftRight,
   ImageSquare,
   Info,
   FolderOpen,
@@ -24,12 +25,21 @@ import "./ComfyLocalWorkbench.css";
 import WorkflowPanel from "./WorkflowPanel";
 import DynamicShowcase from "./DynamicShowcase";
 import { generateId } from "./utils/generateId";
-import { applySchemeToWorkflow, createComfyProgressPlan, createWorkflowForm, describeComfyProgress, FALLBACK_FORM, findFinalOutput, getWorkflowFieldKeys, getWorkflowRevision, normalizeFolder, refreshWorkflowForm } from "./comfy/workbench";
+import { applySchemeToWorkflow, createComfyProgressPlan, createWorkflowForm, describeComfyProgress, FALLBACK_FORM, findFinalOutput, getWorkflowFieldKeys, getWorkflowRevision, refreshWorkflowForm } from "./comfy/workbench";
+import { buildPromptCategories, extractNegativeExtra, extractPositiveExtra, matchSelectedOptionsFromPrompt, normalizePrompt } from "./promptComposer";
+import { buildLuckyPrompts } from "./luckyPrompt";
 
 const BRIDGE = "http://127.0.0.1:32145";
+const BRIDGE_LAUNCH_URL = "aiprovider-bridge://start";
 const initial = FALLBACK_FORM;
 const VIEWER_ZOOM_STEP = 0.2;
 const taskStateRank = { RUNNING: 0, QUEUED: 1 };
+function PromptViewToggle({ value, onChange }) {
+  return <div className="prompt-view-toggle" aria-label="Prompt 显示方式">
+    <button type="button" aria-pressed={value === "zh"} onClick={() => onChange("zh")}>中文映射</button>
+    <button type="button" aria-pressed={value === "raw"} onClick={() => onChange("raw")}>原始 Prompt</button>
+  </div>;
+}
 const sortActiveTasks = (items) => [...items].sort((left, right) => {
   const stateDifference = (taskStateRank[left.state] ?? 9) - (taskStateRank[right.state] ?? 9);
   if (stateDifference) return stateDifference;
@@ -149,6 +159,13 @@ const readGenerationTiming = (historyItem) => {
     generationDurationMs: startedAt && completedAt && completedAt >= startedAt ? completedAt - startedAt : null,
   };
 };
+const readTaskFailure = (historyItem) => {
+  const status = historyItem?.status;
+  const messages = Array.isArray(status?.messages) ? status.messages : [];
+  const error = messages.find((message) => Array.isArray(message) && message[0] === "execution_error");
+  if (!error && String(status?.status_str || "").toLowerCase() !== "error") return "";
+  return error?.[1]?.exception_message || error?.[1]?.exception_type || "ComfyUI 执行失败";
+};
 const formatGenerationDuration = (value) => {
   if (value == null || value === "") return "未记录";
   const milliseconds = Number(value);
@@ -160,6 +177,12 @@ const formatGenerationDuration = (value) => {
   const seconds = Math.round(totalSeconds % 60);
   return hours ? `${hours} 小时 ${minutes} 分 ${seconds} 秒` : `${minutes} 分 ${seconds} 秒`;
 };
+const formatTaskElapsed = (task, now = Date.now()) => {
+  const started = normalizeHistoryTimestamp(task?.generationStartedAt || task?.startedAt || task?.createdAt);
+  if (!started) return "未记录";
+  return formatGenerationDuration(Math.max(0, now - started));
+};
+const sha256Blob = async (blob) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer()))).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 const deadline = (ms = 8000) => AbortSignal.timeout(ms);
 async function readJson(response, label) {
   const text = await response.text();
@@ -237,15 +260,25 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   const [tasks, setTasks] = useState([]),
     [results, setResults] = useState([]),
     [cancelingTask, setCancelingTask] = useState("");
+  const [taskClock, setTaskClock] = useState(() => Date.now());
+  const [taskDetail, setTaskDetail] = useState(null);
+  const [batchOperation, setBatchOperation] = useState({ open: false, workflowId: "", busy: false });
+  const [batchScheduling, setBatchScheduling] = useState(false);
+  const [batchProgress, setBatchProgress] = useState(null);
+  const [luckyLoading, setLuckyLoading] = useState(false);
   const [galleryMode, setGalleryMode] = useState("output");
   const [gallerySources, setGallerySources] = useState(() => ({
     output: createGallerySource(),
+    pending: createGallerySource(),
     assets: createGallerySource(),
   }));
   const [galleryWorkflowFilter, setGalleryWorkflowFilter] = useState("all");
   const [galleryTransparencyFilter, setGalleryTransparencyFilter] = useState("all");
   const [detail, setDetail] = useState(null);
   const [infoDetail, setInfoDetail] = useState(null);
+  const [detailPromptView, setDetailPromptView] = useState("zh");
+  const [detailPromptTranslation, setDetailPromptTranslation] = useState({ key: "", positivePrompt: "", negativePrompt: "", loading: false, error: "" });
+  const [viewerOrientation, setViewerOrientation] = useState({ rotation: 0, mirrored: false });
   const [imageMenu, setImageMenu] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [selectionMode, setSelectionMode] = useState(false);
@@ -253,9 +286,14 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   const [presets, setPresets] = useState([]),
     [selectedPresetId, setSelectedPresetId] = useState(""),
     [appliedPresetTitle, setAppliedPresetTitle] = useState("");
+  const [promptOptions, setPromptOptions] = useState([]);
+  const [negativePromptOptions, setNegativePromptOptions] = useState([]);
+  const allPromptOptions = useMemo(() => [...promptOptions, ...negativePromptOptions], [promptOptions, negativePromptOptions]);
+  const [generalNegativePrompt, setGeneralNegativePrompt] = useState("");
   const [presetQuery, setPresetQuery] = useState("");
   const [presetSaveName, setPresetSaveName] = useState("");
   const [presetSaving, setPresetSaving] = useState(false);
+  const [presetReloading, setPresetReloading] = useState(false);
   const [folders, setFolders] = useState([]),
     [folder, setFolder] = useState(() => localStorage.getItem("comfy_output_folder") || "aimaid"),
     [migrationNewFolder, setMigrationNewFolder] = useState(""),
@@ -285,9 +323,12 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     workflowVersions = useRef(new Map()),
     workflowRefreshInFlight = useRef(false),
     taskSyncInFlight = useRef(false),
+    taskMissingChecks = useRef(new Map()),
     galleryModeRef = useRef("output"),
     gallerySourcesRef = useRef(gallerySources),
-    galleryRequestVersions = useRef({ output: 0, assets: 0 }),
+    galleryRequestVersions = useRef({ output: 0, pending: 0, assets: 0 }),
+    pendingGenerationSourceIds = useRef(new Set()),
+    pendingSourceImageRef = useRef(false),
     comfyHistoryIds = useRef(new Set()),
     comfyHistoryLoadingIds = useRef(new Set()),
     galleryCompletionRegisteredIds = useRef(new Set()),
@@ -295,12 +336,24 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     comfyHistorySyncInFlight = useRef(false),
     historyTimingCache = useRef(new Map()),
     loadWorkflowsRef = useRef(null),
+    bridgeInstanceIdRef = useRef(""),
+    bridgeExitIntent = useRef(""),
     defaultPresetApplied = useRef(""),
+    batchStopRequested = useRef(false),
     viewerTransform = useRef(null);
   gallerySourcesRef.current = gallerySources;
   const activeGallerySource = gallerySources[galleryMode];
   const history = visibleGalleryEntries(galleryMode, activeGallerySource);
   useEffect(() => { tasksRef.current = tasks; }, [tasks]);
+  useEffect(() => {
+    if (!tasks.length) return undefined;
+    const timer = window.setInterval(() => setTaskClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [tasks.length]);
+  useEffect(() => () => { batchStopRequested.current = true; }, []);
+  useEffect(() => {
+    if (!active) batchStopRequested.current = true;
+  }, [active]);
   useEffect(() => {
     if (!notice) return undefined;
     const timer = setTimeout(() => setNotice(""), 3000);
@@ -313,6 +366,31 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     window.addEventListener("scroll", close, true);
     return () => { window.removeEventListener("click", close); window.removeEventListener("scroll", close, true); };
   }, [imageMenu]);
+  useEffect(() => {
+    setViewerOrientation({ rotation: 0, mirrored: false });
+  }, [detail?.index]);
+  useEffect(() => {
+    if (detailPromptView !== "zh" || (!taskDetail && !infoDetail)) return undefined;
+    const positivePrompt = String(taskDetail?.form?.positivePrompt ?? infoDetail?.item?.prompt ?? "");
+    const negativePrompt = String(taskDetail?.form?.negativePrompt ?? infoDetail?.item?.negativePrompt ?? "");
+    const key = JSON.stringify([positivePrompt, negativePrompt]);
+    const controller = new AbortController();
+    setDetailPromptTranslation({ key, positivePrompt: "", negativePrompt: "", loading: true, error: "" });
+    fetch("/api/prompt-translations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ positivePrompt, negativePrompt }),
+      signal: controller.signal,
+    }).then(async (response) => {
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.code !== 200) throw new Error(payload.message || `HTTP ${response.status}`);
+      setDetailPromptTranslation({ key, positivePrompt: payload.data?.positivePrompt || "", negativePrompt: payload.data?.negativePrompt || "", loading: false, error: "" });
+    }).catch((exception) => {
+      if (exception.name !== "AbortError")
+        setDetailPromptTranslation({ key, positivePrompt: "", negativePrompt: "", loading: false, error: exception.message || "请求失败" });
+    });
+    return () => controller.abort();
+  }, [detailPromptView, taskDetail, infoDetail]);
   const call = (path, options = {}, ms = 10000, authToken = token) =>
     fetch(`${BRIDGE}${path}`, {
       ...options,
@@ -339,11 +417,23 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     const timer = polling.current.get(promptId);
     if (timer) clearInterval(timer);
     polling.current.delete(promptId);
+    taskMissingChecks.current.delete(String(promptId));
     setTasks((current) => {
       const next = current.filter((task) => task.id !== promptId);
       localStorage.setItem("comfy_active_tasks", JSON.stringify(next));
       return next;
     });
+  };
+  const failActiveTask = (promptId, message) => {
+    const id = String(promptId);
+    const timer = polling.current.get(id);
+    if (timer) clearInterval(timer);
+    polling.current.delete(id);
+    taskMissingChecks.current.delete(id);
+    setTasks((current) => current.map((task) => String(task.id) === id ? { ...task, state: "FAILED", failureMessage: message, reconciling: false } : task));
+    const saved = JSON.parse(localStorage.getItem("comfy_active_tasks") || "[]");
+    localStorage.setItem("comfy_active_tasks", JSON.stringify((Array.isArray(saved) ? saved : []).filter((task) => String(task.id) !== id)));
+    setError(`任务失败：${message}`);
   };
   const cancelTask = async (task) => {
     const promptId = String(task.id);
@@ -374,6 +464,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       const config = await readJson(configResponse, "本机配置接口"),
         status = await readJson(statusResponse, "本机状态接口");
       setToken(config.token);
+      bridgeInstanceIdRef.current = config.instanceId || bridgeInstanceIdRef.current;
       setPlatform(config.platform || status.platform || "Windows");
       setPlatformConfigured(config.configured !== false && status.configured !== false);
       setExpectedComfyDirectory(config.expectedComfyDirectory || status.expectedComfyDirectory || "");
@@ -408,9 +499,8 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     } catch {
       setLauncher("missing");
       setRunning(false);
-      setError(
-        "未检测到本机桥接器，请确认 Local ComfyUI Bridge 已随 Windows 启动。",
-      );
+      if (bridgeExitIntent.current) return;
+      setError("");
     }
   };
   useEffect(() => {
@@ -428,11 +518,40 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     };
   }, []);
 
+  const waitForBridgeRestart = async (previousInstanceId) => {
+    if (!previousInstanceId) throw new Error("无法确认 Bridge 当前实例，已取消重启确认。");
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+      try {
+        const configResponse = await fetch(`${BRIDGE}/api/config`, { signal: deadline(2000) });
+        const config = await readJson(configResponse, "Bridge 重启确认");
+        if (!configResponse.ok || !config.instanceId || config.instanceId === previousInstanceId) continue;
+        const statusResponse = await fetch(`${BRIDGE}/api/comfy/status`, { signal: deadline(2000) });
+        const status = await readJson(statusResponse, "ComfyUI 重启确认");
+        if (!statusResponse.ok || !status.running) continue;
+        setToken(config.token);
+        bridgeInstanceIdRef.current = config.instanceId;
+        setPlatform(config.platform || status.platform || "Windows");
+        setPlatformConfigured(config.configured !== false && status.configured !== false);
+        setExpectedComfyDirectory(config.expectedComfyDirectory || status.expectedComfyDirectory || "");
+        setLauncher("ready");
+        setRunning(true);
+        bridgeExitIntent.current = "";
+        return config.token;
+      } catch {
+        // The old Bridge must release the port before the new instance can listen.
+      }
+    }
+    throw new Error("Bridge 未能在 20 秒内完成重启。");
+  };
+
   const control = async (action) => {
     setBusy(true);
     setControlAction(action);
     setError("");
     setNotice("");
+    const controlsBridgeLifecycle = action === "stop" || action === "restart";
+    if (controlsBridgeLifecycle) bridgeExitIntent.current = action;
     try {
       const response = await call(
         `/api/comfy/${action}`,
@@ -444,11 +563,23 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         throw new Error(
           data.message || data.detail || `HTTP ${response.status}`,
         );
-      setRunning(data.running);
-      if (action === "start" || action === "restart") await loadWorkflows(token);
-      setNotice(action === "start" ? "ComfyUI 已启动" : action === "restart" ? "ComfyUI 已重启" : "ComfyUI 已停止");
+      if (action === "restart") {
+        const restartedToken = await waitForBridgeRestart(bridgeInstanceIdRef.current);
+        await loadWorkflows(restartedToken);
+        setNotice("ComfyUI 与 Bridge 已重启");
+      } else if (action === "stop") {
+        setRunning(false);
+        setLauncher("missing");
+        clearActiveTasks();
+        setNotice("ComfyUI 与 Bridge 已停止");
+      } else {
+        setRunning(data.running);
+        await loadWorkflows(token);
+        setNotice("ComfyUI 已启动");
+      }
       window.setTimeout(() => setNotice(""), 3500);
     } catch (e) {
+      bridgeExitIntent.current = "";
       setError(e.name === "TimeoutError" ? "本机启动器响应超时。" : e.message);
     } finally {
       setBusy(false);
@@ -466,7 +597,10 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       if (editorKeys.length) setForm((current) => ({ ...current, ...Object.fromEntries(editorKeys.map((fieldKey) => [fieldKey, '{"points":[],"bboxes":[]}'])) }));
     }
   };
-  const chooseReference = (key, event) => applyReferenceFile(key, event.target.files?.[0]);
+  const chooseReference = (key, event) => {
+    if (key === "sourceImage") pendingSourceImageRef.current = false;
+    applyReferenceFile(key, event.target.files?.[0]);
+  };
   const startHistoryImageDrag = (event, item, image) => {
     draggedHistoryImage.current = { item, image };
     event.dataTransfer.effectAllowed = "copy";
@@ -477,6 +611,8 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     const dragged = draggedHistoryImage.current;
     draggedHistoryImage.current = null;
     if (key !== "sourceImage") return;
+    // Track if source image is from pending gallery
+    pendingSourceImageRef.current = dragged?.item?.source === "asset" && galleryModeRef.current === "pending";
     try {
       const droppedFile = [...(event.dataTransfer.files || [])].find((file) =>
         file.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(file.name),
@@ -509,22 +645,29 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       setError(`读取参数方案失败：${e.message}`);
     }
   };
+  const loadPromptOptions = async () => {
+    const response = await fetch("/api/prompt-catalog");
+    const data = await readJson(response, "Prompt 词条接口");
+    if (!response.ok) throw new Error(data.message || "读取 Prompt 词条失败");
+    setPromptOptions(data.data?.options || []);
+    setNegativePromptOptions(data.data?.negativeOptions || []);
+    setGeneralNegativePrompt(data.data?.generalNegativePrompt || "");
+  };
   useEffect(() => {
-    if (mode === "workbench" && active) loadPresets();
+    if (mode === "workbench" && active) { loadPresets(); loadPromptOptions().catch((e) => setError(e.message)); }
   }, [active, mode]);
   useEffect(() => {
     if (mode !== "workbench" || !active) return;
-    const preset = presets.find((item) => item.defaultPreset);
+    const preset = presets.find((item) => item.isDefault);
     const workflow = workflows.find((item) => item.id === form.workflowId);
     if (!preset || !workflow) return;
     const applicationKey = `${preset.id}:${workflow.id}`;
     if (defaultPresetApplied.current === applicationKey) return;
     defaultPresetApplied.current = applicationKey;
     setForm((current) => applySchemeToWorkflow(current, preset, workflow));
-    setFolder(normalizeFolder(preset.outputFolder));
     setPresetQuery(String(preset.id));
     setSelectedPresetId(String(preset.id));
-    setAppliedPresetTitle(preset.title);
+    setAppliedPresetTitle(preset.name);
   }, [active, form.workflowId, mode, presets, workflows]);
   const applyPreset = (preset) => {
     setForm((current) => {
@@ -532,7 +675,6 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       const next = applySchemeToWorkflow(current, preset, workflow);
       return next;
     });
-    setFolder(normalizeFolder(preset.outputFolder));
   };
   const applySelectedPreset = () => {
     const preset = presets.find(
@@ -543,7 +685,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       return;
     }
     applyPreset(preset);
-    setAppliedPresetTitle(preset.title);
+    setAppliedPresetTitle(preset.name);
     setError("");
   };
   const choosePreset = (value) => {
@@ -552,29 +694,57 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     if (!preset) return;
     setSelectedPresetId(String(preset.id));
     applyPreset(preset);
-    setAppliedPresetTitle(preset.title);
+    setAppliedPresetTitle(preset.name);
     setPresetSaveName("");
     setError("");
+  };
+  const reloadCurrentPreset = async () => {
+    if (!presetQuery) { setError("请先选择要重新加载的 Prompt 方案"); return; }
+    setPresetReloading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/comfy-presets");
+      const data = await readJson(response, "Prompt 方案接口");
+      if (!response.ok || data.code !== 200) throw new Error(data.message || `HTTP ${response.status}`);
+      const latestPresets = data.data || [];
+      const latest = latestPresets.find((item) => String(item.id) === String(presetQuery));
+      if (!latest) throw new Error("当前方案已不存在，请重新选择");
+      setPresets(latestPresets);
+      applyPreset(latest);
+      setSelectedPresetId(String(latest.id));
+      setAppliedPresetTitle(latest.name);
+      setNotice(`已重新加载当前方案：${latest.name}`);
+    } catch (e) {
+      setError(`重新加载 Prompt 方案失败：${e.message}`);
+    } finally {
+      setPresetReloading(false);
+    }
   };
   const savePromptPreset = async (mode) => {
     const selected = presets.find((item) => String(item.id) === String(presetQuery));
     if (mode === "overwrite" && !selected) { setError("请先选择要覆盖的 Prompt 方案"); return; }
-    const title = mode === "new" ? presetSaveName.trim() : selected.title;
+    const title = mode === "new" ? presetSaveName.trim() : selected.name;
     if (!title) { setError("请填写新 Prompt 方案名称"); return; }
     setPresetSaving(true);
     setError("");
     try {
+      if (!promptOptions.length) throw new Error("Prompt 词条尚未加载完成");
+      const definitions = buildPromptCategories(promptOptions);
+      const mappedSelections = matchSelectedOptionsFromPrompt(form.positivePrompt, promptOptions, definitions);
+      const mappedPositiveExtra = extractPositiveExtra(form.positivePrompt, mappedSelections, promptOptions);
+      const mappedNegativeExtra = extractNegativeExtra(form.negativePrompt, mappedSelections, promptOptions, generalNegativePrompt);
       const response = await fetch(mode === "new" ? "/api/comfy-presets" : `/api/comfy-presets/${selected.id}`, {
         method: mode === "new" ? "POST" : "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title,
-          outputFolder: selected?.outputFolder || "",
-          notes: selected?.notes || "",
-          parameters: {
-            positivePrompt: form.positivePrompt ?? "",
-            negativePrompt: form.negativePrompt ?? "",
-          },
+          name: title,
+          selectedOptions: mappedSelections,
+          positiveExtra: mappedPositiveExtra,
+          negativeExtra: mappedNegativeExtra,
+          positivePrompt: form.positivePrompt ?? "",
+          negativePrompt: form.negativePrompt ?? "",
+          remark: "",
+          isDefault: mode === "overwrite" && Boolean(selected?.isDefault),
         }),
       });
       const data = await readJson(response, mode === "new" ? "新建 Prompt 方案接口" : "覆盖 Prompt 方案接口");
@@ -585,9 +755,11 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       setSelectedPresetId(String(savedId));
       setAppliedPresetTitle(title);
       setPresetSaveName("");
-      setNotice(mode === "new" ? `已保存新 Prompt 方案：${title}` : `已覆盖 Prompt 方案：${title}`);
+      setNotice(`Prompt 方案已保存：${title}`);
+      return true;
     } catch (e) {
       setError(`保存 Prompt 方案失败：${e.message}`);
+      return false;
     } finally {
       setPresetSaving(false);
     }
@@ -723,12 +895,18 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     setTasks(
       saved.map((item) => ({
         ...item,
+        sourceType: item.sourceType || (item.external ? "COMFYUI" : "AIPROVIDER"),
         state: item.state || "RUNNING",
         progress: null,
       })),
     );
     saved.forEach((item) => poll(item.id, authToken, item.finalOutputNodeId, item.progressPlan, item));
     localStorage.removeItem("comfy_active_task");
+  };
+  const editCurrentPreset = () => {
+    if (!presetQuery) { setError("请先选择要编辑的 Prompt 方案"); return; }
+    window.history.pushState({}, "", `/prompts?edit=${encodeURIComponent(presetQuery)}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
   };
   const replaceGallerySource = (mode, updater) => {
     const currentSources = gallerySourcesRef.current;
@@ -745,7 +923,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     });
   };
   const hydrateGalleryEntries = async (entries, mode, authToken, cachedEntries = []) => {
-    const assets = mode === "assets";
+    const assets = mode === "assets" || mode === "pending";
     const cachedImages = new Map(
       cachedEntries.flatMap((item) => (item.images || [])
         .filter((image) => image.url)
@@ -779,24 +957,24 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       },
     );
   };
-  const addRecentAssetRecords = async (records, authToken = token) => {
+  const addRecentAssetRecords = async (records, authToken = token, targetMode = "assets") => {
     if (!records.length) return;
-    const current = gallerySourcesRef.current.assets;
+    const current = gallerySourcesRef.current[targetMode];
     const hydrated = await hydrateGalleryEntries(
       records.map(assetRecordToGalleryEntry),
-      "assets",
+      targetMode,
       authToken,
       [...current.serverEntries, ...current.recentEntries],
     );
-    replaceGallerySource("assets", (source) => {
+    replaceGallerySource(targetMode, (source) => {
       const known = new Set([...source.serverEntries, ...source.recentEntries].flatMap((item) =>
-        (item.images || []).map((image) => galleryImageAddress("assets", image))));
+        (item.images || []).map((image) => galleryImageAddress(targetMode, image))));
       const added = hydrated.reduce((count, item) => count + (item.images || []).filter((image) =>
-        !known.has(galleryImageAddress("assets", image))).length, 0);
+        !known.has(galleryImageAddress(targetMode, image))).length, 0);
       const total = source.total + added;
       return {
         ...source,
-        recentEntries: mergeGalleryEntries("assets", hydrated, source.recentEntries),
+        recentEntries: mergeGalleryEntries(targetMode, hydrated, source.recentEntries),
         total,
         pages: total ? Math.ceil(total / 100) : 0,
       };
@@ -819,10 +997,11 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       ...source,
       status: source.serverEntries.length ? "refreshing" : "loading",
     }));
-    const assets = mode === "assets";
+    const assets = mode === "assets" || mode === "pending";
+    const statusParam = mode === "pending" ? "&status=PENDING" : mode === "assets" ? "&status=ACTIVE" : "";
     try {
       const response = assets
-        ? await fetch(`/api/assets?platform=${encodeURIComponent(platform)}&page=${page}&pageSize=100`, { signal: deadline(30000) })
+        ? await fetch(`/api/assets?platform=${encodeURIComponent(platform)}&page=${page}&pageSize=100${statusParam}`, { signal: deadline(30000) })
         : await call(`/api/gallery?page=${page}&pageSize=100`, {}, 30000, authToken);
       const data = await readJson(response, assets ? "后端资产目录" : "本机图片目录");
       if (!response.ok || (assets && data.code !== 200)) throw new Error(data.message || `HTTP ${response.status}`);
@@ -959,6 +1138,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       fileName: image.filename,
       workflowId: entry.workflowId,
       workflowName: entry.workflowName,
+      promptSchemeName: entry.promptSchemeName,
       prompt: entry.prompt,
       negativePrompt: entry.negativePrompt,
       lorasJson: JSON.stringify(parseLoras(entry.loras)),
@@ -1002,6 +1182,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       scheduler: form.scheduler,
       workflowId: task?.workflowId || form.workflowId,
       workflowName: task?.workflowName,
+      promptSchemeName: task?.promptSchemeName || form.promptSchemeName || "",
       width: form.width,
       height: form.height,
       createdAt: task?.createdAt || new Date().toISOString(),
@@ -1034,6 +1215,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       }),
     }, 10000, authToken);
     if (!response.ok) return false;
+    fetch(`/api/comfy-tasks/${encodeURIComponent(id)}/complete`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paths: files }) }).catch((exception) => reportLocalError("comfy-task-complete", exception, { promptId: id }));
     galleryCompletionRegisteredIds.current.add(id);
     return true;
   };
@@ -1067,14 +1249,12 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       const data = await readJson(response, "ComfyUI 最近历史");
       if (!response.ok || !data || Array.isArray(data)) throw new Error(data.message || `HTTP ${response.status}`);
       const ids = Object.keys(data);
-      const registrations = await Promise.allSettled(ids.map((id) => registerGalleryCompletion(
+      await Promise.allSettled(ids.map((id) => registerGalleryCompletion(
         id,
         data[id],
         tasksRef.current.find((candidate) => String(candidate.id) === String(id)),
         authToken,
       )));
-      if (registrations.some((result) => result.status === "fulfilled" && result.value === true))
-        await loadGalleryPage(authToken, "output", gallerySourcesRef.current.output.page || 1);
       let newIds;
       if (!comfyHistoryInitialized.current) {
         const knownAddresses = new Set([
@@ -1165,13 +1345,16 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
             workflowId: existing?.workflowId || matchedWorkflow?.id,
             workflowName: existing?.workflowName || matchedWorkflow?.name,
             external: existing ? Boolean(existing.external) : true,
+            sourceType: existing?.sourceType || (existing && !existing.external ? "AIPROVIDER" : "COMFYUI"),
             queueOrder,
             queueNumber: row[0],
             createdAt: existing?.createdAt || new Date().toISOString(),
           };
         });
-      const next = sortActiveTasks(activeTasks);
-      localStorage.setItem("comfy_active_tasks", JSON.stringify(next.filter((task) => !task.external)));
+      const activeIds = new Set(activeTasks.map((task) => String(task.id)));
+      const retainedLocalTasks = current.filter((task) => !task.external && !activeIds.has(String(task.id)) && task.state !== "SUCCEEDED");
+      const next = sortActiveTasks([...activeTasks, ...retainedLocalTasks]);
+      localStorage.setItem("comfy_active_tasks", JSON.stringify(next.filter((task) => !task.external && !["SUCCEEDED", "FAILED"].includes(task.state))));
       return next;
     });
     if (completedExternalTasks.length)
@@ -1184,7 +1367,6 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     if (!token || !running) return undefined;
     const sync = () => syncComfyTasks(token).catch((e) => {
       reportLocalError("task-sync", e, { path: "/comfy/queue + /comfy/aiprovider/progress" }, token);
-      setError(`查询当前任务失败：${e.message}`);
     });
     sync();
     const id = setInterval(sync, 1500);
@@ -1198,26 +1380,22 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     const id = setInterval(sync, 2000);
     return () => clearInterval(id);
   }, [token, running, active]);
-  const generate = async () => {
-    setBusy(true);
-    setError("");
-    results.forEach((x) => URL.revokeObjectURL(x.url));
-    setResults([]);
-    try {
+  const submitGeneration = async (submissionForm, batchRunId = null, submissionReferences = referenceFiles, inputSha256 = null) => {
       const body = new FormData();
-      Object.entries(form).forEach(([key, value]) => body.append(key, key === "loras" ? JSON.stringify(Array.isArray(value) ? value : []) : String(value)));
-      const selectedWorkflowId = selectedWorkflowIdRef.current || form.workflowId;
+      Object.entries(submissionForm).forEach(([key, value]) => body.append(key, key === "loras" ? JSON.stringify(Array.isArray(value) ? value : []) : String(value)));
+      const selectedWorkflowId = submissionForm.workflowId || selectedWorkflowIdRef.current;
       const active = workflows.find((item) => item.id === selectedWorkflowId);
       if (!active) throw new Error("工作流尚未从后端加载完成");
       body.set("workflowId", active.id);
       body.set("workflowName", active.name || active.id);
+      body.set("promptSchemeName", appliedPresetTitle || "");
       body.append("workflowDefinition", JSON.stringify(active.definition));
       body.append("workflowBinding", JSON.stringify(active.binding));
       const referenceKeys = [];
       if (active?.capabilities?.inputImage) referenceKeys.push("sourceImage");
       if (active?.capabilities?.styleReference) referenceKeys.push("styleReference1", "styleReference2", "styleReference3", "styleReference4");
       if (active?.capabilities?.poseReference) referenceKeys.push("poseReference");
-      const missing = referenceKeys.find((key) => !referenceFiles[key]);
+      const missing = referenceKeys.find((key) => !submissionReferences[key]);
       if (missing) throw new Error(missing === "sourceImage" ? "当前工作流需要先选择待处理原图" : "当前工作流需要先选择全部参考图片");
       const interactiveEditor = activeWorkflowFields.find((fieldKey) =>
         active?.binding?.fields?.[fieldKey]?.nodeType === "MaskEditMEC" &&
@@ -1225,11 +1403,11 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       );
       if (interactiveEditor) {
         let editorData;
-        try { editorData = JSON.parse(form[interactiveEditor] || "{}"); }
+        try { editorData = JSON.parse(submissionForm[interactiveEditor] || "{}"); }
         catch { throw new Error("区域编辑数据无效，请清空后重新涂抹"); }
         if (!(editorData.points?.length || editorData.bboxes?.length)) throw new Error("请先在原图上涂抹需要删除的区域");
       }
-      referenceKeys.forEach((key) => body.append(key, referenceFiles[key]));
+      referenceKeys.forEach((key) => body.append(key, submissionReferences[key]));
       body.append("folder", folder);
       body.append("clientId", generateId());
       const response = await call(
@@ -1247,23 +1425,34 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
             data.message ||
             `ComfyUI 提交失败（HTTP ${response.status}）`,
         );
+      // Track if this generation was from a pending source image
+      if (pendingSourceImageRef.current) {
+        pendingGenerationSourceIds.current.add(String(data.promptId));
+        pendingSourceImageRef.current = false;
+      }
       const progressPlan = createComfyProgressPlan(active.definition, [data.finalOutputNodeId]);
       const nextTask = {
         id: data.promptId,
+        sourceType: "AIPROVIDER",
+        external: false,
         state: "QUEUED",
         progress: 0,
-        form: { ...form, workflowId: active.id },
+        form: { ...submissionForm, workflowId: active.id },
         workflowId: active.id,
         workflowName: active.name || active.id,
+        promptSchemeName: appliedPresetTitle || "",
+        inputSha256,
+        inputImages: Object.entries(submissionReferences).filter(([, file]) => file instanceof File).map(([key, file]) => ({ key, name: file.name, url: URL.createObjectURL(file) })),
         finalOutputNodeId: data.finalOutputNodeId,
         progressPlan,
         progressDetail: null,
         actualSeed: data.actualSeed,
+        batchRunId,
         folder,
         createdAt: new Date().toISOString(),
       };
       setTasks((current) => {
-        const next = [nextTask, ...current].slice(0, 8);
+        const next = [nextTask, ...current].slice(0, 2000);
         localStorage.setItem(
           "comfy_active_tasks",
           JSON.stringify(
@@ -1274,13 +1463,64 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         );
         return next;
       });
+      fetch("/api/comfy-tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ promptId: nextTask.id, workflowId: nextTask.workflowId, workflowName: nextTask.workflowName, promptSchemeName: nextTask.promptSchemeName, positivePrompt: submissionForm.positivePrompt || "", negativePrompt: submissionForm.negativePrompt || "", parametersJson: JSON.stringify(submissionForm), inputFile: nextTask.inputImages?.[0]?.name || null, inputFileName: nextTask.inputImages?.[0]?.name || null, inputSha256, status: "QUEUED" }) }).catch((exception) => reportLocalError("comfy-task-record", exception, { promptId: nextTask.id }));
       poll(data.promptId, token, data.finalOutputNodeId, progressPlan, nextTask);
+      return nextTask;
+  };
+  const scheduleGenerations = async (total, buildSubmissionForm, completionLabel = "任务") => {
+    if (total < 1 || total > 10000) { setError("生成数量必须在 1 到 10000 之间"); return; }
+    const batchRunId = generateId();
+    batchStopRequested.current = false;
+    setBatchScheduling(true);
+    setBatchProgress({ total, submitted: 0 });
+    setError("");
+    results.forEach((result) => URL.revokeObjectURL(result.url));
+    setResults([]);
+    try {
+      let submitted = 0;
+      while (submitted < total && !batchStopRequested.current) {
+        await submitGeneration({ ...buildSubmissionForm(submitted), batchSize: 1 }, batchRunId);
+        submitted += 1;
+        setBatchProgress({ total, submitted });
+      }
+      setNotice(batchStopRequested.current ? `已停止加入 Bridge 队列，共提交 ${submitted} / ${total} 个任务` : `已将 ${submitted} 个${completionLabel}交给 Bridge 队列`);
     } catch (e) {
       reportLocalError("generate", e, { path: "/api/generate" });
       setError(e.message);
     } finally {
-      setBusy(false);
+      setBatchScheduling(false);
     }
+  };
+  const runGeneration = async (generationForm) => {
+    const total = Math.floor(Number(generationForm.batchSize) || 1);
+    return scheduleGenerations(total, () => generationForm);
+  };
+  const generate = async () => runGeneration(form);
+  const batchPromptGenerate = async (options) => {
+    const selected = Array.isArray(options) ? options : [];
+    if (!selected.length) { setError("请至少选择一个批量生成词条"); return; }
+    const baseForm = { ...form, batchSize: 1 };
+    await scheduleGenerations(selected.length, (index) => {
+      const option = selected[index];
+      const negative = option.type === "negative";
+      const target = negative ? "negativePrompt" : "positivePrompt";
+      const term = option.prompt || (negative ? option.negativePrompt : option.positivePrompt);
+      return { ...baseForm, [target]: normalizePrompt(baseForm[target], term) };
+    }, "批量 Prompt 词条");
+  };
+  const luckyGenerate = async () => {
+    setLuckyLoading(true); setError("");
+    try {
+      const response = await fetch(`/api/assets/prompt-pool?platform=${encodeURIComponent(platform)}`);
+      const data = await readJson(response, "资产 Prompt 池接口");
+      if (!response.ok || data.code !== 200) throw new Error(data.message || `HTTP ${response.status}`);
+      const lucky = buildLuckyPrompts(form.positivePrompt, form.negativePrompt, data.data || []);
+      const luckyForm = { ...form, positivePrompt: lucky.positivePrompt, negativePrompt: lucky.negativePrompt };
+      setForm(luckyForm);
+      setNotice(`手气不错：加入 ${lucky.positiveAdditions.length} 个正向词和 ${lucky.negativeAdditions.length} 个反向词`);
+      await runGeneration(luckyForm);
+    } catch (e) { setError(`手气不错失败：${e.message}`); }
+    finally { setLuckyLoading(false); }
   };
   const poll = (promptId, authToken = token, finalOutputNodeId, progressPlan, taskHint = null) => {
     if (polling.current.has(promptId)) return;
@@ -1305,9 +1545,30 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
             queued = contains(queue.queue_pending),
             executing = contains(queue.queue_running);
           if (!queued && !executing) {
-            removeActiveTask(promptId);
+            const stateResponse = await call(`/api/tasks/${encodeURIComponent(promptId)}/state`, {}, 10000, authToken);
+            const bridgeState = await readJson(stateResponse, "Bridge 任务状态接口");
+            if (!stateResponse.ok) throw new Error(bridgeState.message || `Bridge 任务状态查询失败（HTTP ${stateResponse.status}）`);
+            if (bridgeState.state === "FAILED") {
+              failActiveTask(promptId, bridgeState.message || "Bridge 或 ComfyUI 已明确报告任务执行失败");
+              return;
+            }
+            if (bridgeState.state === "QUEUED") {
+              taskMissingChecks.current.delete(String(promptId));
+              setTasks((current) => current.map((task) => String(task.id) === String(promptId) ? { ...task, state: "QUEUED", progress: 0, reconciling: false } : task));
+              return;
+            }
+            if (["TRACKED", "COMPLETED"].includes(bridgeState.state)) {
+              taskMissingChecks.current.delete(String(promptId));
+              setTasks((current) => current.map((task) => String(task.id) === String(promptId) ? { ...task, reconciling: true } : task));
+              return;
+            }
+            const missingChecks = (taskMissingChecks.current.get(String(promptId)) || 0) + 1;
+            taskMissingChecks.current.set(String(promptId), missingChecks);
+            if (missingChecks < 10) return;
+            failActiveTask(promptId, "Bridge 与 ComfyUI 连续确认后均找不到该任务");
             return;
           }
+          taskMissingChecks.current.delete(String(promptId));
           let progress = 0;
           let progressDetail = null;
           if (executing) {
@@ -1326,16 +1587,27 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
                     state: executing ? "RUNNING" : "QUEUED",
                     progress,
                     progressDetail,
+                    reconciling: false,
                   }
                 : task,
             ),
           );
           return;
         }
+        const explicitFailure = readTaskFailure(item);
+        if (explicitFailure) {
+          failActiveTask(promptId, explicitFailure);
+          return;
+        }
+        const finalOutput = findFinalOutput(item, finalOutputNodeId);
+        if (!finalOutput) {
+          if (item?.status?.completed || String(item?.status?.status_str || "").toLowerCase() === "success")
+            failActiveTask(promptId, "任务已结束，但没有找到可展示的图片输出");
+          return;
+        }
         clearInterval(timer);
         polling.current.delete(promptId);
-        const finalOutput = findFinalOutput(item, finalOutputNodeId);
-        if (!finalOutput) throw new Error("历史结果中没有可展示的图片输出");
+        taskMissingChecks.current.delete(String(promptId));
         await registerGalleryCompletion(promptId, item, taskHint || tasksRef.current.find((task) => String(task.id) === String(promptId)), authToken);
         const loaded = await loadOutputImages(finalOutput.images, authToken, true);
         setResults(loaded.map(({ blob, ...image }) => image));
@@ -1343,20 +1615,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         removeActiveTask(promptId);
       } catch (e) {
         reportLocalError("task-poll", e, { promptId, path: `/comfy/history/${promptId}` }, authToken);
-        try {
-          const statusResponse = await fetch(`${BRIDGE}/api/comfy/status`, {
-            signal: deadline(),
-          });
-          const status = await readJson(statusResponse, "本机状态接口");
-          if (!status.running) {
-            removeActiveTask(promptId);
-            setError("");
-            return;
-          }
-        } catch {
-          // Bridge 本身不可用时保留任务，避免误删仍在运行的生成。
-        }
-        setError(`查询本机任务失败：${e.message}`);
+        setTasks((current) => current.map((task) => String(task.id) === String(promptId) ? { ...task, reconciling: true } : task));
       }
     }, 2000);
     polling.current.set(promptId, timer);
@@ -1421,30 +1680,23 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   const copyGalleryImage = async (image) => {
     try {
       if (!navigator.clipboard?.write || typeof ClipboardItem !== "function") throw new Error("当前浏览器不支持图片剪贴板");
-      const pngPromise = (image.blob
-        ? Promise.resolve(image.blob)
-        : fetch(image.url).then((response) => {
-          if (!response.ok) throw new Error(`读取图片失败（HTTP ${response.status}）`);
-          return response.blob();
-        }))
-        .then(convertImageBlobToPng);
-      await navigator.clipboard.write([new ClipboardItem({ "image/png": pngPromise })]);
+      let blob = image.blob;
+      if (!blob) {
+        const response = await fetch(image.url);
+        if (!response.ok) throw new Error(`读取图片失败（HTTP ${response.status}）`);
+        blob = await response.blob();
+        const responseType = response.headers.get("content-type")?.split(";")[0]?.trim();
+        if (!blob.type && responseType?.startsWith("image/")) blob = blob.slice(0, blob.size, responseType);
+      }
+      const png = await convertImageBlobToPng(blob);
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
       setNotice("图片已复制");
     } catch (exception) {
       setError(`复制图片失败：${exception.message}`);
     }
   };
   const requestViewerDelete = (item, image) => {
-    if (item.source !== "asset") {
-      performDeleteImage(item, image);
-      return;
-    }
-    setDeleteConfirm({
-      kind: "item",
-      item,
-      image,
-      message: "永久删除这张资产图片？此操作不可恢复。",
-    });
+    performDeleteImage(item, image);
   };
   const closeDetail = () => {
     setDetail(null);
@@ -1544,6 +1796,43 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   }, [transparencyScanKey]);
   const selectedGalleryImages = () =>
     galleryImages.filter((entry) => selectedImages.has(entry.key));
+  const batchInputWorkflows = workflows.filter((workflow) => workflow?.capabilities?.inputImage);
+  const openBatchOperation = () => {
+    if (!selectedImages.size) return;
+    setBatchOperation({ open: true, workflowId: batchInputWorkflows[0]?.id || "", busy: false });
+  };
+  const runBatchOperation = async () => {
+    const workflow = batchInputWorkflows.find((item) => item.id === batchOperation.workflowId);
+    const entries = selectedGalleryImages();
+    if (!workflow || !entries.length) return;
+    setBatchOperation((current) => ({ ...current, busy: true }));
+    try {
+      const prepared = [];
+      for (const { image } of entries) {
+        const blob = image.blob || await (await fetch(image.url)).blob();
+        const file = new File([blob], image.filename || image.path?.split(/[\\/]/).pop() || "input.png", { type: blob.type || "image/png" });
+        const hash = await sha256Blob(blob);
+        const response = await fetch(`/api/comfy-tasks/duplicate?workflowId=${encodeURIComponent(workflow.id)}&inputSha256=${hash}`);
+        const result = await readJson(response, "重复任务检查接口");
+        if (!response.ok || result.code !== 200) throw new Error(result.message || "重复任务检查失败");
+        prepared.push({ file, hash, duplicate: result.data && Object.keys(result.data).length > 0 });
+      }
+      const duplicateCount = prepared.filter((item) => item.duplicate).length;
+      if (duplicateCount && !window.confirm(`其中 ${duplicateCount} 张图片之前已经使用同一工作流生成过，是否仍然继续？`)) return;
+      let submitted = 0;
+      for (const input of prepared) {
+        const batchForm = { ...initial, ...(workflow.defaults || {}), workflowId: workflow.id, batchSize: 1 };
+        await submitGeneration(batchForm, generateId(), { sourceImage: input.file }, input.hash);
+        submitted += 1;
+      }
+      setNotice(`批量操作已向 Bridge 队列提交 ${submitted} 个任务`);
+      setBatchOperation({ open: false, workflowId: "", busy: false });
+      setSelectionMode(false); setSelectedImages(new Set());
+    } catch (exception) {
+      setError(`批量操作失败：${exception.message}`);
+      setBatchOperation((current) => ({ ...current, busy: false }));
+    }
+  };
   const toggleSelected = (item, image) =>
     setSelectedImages((current) => {
       const next = new Set(current);
@@ -1557,7 +1846,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       path: image.path,
       url: image.url,
       assetId: item.assetId || null,
-      source: item.source === "asset" || galleryMode === "assets" ? "asset" : "output",
+      source: item.source === "asset" || galleryMode === "assets" || galleryMode === "pending" ? "asset" : "output",
       fileName: image.filename || image.path?.split(/[\\/]/).pop() || "image",
       contentType: image.filename?.toLowerCase().endsWith(".png") ? "image/png"
         : image.filename?.toLowerCase().endsWith(".webp") ? "image/webp"
@@ -1614,7 +1903,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     }
   };
   const performDeleteSelected = async () => {
-    const deletingAssets = galleryMode === "assets";
+    const deletingAssets = galleryMode === "assets" || galleryMode === "pending";
     if (!selectedImages.size) return;
     setBusy(true);
     setError("");
@@ -1639,7 +1928,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         const backendData = await readJson(backend, "后端资产删除接口");
         if (!backend.ok || backendData.code !== 200) throw new Error(backendData.message || "后端资产记录删除失败");
       }
-      removeGalleryImages(deletingAssets ? "assets" : "output", selectedEntries.map(({ image }) => image));
+      removeGalleryImages(deletingAssets ? (galleryMode === "pending" ? "pending" : "assets") : "output", selectedEntries.map(({ image }) => image));
       setSelectedImages(new Set());
       setSelectionMode(false);
     } catch (e) {
@@ -1656,7 +1945,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     }
     setDeleteConfirm({
       kind: "selected",
-      message: galleryMode === "assets"
+      message: galleryMode === "assets" || galleryMode === "pending"
         ? `永久删除选中的 ${selectedImages.size} 张资产图片？此操作不可恢复。`
         : `删除选中的 ${selectedImages.size} 张本机图片？`,
     });
@@ -1679,7 +1968,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     setMoveFolder(data.name);
     setMoveNewFolder("");
   };
-  const migratePaths = async (paths, viewerEntry = null) => {
+  const migratePaths = async (paths, viewerEntry = null, assetStatus = "ACTIVE") => {
     if (!paths.length) return;
     setBusy(true);
     setError("");
@@ -1701,8 +1990,10 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       if (!Array.isArray(data.assets) || !data.assets.length) throw new Error("本机 Agent 版本过旧，图片已迁移但未返回资产登记信息；请更新并重启 Agent 后重试");
       const assets = data.assets.map((asset) => {
         const source = sourceByPath.get(String(asset.oldPath || "").toLowerCase());
+        const sourceStatus = source?.id && pendingGenerationSourceIds.current.has(String(source.id)) ? "PENDING" : assetStatus;
         return {
           ...asset,
+          status: sourceStatus,
           generationCompletedAt: source?.generationCompletedAt,
           generationDurationMs: source?.generationDurationMs,
         };
@@ -1715,12 +2006,16 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       if (!registerResponse.ok || registerData.code !== 200) throw new Error(`图片已迁移，但后端资产保存失败：${registerData.message || registerResponse.status}`);
       const registeredAssets = registerData.data?.items || [];
       if (!registeredAssets.length) throw new Error("图片已迁移并写入后端，但后端没有返回新资产记录");
-      await addRecentAssetRecords(registeredAssets, token);
+      await addRecentAssetRecords(registeredAssets, token, assetStatus === "PENDING" ? "pending" : "assets");
+      // Clean up pendingGenerationSourceIds for migrated items
+      for (const source of sourceByPath.values()) {
+        if (source?.id) pendingGenerationSourceIds.current.delete(String(source.id));
+      }
       setMoveDialog(false);
       setDirectMove(null);
       setSelectedImages(new Set());
       setSelectionMode(false);
-      setNotice("迁移成功");
+      setNotice(assetStatus === "PENDING" ? "已加入待处理" : "转成资产成功");
       if (viewerEntry) advanceDetailAfterAction(viewerEntry.item, viewerEntry.image);
       else {
         removeGalleryImages("output", paths.map((path) => ({ path })));
@@ -1793,9 +2088,46 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       setBusy(false);
     }
   };
+  const migratePendingToActive = async (entries) => {
+    if (!entries.length) return;
+    setBusy(true);
+    setError("");
+    try {
+      const ids = entries.map(({ item }) => item.assetId).filter(Boolean);
+      if (!ids.length) throw new Error("未找到待处理资产的 ID");
+      const response = await fetch("/api/assets/status", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform, ids, status: "ACTIVE" }),
+      });
+      const data = await readJson(response, "资产状态更新接口");
+      if (!response.ok || data.code !== 200) throw new Error(data.message || "状态更新失败");
+      const updatedCount = data.data?.updated || 0;
+      // Remove from pending gallery
+      const movedImages = entries.map(({ image }) => image);
+      removeGalleryImages("pending", movedImages);
+      // Add to assets gallery
+      const assetRecords = entries.map(({ item }) => ({
+        ...item, status: "ACTIVE",
+      }));
+      await addRecentAssetRecords(assetRecords, token, "assets");
+      setSelectedImages(new Set());
+      setSelectionMode(false);
+      setNotice(updatedCount ? `已转成资产 ${updatedCount} 张图片` : "所选图片已转成资产");
+    } catch (e) {
+      setError(`转成资产失败：${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const directToAsset = async () => {
+    const entries = selectedGalleryImages();
+    return migratePaths(entries.map(({ image }) => image.path), null, "ACTIVE");
+  };
   const moveSelected = async () => {
     const entries = selectedGalleryImages();
-    return galleryMode === "assets" ? migrateAssetEntries(entries) : migratePaths(entries.map(({ image }) => image.path));
+    if (galleryMode === "pending") return migratePendingToActive(entries);
+    if (galleryMode === "assets") return migrateAssetEntries(entries);
+    return migratePaths(entries.map(({ image }) => image.path), null, "PENDING");
   };
   const contextEntry = () => imageMenu ? { item: imageMenu.item, image: imageMenu.image, key: imageSelectionKey(imageMenu.item, imageMenu.image) } : null;
   const contextDelete = () => {
@@ -1803,12 +2135,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     if (!entry) return;
     const fromViewer = imageMenu.viewer;
     setImageMenu(null);
-    if (entry.item.source !== "asset") {
-      performDeleteImage(entry.item, entry.image);
-      return;
-    }
-    if (fromViewer) requestViewerDelete(entry.item, entry.image);
-    else setDeleteConfirm({ kind: "item", item: entry.item, image: entry.image, message: "永久删除这张资产图片？此操作不可恢复。" });
+    performDeleteImage(entry.item, entry.image);
   };
   const contextCopy = async () => {
     const entry = contextEntry();
@@ -1831,12 +2158,16 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     if (!entry) return;
     const fromViewer = imageMenu.viewer;
     setImageMenu(null);
-    if (entry.item.source === "asset") migrateAssetEntries([entry], fromViewer ? entry : null);
-    else migratePaths([entry.image.path], fromViewer ? entry : null);
+    if (entry.item.source === "asset") {
+      if (galleryMode === "pending") migratePendingToActive([entry]);
+      else migrateAssetEntries([entry], fromViewer ? entry : null);
+    } else {
+      migratePaths([entry.image.path], fromViewer ? entry : null, "PENDING");
+    }
   };
   const contextSelectAll = () => {
-    setSelectedImages(new Set(filteredGalleryImages.map((entry) => entry.key)));
-    setSelectionMode(true);
+    setSelectedImages(allHistorySelected ? new Set() : new Set(filteredGalleryImages.map((entry) => entry.key)));
+    setSelectionMode(!allHistorySelected);
     setImageMenu(null);
   };
   const contextTwitter = async () => {
@@ -2002,6 +2333,12 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   const activeTaskWorkflowName = activeTask
     ? activeTask.workflowName || workflows.find((workflow) => workflow.id === (activeTask.workflowId || activeTask.form?.workflowId))?.name || (activeTask.external ? "外部 ComfyUI 工作流" : "当前工作流")
     : "";
+  const detailPromptText = (value, field) => {
+    if (detailPromptView === "raw") return value || "";
+    if (detailPromptTranslation.loading) return "正在读取中文映射…";
+    if (detailPromptTranslation.error) return `中文映射失败：${detailPromptTranslation.error}`;
+    return detailPromptTranslation[field] || "";
+  };
   const activeGalleryPage = activeGallerySource;
 
   if (mode === "settings") {
@@ -2077,6 +2414,19 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
           <strong>{running ? "运行中" : platformConfigured ? "已停止" : "路径待配置"}</strong>
         </div>
         <div className="comfy-actions">
+          {launcher === "missing" && (
+            <a
+              className="bridge-launch-action"
+              href={BRIDGE_LAUNCH_URL}
+              onClick={() => {
+                setNotice("请在浏览器提示中确认打开 Local ComfyUI Bridge");
+                window.setTimeout(() => setNotice(""), 5000);
+              }}
+            >
+              <Play />
+              启动本机桥接器
+            </a>
+          )}
           <button
             onClick={() => control("start")}
             disabled={busy || launcher !== "ready" || running || !platformConfigured}
@@ -2084,11 +2434,11 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
             <Play />
             {controlAction === "start" ? "启动中…" : "启动"}
           </button>
-          <button onClick={() => control("stop")} disabled={busy || !running}>
+          <button onClick={() => control("stop")} disabled={busy || launcher !== "ready"}>
             <Power />
             {controlAction === "stop" ? "停止中…" : "停止"}
           </button>
-          <button onClick={() => control("restart")} disabled={busy || launcher !== "ready" || !running || !platformConfigured}>
+          <button onClick={() => control("restart")} disabled={busy || launcher !== "ready" || !platformConfigured}>
             <ArrowClockwise className={controlAction === "restart" ? "spin" : ""} />
             {controlAction === "restart" ? "重启中…" : "重启"}
           </button>
@@ -2125,10 +2475,13 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
             onWorkflowChange={selectWorkflow} referenceFiles={referenceFiles} onReference={chooseReference}
             onReferenceDrop={dropHistoryImageAsReference}
             loraModels={loraModels} loraModelsLoading={loraModelsLoading}
+            promptOptions={allPromptOptions}
+            onPromptOptionsReload={loadPromptOptions}
             presets={presets} presetQuery={presetQuery} onPresetChange={choosePreset}
             appliedPresetTitle={appliedPresetTitle} presetSaveName={presetSaveName} onPresetSaveNameChange={setPresetSaveName}
-            onSavePreset={savePromptPreset} presetSaving={presetSaving} onGenerate={generate}
-            disabled={{ blocked: busy || !running || !token || !activeWorkflow, busy }}
+            onSavePreset={savePromptPreset} onReloadPreset={reloadCurrentPreset} onEditPreset={editCurrentPreset} presetSaving={presetSaving} presetReloading={presetReloading}
+            onLuckyGenerate={luckyGenerate} luckyLoading={luckyLoading} onBatchGenerate={batchPromptGenerate} onGenerate={generate}
+            disabled={{ blocked: busy || batchScheduling || !running || !token || !activeWorkflow, busy: busy || batchScheduling }}
           />
         </section>
         <section className="comfy-history">
@@ -2136,6 +2489,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
             <div className="gallery-source-row">
               <div className="gallery-source-tabs">
                 <button className={galleryMode === "output" ? "active" : ""} onClick={() => switchGallery("output").catch((e) => setError(e.message))}>本机图片</button>
+                <button className={galleryMode === "pending" ? "active" : ""} onClick={() => switchGallery("pending").catch((e) => setError(e.message))}>待处理</button>
                 <button className={galleryMode === "assets" ? "active" : ""} onClick={() => switchGallery("assets").catch((e) => setError(e.message))}>我的资产</button>
               </div>
               <div className="gallery-filters">
@@ -2181,13 +2535,30 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
                   >
                     删除 {selectedImages.size || ""}
                   </button>
-                  <button
+                  <button disabled={!selectedImages.size || !batchInputWorkflows.length} onClick={openBatchOperation}>批量操作 {selectedImages.size || ""}</button>
+                  {galleryMode === "output" && <>
+                    <button
                       className="move-action"
                       disabled={!selectedImages.size}
                       onClick={openMoveDialog}
                     >
-                      迁移 {selectedImages.size || ""}
+                      加入待处理 {selectedImages.size || ""}
                     </button>
+                    <button
+                      className="move-action"
+                      disabled={!selectedImages.size}
+                      onClick={directToAsset}
+                    >
+                      转成资产 {selectedImages.size || ""}
+                    </button>
+                  </>}
+                  {galleryMode === "pending" && <button
+                      className="move-action"
+                      disabled={!selectedImages.size}
+                      onClick={openMoveDialog}
+                    >
+                      转成资产 {selectedImages.size || ""}
+                    </button>}
                   <button
                     className="twitter-task-action"
                     disabled={!selectedImages.size || selectedTwitterImages().length > 4}
@@ -2211,12 +2582,16 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
           </div>
           {tasks.length > 0 && (
             <div className="task-queue-area">
-              <div className="task-queue-overview"><strong>当前 {tasks.length} 个任务</strong><span>执行中 {runningTaskCount}</span><span>排队 {queuedTaskCount}</span></div>
+              <div className="task-queue-overview"><strong>当前 {tasks.length} 个任务</strong><span>执行中 {runningTaskCount}</span><span>排队 {queuedTaskCount}</span>{batchProgress && <span>Bridge 已接收 {batchProgress.submitted} / {batchProgress.total}</span>}{batchScheduling && <button type="button" onClick={() => { batchStopRequested.current = true; }}>停止加入 Bridge</button>}</div>
               <div className="task-queue-strip">
               {sortedTasks.map((task) => (
                 <div
                   key={task.id}
                   className={`queue-pill ${task.state.toLowerCase()}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setTaskDetail(task)}
+                  onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setTaskDetail(task); } }}
                   title={`${task.workflowName || workflows.find((workflow) => workflow.id === (task.workflowId || task.form?.workflowId))?.name || (task.external ? "外部 ComfyUI 工作流" : "当前工作流")} · ${task.id}`}
                 >
                   <div className="queue-pill__info">
@@ -2227,12 +2602,13 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
                         ? "排队"
                         : task.state === "RUNNING"
                           ? "生成中"
-                          : "完成"}
+                          : task.state === "FAILED" ? "失败" : "完成"}
                     </span>
                     <small>{task.workflowName || workflows.find((workflow) => workflow.id === (task.workflowId || task.form?.workflowId))?.name || (task.external ? "外部 ComfyUI 工作流" : "当前工作流")}</small>
+                    <em>已运行 {formatTaskElapsed(task, taskClock)}</em>
                   </div>
                   <strong>{task.progress === null ? "读取中" : `${task.progress}%`}</strong>
-                  {["QUEUED", "RUNNING"].includes(task.state) && <button className="queue-pill__cancel" type="button" aria-label={`取消任务 ${task.id}`} title="取消任务" disabled={cancelingTask === String(task.id)} onClick={() => cancelTask(task)}><X /></button>}
+                  {["QUEUED", "RUNNING"].includes(task.state) && <button className="queue-pill__cancel" type="button" aria-label={`取消任务 ${task.id}`} title="取消任务" disabled={cancelingTask === String(task.id)} onClick={(event) => { event.stopPropagation(); cancelTask(task); }}><X /></button>}
                   <i style={{ width: `${task.progress ?? 0}%` }} />
                 </div>
               ))}
@@ -2244,7 +2620,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
               {activeGalleryPage.status === "loading" ? <SpinnerGap className="spin" size={38} /> : <ImageSquare size={38} />}
               <span>{activeGalleryPage.status === "loading"
                 ? "正在读取图片…"
-                : galleryMode === "assets" ? `当前 ${platform} 暂无已登记资产` : "生成结果只保存在本机"}</span>
+                : galleryMode === "assets" ? `当前 ${platform} 暂无已登记资产` : galleryMode === "pending" ? "暂无待处理图片" : "生成结果只保存在本机"}</span>
             </div>
           )}
           {history.length > 0 && filteredGalleryImages.length === 0 && (
@@ -2341,10 +2717,33 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         <button onClick={() => contextCopy()}><Copy />复制图片</button>
         <button onClick={() => contextOpenFolder()}><FolderOpen />打开所在文件夹</button>
         <button className="danger" onClick={contextDelete}><Trash />删除</button>
-        <button onClick={contextMigrate}><FolderOpen />迁移</button>
+        {imageMenu.item.source !== "asset" && <button onClick={contextMigrate}><FolderOpen />加入待处理</button>}
+        {imageMenu.item.source !== "asset" && <button onClick={() => { const entry = contextEntry(); if (!entry) return; const fromViewer = imageMenu.viewer; setImageMenu(null); migratePaths([entry.image.path], fromViewer ? entry : null, "ACTIVE"); }}><FolderOpen />转成资产</button>}
+        {imageMenu.item.source === "asset" && galleryMode === "pending" && <button onClick={contextMigrate}><FolderOpen />转成资产</button>}
         <button onClick={() => openImageInfo(imageMenu.item, imageMenu.image)}><Info />详细</button>
-        {!imageMenu.viewer && <button onClick={contextSelectAll}><CheckCircle />全选</button>}
+        {!imageMenu.viewer && <button onClick={contextSelectAll}><CheckCircle />{allHistorySelected ? "取消全选" : "全选"}</button>}
         {!imageMenu.viewer && <button onClick={() => contextTwitter().catch((e) => setError(e.message))}><PaperPlaneTilt />添加到 Twitter 任务</button>}
+      </div>}
+      {batchOperation.open && <div className="history-modal batch-operation-modal" onMouseDown={(event) => event.target === event.currentTarget && !batchOperation.busy && setBatchOperation({ open: false, workflowId: "", busy: false })}>
+        <div className="batch-operation-panel"><header><div><span>批量操作</span><h3>为 {selectedImages.size} 张图片创建任务</h3></div><button type="button" disabled={batchOperation.busy} onClick={() => setBatchOperation({ open: false, workflowId: "", busy: false })}><X /></button></header><label><span>选择输入图片工作流</span><select value={batchOperation.workflowId} onChange={(event) => setBatchOperation((current) => ({ ...current, workflowId: event.target.value }))}>{batchInputWorkflows.map((workflow) => <option key={workflow.id} value={workflow.id}>{workflow.name || workflow.id}</option>)}</select></label><p>每张图片会建立一个独立任务；提交前会使用图片 SHA-256 和工作流检查是否已经生成过。</p><footer><button disabled={batchOperation.busy} onClick={() => setBatchOperation({ open: false, workflowId: "", busy: false })}>取消</button><button className="confirm-batch-operation" disabled={batchOperation.busy || !batchOperation.workflowId} onClick={runBatchOperation}>{batchOperation.busy ? "检查并提交中…" : "开始批量操作"}</button></footer></div>
+      </div>}
+      {taskDetail && <div className="history-modal task-detail-modal" onMouseDown={(event) => event.target === event.currentTarget && setTaskDetail(null)}>
+        <div className="task-detail-panel">
+          <header><div><span>任务详情</span><h3>{taskDetail.workflowName || "当前工作流"}</h3></div><PromptViewToggle value={detailPromptView} onChange={setDetailPromptView} /><button type="button" onClick={() => setTaskDetail(null)} aria-label="关闭任务详情"><X /></button></header>
+          <div className="task-detail-summary">
+            <span><small>状态</small>{taskDetail.state === "RUNNING" ? "生成中" : taskDetail.state === "QUEUED" ? "排队中" : taskDetail.state === "FAILED" ? "失败" : taskDetail.state}</span>
+            <span><small>任务类型</small>{taskDetail.sourceType === "COMFYUI" || taskDetail.external ? "ComfyUI 外部任务" : "AIProvider 创建任务"}</span>
+            <span><small>已运行</small>{formatTaskElapsed(taskDetail, taskClock)}</span>
+            <span><small>进度</small>{taskDetail.progress == null ? "读取中" : `${Math.round(taskDetail.progress)}%`}</span>
+            <span><small>Prompt 方案</small>{taskDetail.promptSchemeName || taskDetail.form?.promptSchemeName || "未使用方案"}</span>
+            <span><small>任务 ID</small>{taskDetail.id}</span>
+          </div>
+          {taskDetail.progressDetail && <div className="task-detail-progress"><strong>{taskDetail.progressDetail.currentNode?.name || "当前节点"}</strong><span>{taskDetail.progressDetail.completedNodes || 0} / {taskDetail.progressDetail.totalNodes || 0} 个节点</span></div>}
+          {taskDetail.inputImages?.length > 0 && <section className="task-detail-inputs"><strong>输入图片</strong><div>{taskDetail.inputImages.map((image) => <figure key={`${image.key}-${image.name}`}><img src={image.url} alt={image.name} /><figcaption>{image.name}</figcaption></figure>)}</div></section>}
+          <label><span>正向 Prompt</span><textarea readOnly value={detailPromptText(taskDetail.form?.positivePrompt, "positivePrompt")} /></label>
+          <label><span>反向 Prompt</span><textarea readOnly value={detailPromptText(taskDetail.form?.negativePrompt, "negativePrompt")} /></label>
+          <div className="task-detail-meta"><span><small>Seed</small>{taskDetail.actualSeed ?? taskDetail.form?.seed ?? "-"}</span><span><small>Steps</small>{taskDetail.form?.steps ?? "-"}</span><span><small>CFG</small>{taskDetail.form?.cfg ?? "-"}</span><span><small>LoRA</small>{Array.isArray(taskDetail.form?.loras) ? taskDetail.form.loras.length : 0} 个</span></div>
+        </div>
       </div>}
       {deleteConfirm && <div className="history-modal delete-confirm-modal" onMouseDown={(event) => event.target === event.currentTarget && setDeleteConfirm(null)}>
         <div className="delete-confirm-panel">
@@ -2355,9 +2754,10 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       </div>}
       {infoDetail && <div className="history-modal image-info-modal" onMouseDown={(event) => event.target === event.currentTarget && setInfoDetail(null)}>
         <div className="image-info-panel">
-          <header><div><span>{infoDetail.item.source === "asset" ? "资产详情" : "本机图片详情"}</span><h3>{infoDetail.image.filename || "图片信息"}</h3></div><button onClick={() => setInfoDetail(null)}><X /></button></header>
+          <header><div><span>{infoDetail.item.source === "asset" ? "资产详情" : "本机图片详情"}</span><h3>{infoDetail.image.filename || "图片信息"}</h3></div><PromptViewToggle value={detailPromptView} onChange={setDetailPromptView} /><button onClick={() => setInfoDetail(null)}><X /></button></header>
           <div className="image-info-summary">
             <span><small>工作流</small>{infoDetail.item.workflowName || workflows.find((entry) => entry.id === infoDetail.item.workflowId)?.name || infoDetail.item.workflowId || "未记录"}</span>
+            <span><small>Prompt 方案</small>{infoDetail.item.promptSchemeName || "未使用方案"}</span>
             <span><small>分辨率</small>{infoDetail.image.width || infoDetail.item.width || "-"} × {infoDetail.image.height || infoDetail.item.height || "-"}</span>
             <span><small>生成平台</small>{infoDetail.item.platform || platform || "未记录"}</span>
             <span><small>任务创建时间</small>{infoDetail.item.createdAt ? new Date(infoDetail.item.createdAt).toLocaleString("zh-CN", { hour12: false }) : "未记录"}</span>
@@ -2372,8 +2772,8 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
               <b>{index + 1}</b><span>{loraDisplayName(lora.name)}</span><small>模型 {Number(lora.modelStrength ?? 1).toFixed(2)}</small><small>CLIP {Number(lora.clipStrength ?? 1).toFixed(2)}</small>
             </article>)}</div> : <p>该图片没有记录 LoRA</p>}
           </section>
-          <label className="image-info-prompt"><span>正向 Prompt <button onClick={() => copyInfo(infoDetail.item.prompt, "正向 Prompt")}><Copy />复制</button></span><textarea readOnly value={infoDetail.item.prompt || "未记录"} /></label>
-          <label className="image-info-prompt"><span>反向 Prompt <button onClick={() => copyInfo(infoDetail.item.negativePrompt, "反向 Prompt")}><Copy />复制</button></span><textarea readOnly value={infoDetail.item.negativePrompt || "未记录"} /></label>
+          <label className="image-info-prompt"><span>正向 Prompt <button disabled={!infoDetail.item.prompt} onClick={() => copyInfo(detailPromptText(infoDetail.item.prompt, "positivePrompt"), "正向 Prompt")}><Copy />复制</button></span><textarea readOnly value={detailPromptText(infoDetail.item.prompt, "positivePrompt")} /></label>
+          <label className="image-info-prompt"><span>反向 Prompt <button disabled={!infoDetail.item.negativePrompt} onClick={() => copyInfo(detailPromptText(infoDetail.item.negativePrompt, "negativePrompt"), "反向 Prompt")}><Copy />复制</button></span><textarea readOnly value={detailPromptText(infoDetail.item.negativePrompt, "negativePrompt")} /></label>
           <div className="image-info-path"><small>本机路径</small><code>{infoDetail.image.fullPath || infoDetail.image.path || "未记录"}</code><button onClick={() => copyInfo(infoDetail.image.fullPath || infoDetail.image.path, "本机路径")}><Copy />复制</button></div>
           <footer><button onClick={() => openImageFolder(infoDetail.item, infoDetail.image).catch((e) => setError(e.message))}><FolderOpen />打开所在文件夹</button><button onClick={() => setInfoDetail(null)}>关闭</button></footer>
         </div>
@@ -2389,6 +2789,8 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
                 <button onClick={() => viewerTransform.current?.zoomOut(VIEWER_ZOOM_STEP, 120, "easeOut")} title="缩小"><MagnifyingGlassMinus /></button>
                 <button onClick={() => viewerTransform.current?.resetTransform(140, "easeOut")} title="恢复原位"><ArrowCounterClockwise /></button>
                 <button onClick={() => viewerTransform.current?.zoomIn(VIEWER_ZOOM_STEP, 120, "easeOut")} title="放大"><MagnifyingGlassPlus /></button>
+                <button type="button" onClick={() => setViewerOrientation((current) => ({ ...current, rotation: (current.rotation + 90) % 360 }))} title="顺时针旋转 90°" aria-label="顺时针旋转图片 90 度"><ArrowClockwise /></button>
+                <button type="button" aria-pressed={viewerOrientation.mirrored} onClick={() => setViewerOrientation((current) => ({ ...current, mirrored: !current.mirrored }))} title="水平镜像" aria-label="水平镜像图片"><ArrowsLeftRight /></button>
                 <small>每次 20% · 滚轮同档</small>
               </div>
               <div className="viewer-file-title" title={detail.images[detail.index].filename || detail.images[detail.index].path || "图片"}>
@@ -2431,7 +2833,12 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
                 {() => (
                   <>
                     <TransformComponent wrapperClass="zoom-viewer" contentClass="zoom-content">
-                      <img src={detail.images[detail.index].url} alt="历史生成结果" />
+                      <img
+                        className={`viewer-oriented-image ${viewerOrientation.rotation % 180 ? "is-quarter-turn" : ""}`}
+                        style={{ transform: `rotate(${viewerOrientation.rotation}deg) scaleX(${viewerOrientation.mirrored ? -1 : 1})` }}
+                        src={detail.images[detail.index].url}
+                        alt="历史生成结果"
+                      />
                     </TransformComponent>
                     <button className="lightbox-nav prev" aria-label="上一张图片" onClick={() => navigateDetail(-1)}><CaretLeft /></button>
                     <button className="lightbox-nav next" aria-label="下一张图片" onClick={() => navigateDetail(1)}><CaretRight /></button>

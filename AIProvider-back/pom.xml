@@ -19,7 +19,20 @@
 
     <properties>
         <java.version>8</java.version>
+        <aws.sdk.version>2.47.3</aws.sdk.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${aws.sdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <dependency>
@@ -72,6 +85,31 @@
             <groupId>com.tencentcloudapi</groupId>
             <artifactId>tencentcloud-sdk-java-lighthouse</artifactId>
             <version>3.1.1477</version>
+        </dependency>
+
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>cloudwatch</artifactId>
+            <exclusions><exclusion><groupId>software.amazon.awssdk</groupId><artifactId>apache5-client</artifactId></exclusion></exclusions>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>freetier</artifactId>
+            <exclusions><exclusion><groupId>software.amazon.awssdk</groupId><artifactId>apache5-client</artifactId></exclusion></exclusions>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>costexplorer</artifactId>
+            <exclusions><exclusion><groupId>software.amazon.awssdk</groupId><artifactId>apache5-client</artifactId></exclusion></exclusions>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>billing</artifactId>
+            <exclusions><exclusion><groupId>software.amazon.awssdk</groupId><artifactId>apache5-client</artifactId></exclusion></exclusions>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>url-connection-client</artifactId>
         </dependency>
 
         <dependency>

@@ -21,7 +21,7 @@ export default function UiControl() {
   const reset = () => { const next = { ...DEFAULT_UI_THEME }; setTheme(next); saveUiTheme(next); setSaved(true); };
   return <div className="ui-control-page">
     <section className="ui-control-hero">
-      <div><span>GLOBAL APPEARANCE</span><h2><Palette />全局 UI 控制</h2><p>这里的修改会实时应用到首页、工坊、Prompt、监控、手机监控和系统设置。</p></div>
+      <div><span>GLOBAL APPEARANCE</span><h2><Palette />全局 UI 控制</h2><p>这里的修改会实时应用到首页、图像工坊、图片编辑、视频编辑、市场行情、Prompt、我的女仆、监控、链上工具、Twitter、UI 控制和系统设置。</p></div>
       <div className="ui-control-state"><CheckCircle />{saved ? "已自动保存" : "等待保存"}</div>
     </section>
     <div className="ui-control-layout">

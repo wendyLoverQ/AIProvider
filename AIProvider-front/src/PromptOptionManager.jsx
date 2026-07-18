@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, FloppyDisk, MagnifyingGlass, Plus, Trash, Warning } from "@phosphor-icons/react";
+import { ArrowLeft, FloppyDisk, Plus, Trash, Warning } from "@phosphor-icons/react";
 import { buildPromptCategories, PROMPT_CATEGORIES } from "./promptComposer";
+import UiSearchField from "./UiSearchField";
 import "./PromptOptionManager.css";
 
 const emptyDraft = () => ({ id: "", category: "Clothing", name: "", prompt: "", type: "positive", reverseId: "", sortOrder: 100, enabled: true, allowMultiple: true, persisted: false });
-const MULTIPLE_CATEGORIES = new Set(["Character", "Appearance", "Relationship", "Action", "Clothing", "Composition", "Eyes", "Hair", "Special", "Background", "Lighting", "Style", "Quality"]);
+const MULTIPLE_CATEGORIES = new Set(["Character", "Appearance", "Special", "Clothing", "Artist", "Relationship", "Action", "Composition", "Eyes", "Hair", "Background", "Lighting", "Style", "Quality"]);
 const PAGE_SIZE = 100;
 
 async function request(path, options) {
@@ -69,7 +70,7 @@ export default function PromptOptionManager({ onBack, initialCategory = "" }) {
     <section className="prompt-option-workspace">
       <aside className="prompt-option-list">
         <div className="prompt-option-filters">
-          <label><MagnifyingGlass /><input aria-label="搜索词条" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="中文、英文或 ID" /></label>
+          <UiSearchField aria-label="搜索词条" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="中文、英文或 ID" />
           <div><select aria-label="筛选分类" value={category} onChange={(event) => { setCategory(event.target.value); setPage(1); }}><option value="">全部分类</option>{definitions.map((item) => <option key={item.category} value={item.category}>{item.label}</option>)}</select><select aria-label="筛选状态" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}><option value="all">全部状态</option><option value="enabled">已启用</option><option value="disabled">已停用</option></select></div>
           <small>共 {total} 个词条 · 第 {pages ? page : 0} / {pages} 页</small>
         </div>

@@ -1,0 +1,9 @@
+{
+  "host": "124.222.185.195",
+  "user": "root",
+  "identityFile": "C:\\Users\\49213\\Desktop\\A\\codex\\AIProvider\\server-configs\\tencent-key.pem",
+  "backendService": "aiprovider-backend.service",
+  "backendPath": "/opt/aiprovider/backend/app.jar",
+  "frontendPath": "/opt/aiprovider/frontend",
+  "healthUrl": "http://127.0.0.1:8888/api/health"
+}

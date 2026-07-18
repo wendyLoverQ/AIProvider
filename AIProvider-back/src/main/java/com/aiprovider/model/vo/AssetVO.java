@@ -11,6 +11,9 @@ public class AssetVO {
     private final long fileSize;
     private final Integer width;
     private final Integer height;
+    private final String assetType;
+    private final String mimeType;
+    private final String status;
     private final String prompt;
     private final String negativePrompt;
     private final String lorasJson;
@@ -26,11 +29,11 @@ public class AssetVO {
     private final LocalDateTime createdAt;
 
     public AssetVO(long id, String platform, String localPath, String localUrl, String fileName, long fileSize,
-                   Integer width, Integer height, String prompt, String negativePrompt, String lorasJson, Long seed,
+                   Integer width, Integer height, String assetType, String mimeType, String status, String prompt, String negativePrompt, String lorasJson, Long seed,
                    Integer steps, Double cfg, String sampler, String scheduler, String workflowId,
                    LocalDateTime generatedAt, LocalDateTime generationCompletedAt, Long generationDurationMs, LocalDateTime createdAt) {
         this.id = id; this.platform = platform; this.localPath = localPath; this.localUrl = localUrl; this.fileName = fileName;
-        this.fileSize = fileSize; this.width = width; this.height = height; this.prompt = prompt;
+        this.fileSize = fileSize; this.width = width; this.height = height; this.assetType = assetType; this.mimeType = mimeType; this.status = status; this.prompt = prompt;
         this.negativePrompt = negativePrompt; this.lorasJson = lorasJson; this.seed = seed; this.steps = steps; this.cfg = cfg;
         this.sampler = sampler; this.scheduler = scheduler; this.workflowId = workflowId;
         this.generatedAt = generatedAt; this.generationCompletedAt = generationCompletedAt;
@@ -44,6 +47,9 @@ public class AssetVO {
     public long getFileSize() { return fileSize; }
     public Integer getWidth() { return width; }
     public Integer getHeight() { return height; }
+    public String getAssetType() { return assetType; }
+    public String getMimeType() { return mimeType; }
+    public String getStatus() { return status; }
     public String getPrompt() { return prompt; }
     public String getNegativePrompt() { return negativePrompt; }
     public String getLorasJson() { return lorasJson; }

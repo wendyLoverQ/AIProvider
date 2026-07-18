@@ -5,6 +5,7 @@ import com.aiprovider.model.dto.PromptOptionDTO;
 import com.aiprovider.model.vo.PromptOptionVO;
 import com.aiprovider.model.vo.PromptOptionPageVO;
 import com.aiprovider.repository.PromptCatalogRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.*;
@@ -13,11 +14,19 @@ import java.util.regex.Pattern;
 @Service
 public class PromptOptionService {
     private static final Pattern ID_PATTERN = Pattern.compile("[a-z0-9][a-z0-9_]{0,63}");
-    private static final Set<String> MULTIPLE_CATEGORIES = Set.of("Character", "Appearance", "Relationship", "Action", "Clothing", "Composition", "Eyes", "Hair", "Special", "Background", "Lighting", "Style", "Quality");
-    private static final Set<String> CATEGORIES = Set.of("Action", "Appearance", "Background", "Camera", "Character", "Clothing", "Composition", "Expression", "Eyes", "Hair", "Lighting", "Pose", "Quality", "Relationship", "Special", "Style");
+    private static final Set<String> MULTIPLE_CATEGORIES = Set.of("Character", "Appearance", "Special", "Clothing", "Artist", "Relationship", "Action", "Composition", "Eyes", "Hair", "Background", "Lighting", "Style", "Quality");
+    private static final Set<String> CATEGORIES = Set.of("Action", "Appearance", "Artist", "Background", "Camera", "Character", "Clothing", "Composition", "Expression", "Eyes", "Hair", "Lighting", "Pose", "Quality", "Relationship", "Special", "Style");
     private final PromptCatalogRepository repository;
+    private final PromptTranslationService translationService;
 
-    public PromptOptionService(PromptCatalogRepository repository) { this.repository = repository; }
+    @Autowired
+    public PromptOptionService(PromptCatalogRepository repository, PromptTranslationService translationService) {
+        this.repository = repository;
+        this.translationService = translationService;
+    }
+    PromptOptionService(PromptCatalogRepository repository) {
+        this(repository, new PromptTranslationService(repository));
+    }
 
     public PromptOptionPageVO page(String query, String category, String status, int page, int pageSize) {
         if (page < 1) throw new IllegalArgumentException("page 必须大于等于 1");
@@ -42,6 +51,7 @@ public class PromptOptionService {
         PromptCatalogMapper.OptionRecord record = validate(dto);
         if (repository.existsOption(record.getId())) throw new IllegalArgumentException("词条 ID 已存在");
         repository.insertOption(record);
+        translationService.invalidate();
     }
 
     @Transactional
@@ -49,6 +59,7 @@ public class PromptOptionService {
         PromptCatalogMapper.OptionRecord record = validate(dto);
         if (!record.getId().equals(id)) throw new IllegalArgumentException("词条 ID 创建后不能修改");
         if (!repository.updateOption(record)) throw new IllegalArgumentException("词条不存在");
+        translationService.invalidate();
     }
 
     @Transactional
@@ -56,6 +67,7 @@ public class PromptOptionService {
         validateId(id);
         if (repository.countSchemeReferences(id) > 0) throw new IllegalArgumentException("词条正在被 Prompt 方案使用，请先从方案中移除该词条");
         if (!repository.deleteOption(id)) throw new IllegalArgumentException("词条不存在");
+        translationService.invalidate();
     }
 
     private PromptCatalogMapper.OptionRecord validate(PromptOptionDTO dto) {

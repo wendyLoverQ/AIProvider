@@ -14,15 +14,17 @@ import java.util.regex.Pattern;
 public class MonitorService {
     private static final Duration RESOURCE_TTL=Duration.ofSeconds(15), OVERVIEW_TTL=Duration.ofSeconds(30);
     private static final Pattern SECRET=Pattern.compile("(?i)(authorization|cookie|secret(?:id|key)?|api[-_ ]?key|bearer)\\s*[:=]\\s*[^,;\\s]+",Pattern.CASE_INSENSITIVE);
-    private final ISystemResourceMonitor system; private final TencentTrafficService traffic; private final HealthService health; private final MonitorRepository repository;
+    private final ISystemResourceMonitor system; private final TencentTrafficService traffic; private final AwsCloudWatchTrafficService awsTraffic; private final HealthService health; private final MonitorRepository repository;
+    private final String localProvider;
     private final ZoneId zone;
     private final Object resourceLock=new Object(), overviewLock=new Object();
     private volatile ResourceCache resourceCache; private volatile OverviewCache overviewCache;
-    public MonitorService(ISystemResourceMonitor system,TencentTrafficService traffic,HealthService health,MonitorRepository repository,@Value("${monitor.timezone:Asia/Shanghai}") String timezone){this.system=system;this.traffic=traffic;this.health=health;this.repository=repository;this.zone=ZoneId.of(timezone);}
+    public MonitorService(ISystemResourceMonitor system,TencentTrafficService traffic,AwsCloudWatchTrafficService awsTraffic,HealthService health,MonitorRepository repository,@Value("${monitor.timezone:Asia/Shanghai}") String timezone,@Value("${monitor.local-provider:TENCENT}") String localProvider){this.system=system;this.traffic=traffic;this.awsTraffic=awsTraffic;this.health=health;this.repository=repository;this.zone=ZoneId.of(timezone);this.localProvider=localProvider;}
 
     public MonitorSummaryVO summary(){
         ResourceCache resources=resources(); HealthService.Snapshot state=health.check();
-        return new MonitorSummaryVO(new MonitorSummaryVO.Health(state.getStatus(),state.getCheckedAt()),OffsetDateTime.now(zone),resources.memory,resources.disk,traffic.current());
+        MonitorSummaryVO.Traffic localTraffic="AWS".equalsIgnoreCase(localProvider)?awsTraffic.traffic():traffic.current();
+        return new MonitorSummaryVO(new MonitorSummaryVO.Health(state.getStatus(),state.getCheckedAt()),OffsetDateTime.now(zone),resources.memory,resources.disk,localTraffic);
     }
     private ResourceCache resources(){
         Instant now=Instant.now(); ResourceCache value=resourceCache;

@@ -33,6 +33,16 @@ monitor:
   timezone: ${MONITOR_TIMEZONE:Asia/Shanghai}
   disk-path: ${MONITOR_DISK_PATH:.}
   detail-retention-days: ${MONITOR_DETAIL_RETENTION_DAYS:30}
+  local-provider: ${MONITOR_LOCAL_PROVIDER:TENCENT}
+  aws:
+    region: ${AWS_REGION:ap-northeast-1}
+    instance-id: ${AWS_INSTANCE_ID:}
+    monthly-quota-bytes: ${AWS_MONTHLY_TRAFFIC_QUOTA_BYTES:100000000000}
+    account-id: ${AWS_ACCOUNT_ID:}
+    billing-cache-hours: ${AWS_BILLING_CACHE_HOURS:6}
+  tencent:
+    server-url: ${TENCENT_MONITOR_SERVER_URL:http://124.222.185.195}
+    public-ip: ${TENCENT_MONITOR_PUBLIC_IP:124.222.185.195}
 
 maid:
   avatar-directory: ${MAID_AVATAR_DIRECTORY:/opt/aiprovider/characters}
@@ -42,6 +52,19 @@ tencent-cloud:
   secret-key: ${TENCENT_CLOUD_SECRET_KEY:}
   region: ${TENCENT_CLOUD_REGION:ap-shanghai}
   lighthouse-instance-id: ${TENCENT_CLOUD_LIGHTHOUSE_INSTANCE_ID:lhins-20ht1gis}
+
+crypto-market:
+  ccxt-base-url: ${CCXT_GATEWAY_URL:http://127.0.0.1:8890}
+  connect-timeout-ms: ${CRYPTO_MARKET_CONNECT_TIMEOUT_MS:3000}
+  read-timeout-ms: ${CRYPTO_MARKET_READ_TIMEOUT_MS:15000}
+
+foundry:
+  rpc-url: ${FOUNDRY_RPC_URL:}
+  command-timeout-ms: ${FOUNDRY_COMMAND_TIMEOUT_MS:10000}
+  forge-command: ${FOUNDRY_FORGE_COMMAND:forge}
+  cast-command: ${FOUNDRY_CAST_COMMAND:cast}
+  anvil-command: ${FOUNDRY_ANVIL_COMMAND:anvil}
+  chisel-command: ${FOUNDRY_CHISEL_COMMAND:chisel}
 
 twitter:
   publish-mode: ${TWITTER_PUBLISH_MODE:client}
@@ -55,3 +78,8 @@ remote-codex:
   command: ${REMOTE_CODEX_COMMAND:codex}
   working-directory: ${REMOTE_CODEX_WORKING_DIRECTORY:}
   access-token: ${REMOTE_CODEX_ACCESS_TOKEN:}
+
+content-ai:
+  secret-encryption-key: ${CONTENT_AI_SECRET_ENCRYPTION_KEY:}
+  connect-timeout-ms: ${CONTENT_AI_CONNECT_TIMEOUT_MS:5000}
+  read-timeout-ms: ${CONTENT_AI_READ_TIMEOUT_MS:90000}

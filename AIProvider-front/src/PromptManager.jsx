@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Copy, FloppyDisk, MagnifyingGlass, Plus, Star, Trash, Warning, X } from "@phosphor-icons/react";
+import { Copy, FloppyDisk, Plus, Star, Trash, Warning, X } from "@phosphor-icons/react";
 import { buildPromptCategories, composePrompts, emptySelectedOptions, extractNegativeExtra, extractPositiveExtra, normalizePrompt, relatedNegativePromptsForPositive, normalizeSelectedOptions } from "./promptComposer";
+import UiSearchField from "./UiSearchField";
 import "./PromptManager.css";
 
 const emptyDraft = (definitions) => ({ id: null, name: "", selectedOptions: emptySelectedOptions(definitions), positiveExtra: "", negativeExtra: "", positivePrompt: "", negativePrompt: "", remark: "", isDefault: false });
@@ -35,10 +36,7 @@ function MultiOptionPicker({ definition, options, value, onChange, onEditOptions
         {selected.map((option) => <button type="button" key={option.id} title={option.positivePrompt} onClick={() => onChange(value.filter((id) => id !== option.id))}>{option.name}<X /></button>)}
       </div>}
     </div>
-    <div className={`prompt-option-search ${open ? "is-open" : ""}`}>
-      <input aria-label={`搜索${definition.label}`} value={query} onFocus={() => setOpen(true)} onChange={(event) => { setQuery(event.target.value); setOpen(true); }} onKeyDown={(event) => event.key === "Escape" && setOpen(false)} placeholder={`搜索中文或英文 ${definition.label}`} />
-      <MagnifyingGlass aria-hidden="true" />
-    </div>
+    <UiSearchField className={`prompt-option-search ${open ? "is-open" : ""}`} aria-label={`搜索${definition.label}`} value={query} onFocus={() => setOpen(true)} onChange={(event) => { setQuery(event.target.value); setOpen(true); }} onKeyDown={(event) => event.key === "Escape" && setOpen(false)} placeholder={`搜索中文或英文 ${definition.label}`} />
     {open && <div className="prompt-option-results">
       <header><span>{keyword ? `找到 ${available.length} 项` : "常用词条"}</span><button type="button" onClick={() => setOpen(false)}>收起</button></header>
       {available.map((option) => <button type="button" key={option.id} onClick={() => { onChange([...value, option.id]); setQuery(""); }}><span><strong>{option.name}</strong><small> · {option.positivePrompt}</small></span><Plus /></button>)}
@@ -137,11 +135,11 @@ export default function PromptManager({ onEditOptions }) {
     {error && <div className="prompt-manager-error"><Warning />{error}<button onClick={() => setError("")}>×</button></div>}
     <aside className="prompt-scheme-list">
       <header><div><span>PROMPT LIBRARY</span><h2>Prompt 方案</h2></div><div className="prompt-list-actions"><button onClick={onEditOptions}>编辑词条</button><button onClick={createNew} title="新建方案"><Plus /></button></div></header>
-      <input className="prompt-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索方案名称…" />
+      <UiSearchField className="prompt-list-search" aria-label="搜索 Prompt 方案" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索方案名称…" />
       <div className="prompt-list-scroll">
-        {filtered.map((item) => <button key={item.id} className={String(item.id) === String(draft.id) ? "active" : ""} onClick={() => select(item)}>
-          <span>{item.name}</span><span className={`prompt-default-star ${item.isDefault ? "is-default" : ""}`} role="button" tabIndex="0" aria-label={item.isDefault ? `取消默认方案 ${item.name}` : `设为默认方案 ${item.name}`} title={item.isDefault ? "取消默认方案" : "设为默认方案"} onClick={(event) => { event.stopPropagation(); toggleDefault(item); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); toggleDefault(item); } }}><Star weight={item.isDefault ? "fill" : "regular"} /></span><small>{item.selectedOptions ? `${Object.values(item.selectedOptions).flat().length} 个结构化词条` : "未选择词条"}</small>
-        </button>)}
+        {filtered.map((item) => <div key={item.id} role="button" tabIndex="0" className={`prompt-scheme-row ${String(item.id) === String(draft.id) ? "active" : ""}`} onClick={() => select(item)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); select(item); } }}>
+          <span>{item.name}</span><button type="button" className={`prompt-default-star ${item.isDefault ? "is-default" : ""}`} aria-label={item.isDefault ? `取消默认方案 ${item.name}` : `设为默认方案 ${item.name}`} title={item.isDefault ? "取消默认方案" : "设为默认方案"} onClick={(event) => { event.stopPropagation(); toggleDefault(item); }}><Star weight={item.isDefault ? "fill" : "regular"} /></button><small>{item.selectedOptions ? `${Object.values(item.selectedOptions).flat().length} 个结构化词条` : "未选择词条"}</small>
+        </div>)}
         {!filtered.length && <p>没有匹配的 Prompt 方案</p>}
       </div>
     </aside>
@@ -157,7 +155,7 @@ export default function PromptManager({ onEditOptions }) {
         </section>
         <section className="prompt-composer">
           <header><div><h3>Prompt 组合器</h3><small>词条来自数据库配置；修改选择后自动重建最终 Prompt</small></div><span>{Object.values(draft.selectedOptions).flat().length} 项</span></header>
-          <div className="prompt-option-search prompt-global-search"><input aria-label="全局搜索 Prompt 词条" value={globalOptionQuery} onChange={(event) => setGlobalOptionQuery(event.target.value)} placeholder="搜索中文、英文或词条 ID" /><MagnifyingGlass aria-hidden="true" /><div className="prompt-global-search-results">{globalOptionQuery.trim() && globalOptionResults.map((option) => { const definition = definitions.find((item) => item.category === option.category); const selected = draft.selectedOptions?.[option.category]?.includes(option.id); return <button type="button" key={option.id} className={selected ? "is-selected" : ""} onClick={() => { const current = draft.selectedOptions?.[option.category] || []; const next = definition?.multiple ? (current.includes(option.id) ? current : [...current, option.id]) : [option.id]; setSelection(option.category, next); setGlobalOptionQuery(""); window.setTimeout(() => document.querySelector(`[data-prompt-category="${CSS.escape(option.category)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 0); }}><span><strong>{option.name}</strong><small>{definition?.label || option.category} · {option.positivePrompt}</small></span>{selected && <span>已选</span>}</button>})}{globalOptionQuery.trim() && !globalOptionResults.length && <p>没有匹配词条</p>}</div></div>
+          <UiSearchField className="prompt-option-search prompt-global-search" aria-label="全局搜索 Prompt 词条" value={globalOptionQuery} onChange={(event) => setGlobalOptionQuery(event.target.value)} placeholder="搜索中文、英文或词条 ID"><div className="prompt-global-search-results">{globalOptionQuery.trim() && globalOptionResults.map((option) => { const definition = definitions.find((item) => item.category === option.category); const selected = draft.selectedOptions?.[option.category]?.includes(option.id); return <button type="button" key={option.id} className={selected ? "is-selected" : ""} onClick={() => { const current = draft.selectedOptions?.[option.category] || []; const next = definition?.multiple ? (current.includes(option.id) ? current : [...current, option.id]) : [option.id]; setSelection(option.category, next); setGlobalOptionQuery(""); window.setTimeout(() => document.querySelector(`[data-prompt-category="${CSS.escape(option.category)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 0); }}><span><strong>{option.name}</strong><small>{definition?.label || option.category} · {option.positivePrompt}</small></span>{selected && <span>已选</span>}</button>})}{globalOptionQuery.trim() && !globalOptionResults.length && <p>没有匹配词条</p>}</div></UiSearchField>
           <div className="prompt-category-grid">{definitions.map((definition) => {
             const props = { definition, options: optionsByCategory[definition.category] || [], value: draft.selectedOptions[definition.key], onChange: (value) => setSelection(definition.key, value), onEditOptions };
             return definition.multiple ? <div key={definition.key} data-prompt-category={definition.category}><MultiOptionPicker {...props} /></div> : <div key={definition.key} data-prompt-category={definition.category}><SingleOptionPicker {...props} /></div>;

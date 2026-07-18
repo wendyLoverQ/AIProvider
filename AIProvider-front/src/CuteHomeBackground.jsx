@@ -1,18 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { CuteWorkshopArt } from "./CuteWorkshopCard";
-import unit09Space from "./assets/cockpit-unit09-space-v5.png";
 import unit09Frame from "./assets/cockpit-unit09-frame-v2.png";
 import unit09Pilot from "./assets/cockpit-unit09-pilot-v2.png";
-import jupiterReal from "./assets/celestial/jupiter-real-v2.webp";
-import earthReal from "./assets/celestial/earth-real.webp";
-import marsReal from "./assets/celestial/mars-real.webp";
-import venusReal from "./assets/celestial/venus-real.webp";
-import saturnReal from "./assets/celestial/saturn-real.webp";
-import titanReal from "./assets/celestial/titan-real.webp";
-import neptuneReal from "./assets/celestial/neptune-real.webp";
-import plutoReal from "./assets/celestial/pluto-real.webp";
-import moonReal from "./assets/celestial/moon-real.webp";
 import { RELEASE_VERSION } from "./releaseVersion";
+import { createThreePlanetFlyby, THREE_FLYBY_BODIES } from "./threePlanetFlyby";
 import "./CuteHomeBackground.css";
 
 const STATUS_LIGHTS = Array.from({ length: 7 });
@@ -27,13 +18,12 @@ const COCKPIT_SCENES = [
   {
     id: "unit09",
     label: "UNIT 09",
-    space: unit09Space,
     frame: unit09Frame,
     pilot: unit09Pilot,
     instruments: [
       { id: "left", mode: "radar", style: { left: "20.2%", top: "30.7%", width: "5.45%", height: "9.45%", transform: "perspective(240px) rotateY(5deg) rotateZ(.4deg)" } },
       { id: "center", mode: "bars", style: { left: "44.95%", top: "33.45%", width: "3.35%", height: "4.55%", transform: "perspective(180px) rotateY(-3deg) rotateZ(.4deg)" } },
-      { id: "right", mode: "workshop", style: { left: "62.75%", top: "31.65%", width: "8.15%", height: "13.35%", transform: "perspective(250px) rotateY(-4deg) rotateZ(.35deg)" } },
+      { id: "right", mode: "workshop", style: { left: "70.3402%", top: "78.4032%", width: "3.198%", height: "4.2135%", transform: "matrix(1, .087452, -.210256, 1, 0, 0)" } },
     ],
     consoleKeys: { left: "63.05%", top: "44.25%", width: "7.45%", height: "1.2%", transform: "perspective(180px) rotateY(-4deg) rotateZ(.35deg)" },
     statusLights: { left: "20.35%", top: "41.15%", width: "5.2%", height: ".82%", transform: "rotate(.4deg)" },
@@ -44,6 +34,7 @@ const COCKPIT_SCENES = [
 export default function CuteHomeBackground({ onOpenWorkshop }) {
   const root = useRef(null);
   const spaceCanvas = useRef(null);
+  const planetCanvas = useRef(null);
   const releaseTimer = useRef(0);
   const [pressState, setPressState] = useState("");
   const [sceneIndex, setSceneIndex] = useState(0);
@@ -71,8 +62,10 @@ export default function CuteHomeBackground({ onOpenWorkshop }) {
 
   useEffect(() => {
     const canvas = spaceCanvas.current;
+    const webglCanvas = planetCanvas.current;
     const context = canvas?.getContext("2d");
-    if (!canvas || !context) return undefined;
+    if (!canvas || !webglCanvas || !context) return undefined;
+    const planetLayer = createThreePlanetFlyby(webglCanvas);
 
     let animationFrame = 0;
     let width = 0;
@@ -97,30 +90,7 @@ export default function CuteHomeBackground({ onOpenWorkshop }) {
       life: 0,
       duration: 0,
     }));
-    const flybyTemplates = [
-      { type: "jupiter", k: .11, radius: .014 },
-      { type: "saturn", k: .105, radius: .01 },
-      { type: "earth", k: .118, radius: .012 },
-      { type: "venus", k: .116, radius: .0115 },
-      { type: "mars", k: .122, radius: .0105 },
-      { type: "neptune", k: .113, radius: .012 },
-      { type: "pluto", k: .125, radius: .007 },
-    ];
-    const celestialImages = Object.fromEntries(Object.entries({
-      jupiter: jupiterReal,
-      earth: earthReal,
-      mars: marsReal,
-      venus: venusReal,
-      saturn: saturnReal,
-      titan: titanReal,
-      neptune: neptuneReal,
-      pluto: plutoReal,
-      moon: moonReal,
-    }).map(([key, source]) => {
-      const image = new Image();
-      image.src = source;
-      return [key, image];
-    }));
+    const flybyTemplates = THREE_FLYBY_BODIES;
     const startedAt = performance.now();
     let flybyQueue = [];
     let activeFlyby = null;
@@ -135,6 +105,10 @@ export default function CuteHomeBackground({ onOpenWorkshop }) {
       }
       if (flybyQueue[0]?.type === previousFlybyType) {
         [flybyQueue[0], flybyQueue[1]] = [flybyQueue[1], flybyQueue[0]];
+      }
+      if (!previousFlybyType) {
+        const saturnIndex = flybyQueue.findIndex((item) => item.type === "saturn");
+        [flybyQueue[0], flybyQueue[saturnIndex]] = [flybyQueue[saturnIndex], flybyQueue[0]];
       }
     };
 
@@ -162,35 +136,6 @@ export default function CuteHomeBackground({ onOpenWorkshop }) {
       meteor.duration = 2.4 + Math.random() * 1.6;
     };
 
-    const drawOrbitingBody = (image, radius, time, orbit, frontPass) => {
-      if (!image.complete || !image.naturalWidth) return;
-      const angle = time * orbit.speed + orbit.phase;
-      const depth = Math.sin(angle);
-      if ((depth >= 0) !== frontPass) return;
-      const bodyRadius = radius * orbit.radius;
-      const x = Math.cos(angle) * radius * orbit.distance;
-      const y = depth * radius * orbit.tilt + radius * orbit.offsetY;
-      context.save();
-      context.globalAlpha *= .98;
-      context.beginPath();
-      context.arc(x, y, bodyRadius, 0, Math.PI * 2);
-      context.clip();
-      context.drawImage(image, x - bodyRadius, y - bodyRadius, bodyRadius * 2, bodyRadius * 2);
-      context.restore();
-    };
-
-    const drawSaturnSystem = (radius, time) => {
-      const saturn = celestialImages.saturn;
-      const titan = celestialImages.titan;
-      if (!saturn.complete || !saturn.naturalWidth) return;
-      const titanOrbit = { speed: .000035, phase: .6, radius: .18, distance: 3.2, tilt: .72, offsetY: -.08 };
-      drawOrbitingBody(titan, radius, time, titanOrbit, false);
-      const imageWidth = radius * 4.55;
-      const imageHeight = imageWidth * saturn.naturalHeight / saturn.naturalWidth;
-      context.drawImage(saturn, -imageWidth / 2, -imageHeight / 2, imageWidth, imageHeight);
-      drawOrbitingBody(titan, radius, time, titanOrbit, true);
-    };
-
     const drawFlybyPlanet = (planet, time) => {
       const local = (time - planet.startedAt) / 1000;
       const perspectiveScale = Math.exp(planet.k * local);
@@ -199,31 +144,15 @@ export default function CuteHomeBackground({ onOpenWorkshop }) {
       const radius = Math.min(width, height) * planet.radius * perspectiveScale;
       const centerX = x * width;
       const centerY = y * height;
-      const halfWidth = planet.type === "saturn" ? radius * 2.275 : radius;
-      const halfHeight = planet.type === "saturn" ? radius * 1.18 : radius;
+      const halfWidth = radius * (planet.boundsX || 1);
+      const halfHeight = radius * (planet.boundsY || 1);
       if (centerX + halfWidth < 0 || centerX - halfWidth > width || centerY + halfHeight < 0 || centerY - halfHeight > height) {
+        planetLayer.hide();
         activeFlyby = null;
         nextFlybyAt = time + 2500 + Math.random() * 4500;
         return;
       }
-      context.save();
-      context.translate(centerX, centerY);
-      context.globalAlpha = .96;
-      const image = celestialImages[planet.type];
-      if (!image.complete || !image.naturalWidth) {
-        context.restore();
-        return;
-      }
-      if (planet.type === "saturn") {
-        drawSaturnSystem(radius, time);
-        context.restore();
-        return;
-      }
-      const moonOrbit = { speed: .000045, phase: 1.1, radius: .21, distance: 1.62, tilt: .48, offsetY: -.08 };
-      if (planet.type === "earth") drawOrbitingBody(celestialImages.moon, radius, time, moonOrbit, false);
-      context.drawImage(image, -radius, -radius, radius * 2, radius * 2);
-      if (planet.type === "earth") drawOrbitingBody(celestialImages.moon, radius, time, moonOrbit, true);
-      context.restore();
+      planetLayer.update({ type: planet.type, centerX, centerY, radius, elapsedTime: time });
     };
 
     const resize = () => {
@@ -233,6 +162,7 @@ export default function CuteHomeBackground({ onOpenWorkshop }) {
       canvas.width = Math.round(width * ratio);
       canvas.height = Math.round(height * ratio);
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      planetLayer.resize(width, height, ratio);
     };
 
     const draw = (time = performance.now()) => {
@@ -280,6 +210,7 @@ export default function CuteHomeBackground({ onOpenWorkshop }) {
       context.globalCompositeOperation = "source-over";
       if (!activeFlyby && time >= nextFlybyAt) launchFlyby(time);
       if (activeFlyby) drawFlybyPlanet(activeFlyby, time);
+      planetLayer.render();
       context.globalCompositeOperation = "lighter";
 
       meteors.forEach((meteor) => {
@@ -341,6 +272,7 @@ export default function CuteHomeBackground({ onOpenWorkshop }) {
     return () => {
       window.removeEventListener("resize", resize);
       if (animationFrame) cancelAnimationFrame(animationFrame);
+      planetLayer.dispose();
     };
   }, []);
 
@@ -363,16 +295,14 @@ export default function CuteHomeBackground({ onOpenWorkshop }) {
   return (
     <div className="cute-home-bg cockpit-home-bg" ref={root}>
       <div className={`cockpit-layer-stage cockpit-scene-${scene.id} ${pressState ? `is-${pressState}` : ""}`}>
-        <div className="cockpit-layer-wrap cockpit-space-wrap">
-          <img className="cockpit-layer" src={scene.space} alt="" />
-        </div>
         <canvas
           className="cockpit-space-canvas"
           ref={spaceCanvas}
-          style={{
-            WebkitMaskImage: `url(${scene.space})`,
-            maskImage: `url(${scene.space})`,
-          }}
+        />
+        <canvas
+          className="cockpit-planet-canvas"
+          ref={planetCanvas}
+          aria-hidden="true"
         />
         <div className="cockpit-layer-wrap cockpit-frame-wrap">
           <img className="cockpit-layer" src={scene.frame} alt="" />

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ComfyLocalWorkbench from "./ComfyLocalWorkbench";
 
@@ -69,9 +69,12 @@ describe("Comfy image generation flow", () => {
   let submittedEditorData;
   let savedTwitterTask;
   let presetIsDefault;
+  let presetPositivePrompt;
   let cancelledTask;
   let multiImageGallery;
   let submittedWorkflow;
+  let generateRequests;
+  let submittedBatchSizes;
   let customQueue;
   let progressFails;
   let deletedPaths;
@@ -94,9 +97,12 @@ describe("Comfy image generation flow", () => {
     submittedEditorData = null;
     savedTwitterTask = null;
     presetIsDefault = false;
+    presetPositivePrompt = "preset prompt";
     cancelledTask = null;
     multiImageGallery = false;
     submittedWorkflow = null;
+    generateRequests = 0;
+    submittedBatchSizes = [];
     customQueue = null;
     progressFails = false;
     deletedPaths = [];
@@ -116,17 +122,19 @@ describe("Comfy image generation flow", () => {
       if (url.endsWith("/api/comfy/status")) return json({ running: true, platform: "Windows", configured: true });
       if (url.endsWith("/api/local-workflows/settings")) return json({ directory: "F:\\ComfyUI\\user\\default\\workflows", exists: true });
       if (url.endsWith("/api/local-workflows")) return json({ directory: "F:\\ComfyUI\\user\\default\\workflows", workflows: [workflow, workflow2, cutoutWorkflow, interactiveWorkflow], rejected: [] });
-      if (url.includes("/api/comfy-presets")) return json({ code: 200, data: [{ id: 2, title: "扶她0", defaultPreset: presetIsDefault, outputFolder: "aimaid", parameters: { positivePrompt: "preset prompt", width: 1080, height: 1920 } }] });
+      if (url.endsWith("/api/lora-models")) return json({ models: [] });
+      if (url.includes("/api/comfy-presets")) return json({ code: 200, data: [{ id: 2, name: "扶她0", isDefault: presetIsDefault, selectedOptions: { characterCount: [], characterTypes: [], relationships: [], actions: [], clothing: [], expression: [], pose: [], cameraAngle: [], shotType: [], scene: [], composition: [], quality: [] }, positiveExtra: "", negativeExtra: "", positivePrompt: presetPositivePrompt, negativePrompt: "preset negative", remark: "" }] });
       if (url.startsWith("/api/assets?")) {
         assetRequests += 1;
         return json({ code: 200, data: { page: 1, pages: 1, total: 1, items: [{ id: 12, platform: "Windows", localPath: "C:\\assets\\saved.png", localUrl: "http://127.0.0.1:32145/api/assets/file?path=saved.png", fileName: "saved.png", fileSize: 8 }] } });
       }
+      if (url.startsWith("/api/assets/prompt-pool?")) return json({ code: 200, data: [{ prompt: "black pantyhose, soft lighting, bedroom", negativePrompt: "watermark, extra fingers", weight: 5 }] });
       if (url.endsWith("/api/twitter/accounts")) return json({ code: 200, data: [{ id: 2, username: "tester", sessionStatus: "CONNECTED" }] });
       if (url.endsWith("/api/twitter/posts/local-scheduled") && options.method === "POST") {
         savedTwitterTask = options.body;
         return json({ code: 200, data: { id: 88 } });
       }
-      if (url === "blob:done") return new Response(new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], { type: "image/png" }));
+      if (url === "blob:done") return new Response(new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], { type: "image/png" }), { headers: { "Content-Type": "image/png" } });
       if (url.endsWith("/api/folders")) return json({ folders: ["aimaid", "favorites"] });
       if (url.endsWith("/api/migration/settings")) return json({ directory: "C:\\Users\\49213\\Desktop\\A\\ai成品" });
       if (url.includes("/api/tasks/") && url.endsWith("/cancel") && options.method === "POST") {
@@ -144,6 +152,8 @@ describe("Comfy image generation flow", () => {
         return json({ queue_running: [], queue_pending: [] });
       }
       if (url.endsWith("/api/logs/client") && options.method === "POST") return json({ success: true });
+      if (url.endsWith("/api/gallery/complete") && options.method === "POST") return json({ success: true });
+      if (url.endsWith("/api/local-generated-images/batch") && options.method === "POST") return json({ code: 200, data: { saved: 1 } });
       if (url.endsWith("/comfy/aiprovider/progress") && progressFails) return json({ message: "progress extension unavailable" }, 404);
       if (url.endsWith("/comfy/aiprovider/progress")) return externalRun
         ? json({ promptId: "external-prompt", nodes: { "5": { state: "finished" }, "4": { state: "running", value: 5, max: 10 } } })
@@ -154,7 +164,10 @@ describe("Comfy image generation flow", () => {
         moved = true;
         return json({ moved: 1, folder: "C:\\Users\\49213\\Desktop\\A\\ai成品", manifest: "aiprovider-migration-test.json", platform: "Windows", assets: [{ localPath: "C:\\Users\\49213\\Desktop\\A\\ai成品\\done.png", localUrl: "http://127.0.0.1:32145/api/assets/file?path=done.png", fileName: "done.png" }] });
       }
-      if (url.endsWith("/api/assets/batch") && options.method === "POST") return json({ code: 200, data: { saved: 1 } });
+      if (url.endsWith("/api/assets/batch") && options.method === "POST") {
+        const item = JSON.parse(options.body).items[0];
+        return json({ code: 200, data: { saved: 1, items: [{ id: 13, platform: "Windows", ...item }] } });
+      }
       if (url.includes("/api/gallery?")) {
         galleryRequests += 1;
         galleryRequestUrls.push(url);
@@ -178,8 +191,8 @@ describe("Comfy image generation flow", () => {
         const currentImages = items.reduce((sum, item) => sum + item.images.length, 0);
         return json({ items, page, pages: localGalleryPages, total: currentImages + (localGalleryPages - 1) * 100 });
       }
-      if (url.includes("/api/gallery/file?")) return new Response(new Blob(["image"], { type: "image/png" }));
-      if (url.includes("/api/assets/file?")) return new Response(new Blob(["image"], { type: "image/png" }));
+      if (url.includes("/api/gallery/file?")) return new Response(new Blob(["image"], { type: "image/png" }), { headers: { "Content-Type": "image/png" } });
+      if (url.includes("/api/assets/file?")) return new Response(new Blob(["image"], { type: "image/png" }), { headers: { "Content-Type": "image/png" } });
       if (url.includes("/comfy/history?")) {
         if (existingHistoryAlreadyPresent) return json({ "existing-prompt": completed });
         if (incrementalHistoryAlreadyPresent) return json({ "incremental-prompt": incrementalCompleted });
@@ -191,10 +204,14 @@ describe("Comfy image generation flow", () => {
       if (url.includes("/comfy/view?")) return new Response(new Blob(["image"], { type: "image/png" }));
       if (url.endsWith("/api/generate") && options.method === "POST") {
         submitted = true;
+        generateRequests += 1;
+        submittedBatchSizes.push(options.body.get("batchSize"));
         submittedWorkflow = {
           id: options.body.get("workflowId"),
           name: options.body.get("workflowName"),
           definition: options.body.get("workflowDefinition"),
+          positivePrompt: options.body.get("positivePrompt"),
+          negativePrompt: options.body.get("negativePrompt"),
         };
         submittedEditorData = options.body.get("node_5_editor_data");
         expect(options.body.get("workflowDefinition")).toContain("SaveImage");
@@ -207,6 +224,22 @@ describe("Comfy image generation flow", () => {
   });
 
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); localStorage.clear(); });
+
+  it("offers the registered app launch action without an alert when the local bridge is missing", async () => {
+    const availableFetch = fetch.getMockImplementation();
+    fetch.mockImplementation((input, options) => {
+      const url = String(input);
+      if (url.startsWith("http://127.0.0.1:32145")) return Promise.reject(new TypeError("Failed to fetch"));
+      if (url === "/api/prompt-catalog") return Promise.resolve(json({ code: 200, data: { options: [], negativeOptions: [], generalNegativePrompt: "" } }));
+      return availableFetch(input, options);
+    });
+    render(<ComfyLocalWorkbench />);
+
+    const launch = await screen.findByRole("link", { name: "启动本机桥接器" });
+    expect(launch.getAttribute("href")).toBe("aiprovider-bridge://start");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText("未检测到")).toBeTruthy();
+  });
 
   it("loads the local workflow, submits it locally, polls and renders the completed image", async () => {
     render(<ComfyLocalWorkbench />);
@@ -243,7 +276,7 @@ describe("Comfy image generation flow", () => {
     const image = await screen.findByAltText("历史生成结果", {}, { timeout: 5000 });
     fireEvent.click(screen.getByRole("button", { name: "选择" }));
     fireEvent.click(image.closest("button"));
-    fireEvent.click(screen.getByRole("button", { name: "迁移 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "加入待处理 1" }));
     await waitFor(() => expect(moved).toBe(true));
     await waitFor(() => expect(screen.queryByAltText("历史生成结果")).toBeNull());
   }, 8000);
@@ -276,11 +309,13 @@ describe("Comfy image generation flow", () => {
     render(<ComfyLocalWorkbench />);
     const workflowSelect = await screen.findByRole("combobox", { name: "当前生成工作流" });
     await waitFor(() => expect(workflowSelect.value).toBe("futa01"));
+    fireEvent.click(screen.getAllByRole("button", { name: "手动编辑" })[0]);
     const prompt = screen.getByRole("textbox", { name: "正向提示词" });
     expect(workflowSelect.compareDocumentPosition(prompt) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.change(prompt, { target: { value: "keep this prompt" } });
     const requestsBeforeSwitch = galleryRequests;
     fireEvent.change(workflowSelect, { target: { value: "futa02" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "手动编辑" })[0]);
     const currentPrompt = screen.getByRole("textbox", { name: "正向提示词" });
     expect(currentPrompt.value).toBe("changed by workflow");
     const advancedPanel = screen.getByText("高级选项").closest("details");
@@ -324,6 +359,30 @@ describe("Comfy image generation flow", () => {
     expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
   });
 
+  it("removes migration from asset actions and toggles right-click select all", async () => {
+    render(<ComfyLocalWorkbench />);
+    fireEvent.click(await screen.findByRole("button", { name: "我的资产" }));
+    const image = await screen.findByAltText("历史生成结果");
+
+    fireEvent.contextMenu(image.closest("button"));
+    expect(screen.queryByRole("button", { name: "迁移" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "全选" }));
+    expect(image.closest("button").dataset.selected).toBe("true");
+
+    fireEvent.contextMenu(image.closest("button"));
+    fireEvent.click(within(document.querySelector(".image-context-menu")).getByRole("button", { name: "取消全选" }));
+    expect(image.closest("button").dataset.selected).toBe("false");
+
+    fireEvent.contextMenu(image.closest("button"));
+    fireEvent.click(screen.getByRole("button", { name: "详细" }));
+    const promptFields = screen.getAllByRole("textbox");
+    await waitFor(() => {
+      const readOnly = promptFields.filter((field) => field.readOnly).map((field) => field.value);
+      expect(readOnly).toHaveLength(2);
+      readOnly.forEach((v) => expect(typeof v).toBe("string"));
+    });
+  });
+
   it("paginates local images in pages of 100", async () => {
     submitted = true;
     localGalleryPages = 2;
@@ -357,16 +416,30 @@ describe("Comfy image generation flow", () => {
     const parameters = screen.getByRole("region", { name: "工作流参数" });
     expect(chooser.contains(schemes)).toBe(true);
     expect(chooser.compareDocumentPosition(parameters) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByRole("textbox", { name: "新 Prompt 方案名称" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "另存为方案" })).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: "新 Prompt 方案名称" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "另存为方案" }));
+    expect(screen.getByRole("textbox", { name: "新 Prompt 方案名称" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "关闭另存为方案" }));
     expect(screen.getByRole("button", { name: "覆盖方案" })).toBeTruthy();
-    expect(screen.queryByText("正向提示词", { exact: true })).toBeNull();
-    expect(screen.queryByText("反向提示词", { exact: true })).toBeNull();
+    expect(screen.getByRole("button", { name: "重新加载当前方案" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "编辑当前方案" })).toBeTruthy();
+    expect(screen.queryByLabelText("正向提示词")).toBeNull();
+    expect(screen.queryByLabelText("反向提示词")).toBeNull();
+    const btns = screen.getAllByRole("button", { name: "手动编辑" });
+    fireEvent.click(btns[0]);
+    fireEvent.click(btns[1]);
     expect(screen.getByRole("textbox", { name: "正向提示词" })).toBeTruthy();
     expect(screen.getByRole("textbox", { name: "反向提示词" })).toBeTruthy();
     expect(screen.getByRole("option", { name: "扶她0" }).value).toBe("2");
     fireEvent.change(schemes, { target: { value: "2" } });
-    expect(screen.getByRole("textbox", { name: "正向提示词" }).value).toBe("preset prompt");
+    fireEvent.click(screen.getAllByRole("button", { name: "手动编辑" })[0]);
+    const positivePrompt = screen.getByRole("textbox", { name: "正向提示词" });
+    expect(positivePrompt.value).toBe("preset prompt");
+    fireEvent.change(positivePrompt, { target: { value: "manual draft" } });
+    presetPositivePrompt = "updated preset prompt";
+    fireEvent.click(screen.getByRole("button", { name: "重新加载当前方案" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "正向提示词" }).value).toBe("updated preset prompt"));
   });
 
   it("keeps every Prompt scheme available after switching workflows", async () => {
@@ -382,7 +455,11 @@ describe("Comfy image generation flow", () => {
     presetIsDefault = true;
     render(<ComfyLocalWorkbench />);
     await waitFor(() => expect(screen.getByRole("combobox", { name: "Prompt 方案" }).value).toBe("2"));
-    expect(screen.getByRole("textbox", { name: "正向提示词" }).value).toBe("preset prompt");
+    await waitFor(() => {
+      const toggle = screen.getAllByRole("button", { name: "手动编辑" })[0];
+      if (toggle.getAttribute("aria-expanded") === "false") fireEvent.click(toggle);
+      expect(screen.getByRole("textbox", { name: "正向提示词" }).value).toBe("preset prompt");
+    });
   });
 
   it("appends an external ComfyUI result without recreating its cached image", async () => {
@@ -490,6 +567,24 @@ describe("Comfy image generation flow", () => {
     expect(screen.queryByText(/查询当前任务失败/)).toBeNull();
   });
 
+  it("splits a large requested quantity into single-image queue submissions", async () => {
+    render(<ComfyLocalWorkbench />);
+    const quantity = await screen.findByRole("spinbutton", { name: "生成数量" });
+    fireEvent.change(quantity, { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: "开始生成" }));
+    await waitFor(() => expect(generateRequests).toBe(3));
+    expect(submittedBatchSizes).toEqual(["1", "1", "1"]);
+  });
+
+  it("builds a weighted prompt from image assets before lucky generation", async () => {
+    render(<ComfyLocalWorkbench />);
+    await screen.findByRole("button", { name: "手气不错" });
+    fireEvent.click(screen.getByRole("button", { name: "手气不错" }));
+    await waitFor(() => expect(generateRequests).toBe(1));
+    expect(submittedWorkflow.positivePrompt).toContain("black pantyhose");
+    expect(submittedWorkflow.negativePrompt).toContain("watermark");
+  });
+
   it("advances atomically to the next image after deleting the current large image", async () => {
     multiImageGallery = true;
     render(<ComfyLocalWorkbench />);
@@ -500,7 +595,6 @@ describe("Comfy image generation flow", () => {
 
     fireEvent.contextMenu(document.querySelector(".history-lightbox"));
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
-    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
 
     await waitFor(() => expect(deletedPaths).toEqual(["aimaid/done.png"]));
     expect(screen.getByText("done-2.png")).toBeTruthy();
@@ -518,7 +612,6 @@ describe("Comfy image generation flow", () => {
 
     fireEvent.contextMenu(document.querySelector(".history-lightbox"));
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
-    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
 
     await waitFor(() => expect(deletedPaths).toEqual(["aimaid/done-2.png"]));
     expect(screen.getByText("done.png")).toBeTruthy();
@@ -544,13 +637,11 @@ describe("Comfy image generation flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "复制图片" }));
     await waitFor(() => expect(navigator.clipboard.write).toHaveBeenCalledTimes(4));
 
+    fireEvent.click(screen.getAllByRole("button", { name: "手动编辑" })[0]);
     fireEvent.keyDown(screen.getByRole("textbox", { name: "正向提示词" }), { key: "Delete" });
     expect(screen.queryByText("只删除当前这张本机图片？此操作不可恢复。")).toBeNull();
 
     fireEvent.keyDown(window, { key: "Delete" });
-    expect(screen.getByText("只删除当前这张本机图片？此操作不可恢复。")).toBeTruthy();
-    expect(deletedPaths).toEqual([]);
-    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
     await waitFor(() => expect(deletedPaths).toEqual(["aimaid/done.png"]));
   });
 
