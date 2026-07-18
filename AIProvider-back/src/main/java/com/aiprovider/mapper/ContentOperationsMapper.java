@@ -28,11 +28,24 @@ public interface ContentOperationsMapper {
     @Update("UPDATE c_ContentAccounts SET SessionEncrypted=#{encrypted},SessionHint=#{hint},ConnectionStatus='CONNECTED',AdapterStatus='READY',LastError=NULL,LastConnectedAt=NOW(3) WHERE Id=#{id} AND Platform='XIAOHONGSHU'")
     int updateAccountSession(@Param("id") long id,@Param("encrypted") String encrypted,@Param("hint") String hint);
 
-    @Select("SELECT Id id,Platform platform,Name name,SourceType sourceType,ExternalUid externalUid,ExternalHandle externalHandle,AdapterType adapterType,SourceUrl sourceUrl,CredentialEncrypted credentialEncrypted,CredentialHint credentialHint,PollIntervalMinutes pollIntervalMinutes,FetchLimit fetchLimit,Enabled enabled,LastStatus lastStatus,LastCollectedAt lastCollectedAt,LastTestedAt lastTestedAt FROM c_ContentSources ORDER BY Enabled DESC,UpdatedAt DESC")
+    @Select("SELECT s.Id id,s.Platform platform,s.Name name,s.SourceType sourceType,s.ExternalUid externalUid,s.ExternalHandle externalHandle,s.AdapterType adapterType,s.SourceUrl sourceUrl,COALESCE(c.CredentialEncrypted,s.CredentialEncrypted) credentialEncrypted,COALESCE(c.CredentialHint,s.CredentialHint) credentialHint,s.PollIntervalMinutes pollIntervalMinutes,s.FetchLimit fetchLimit,s.Enabled enabled,s.LastStatus lastStatus,s.LastCollectedAt lastCollectedAt,s.LastTestedAt lastTestedAt,c.Id collectionAccountId,c.DisplayName collectionAccountName FROM c_ContentSources s LEFT JOIN c_ContentSourceCollectionAccounts b ON b.SourceId=s.Id LEFT JOIN c_ContentCollectionAccounts c ON c.Id=b.CollectionAccountId ORDER BY s.Enabled DESC,s.UpdatedAt DESC")
     List<Map<String,Object>> findSources();
 
-    @Select("SELECT Id id,Platform platform,Name name,SourceType sourceType,ExternalUid externalUid,ExternalHandle externalHandle,AdapterType adapterType,SourceUrl sourceUrl,CredentialEncrypted credentialEncrypted,CredentialHint credentialHint,PollIntervalMinutes pollIntervalMinutes,FetchLimit fetchLimit,Enabled enabled,LastStatus lastStatus,LastCollectedAt lastCollectedAt,LastTestedAt lastTestedAt FROM c_ContentSources WHERE Id=#{id}")
+    @Select("SELECT s.Id id,s.Platform platform,s.Name name,s.SourceType sourceType,s.ExternalUid externalUid,s.ExternalHandle externalHandle,s.AdapterType adapterType,s.SourceUrl sourceUrl,COALESCE(c.CredentialEncrypted,s.CredentialEncrypted) credentialEncrypted,COALESCE(c.CredentialHint,s.CredentialHint) credentialHint,s.PollIntervalMinutes pollIntervalMinutes,s.FetchLimit fetchLimit,s.Enabled enabled,s.LastStatus lastStatus,s.LastCollectedAt lastCollectedAt,s.LastTestedAt lastTestedAt,c.Id collectionAccountId,c.DisplayName collectionAccountName FROM c_ContentSources s LEFT JOIN c_ContentSourceCollectionAccounts b ON b.SourceId=s.Id LEFT JOIN c_ContentCollectionAccounts c ON c.Id=b.CollectionAccountId WHERE s.Id=#{id}")
     Map<String,Object> findSource(long id);
+
+    @Select("SELECT Id id,Platform platform,DisplayName displayName,AdapterType adapterType,CredentialEncrypted credentialEncrypted,CredentialHint credentialHint,Enabled enabled FROM c_ContentCollectionAccounts ORDER BY Enabled DESC,UpdatedAt DESC")
+    List<Map<String,Object>> findCollectionAccounts();
+
+    @Select("SELECT Id id,Platform platform,DisplayName displayName,AdapterType adapterType,CredentialEncrypted credentialEncrypted,CredentialHint credentialHint,Enabled enabled FROM c_ContentCollectionAccounts WHERE Id=#{id}")
+    Map<String,Object> findCollectionAccount(long id);
+
+    @Insert("INSERT INTO c_ContentCollectionAccounts(Platform,DisplayName,AdapterType,CredentialEncrypted,CredentialHint,Enabled) VALUES('TWITTER',#{displayName},#{adapterType},#{credentialEncrypted},#{credentialHint},TRUE)")
+    @Options(useGeneratedKeys=true,keyProperty="id")
+    int insertCollectionAccount(CollectionAccountRecord record);
+
+    @Insert("INSERT INTO c_ContentSourceCollectionAccounts(SourceId,CollectionAccountId) VALUES(#{sourceId},#{collectionAccountId})")
+    int insertSourceCollectionAccount(@Param("sourceId") long sourceId,@Param("collectionAccountId") long collectionAccountId);
 
     @Insert("INSERT INTO c_ContentSources(Platform,SourceType,ExternalUid,ExternalHandle,AdapterType,Name,SourceUrl,CredentialEncrypted,CredentialHint,PollIntervalMinutes,FetchLimit,Enabled) VALUES(#{platform},#{sourceType},#{externalUid},#{externalHandle},#{adapterType},#{name},#{sourceUrl},#{credentialEncrypted},#{credentialHint},#{pollIntervalMinutes},#{fetchLimit},TRUE)")
     @Options(useGeneratedKeys=true,keyProperty="id")
@@ -114,7 +127,7 @@ public interface ContentOperationsMapper {
     @Select("SELECT COUNT(*) FROM c_ContentSources WHERE Id=#{id} AND Enabled=TRUE")
     int countEnabledSource(long id);
 
-    @Select("SELECT p.Id id,d.Title title,a.DisplayName accountName,p.PublishMode publishMode,p.Status status,p.AttemptCount attemptCount,p.ErrorMessage errorMessage,p.ScheduledAt scheduledAt FROM c_ContentPublications p JOIN c_ContentDrafts d ON d.Id=p.DraftId JOIN c_ContentAccounts a ON a.Id=p.AccountId WHERE d.Platform='XIAOHONGSHU' ORDER BY p.CreatedAt DESC LIMIT 20")
+    @Select("SELECT p.Id id,d.Title title,a.DisplayName accountName,p.PublishMode publishMode,p.Status status,p.AttemptCount attemptCount,p.ErrorCode errorCode,p.ErrorMessage errorMessage,p.ScheduledAt scheduledAt,p.StartedAt startedAt,p.PublishedAt publishedAt FROM c_ContentPublications p JOIN c_ContentDrafts d ON d.Id=p.DraftId JOIN c_ContentAccounts a ON a.Id=p.AccountId WHERE d.Platform='XIAOHONGSHU' ORDER BY p.CreatedAt DESC LIMIT 20")
     List<Map<String,Object>> findRecentPublications();
 
     @Select("SELECT COUNT(*) FROM c_ContentItems WHERE CollectedAt >= CURRENT_DATE()") long countCollectedToday();
@@ -126,6 +139,8 @@ public interface ContentOperationsMapper {
     class AccountRecord { private Long id; private String displayName; private String accountHandle; private String publishMode;
         public Long getId(){return id;} public void setId(Long v){id=v;} public String getDisplayName(){return displayName;} public void setDisplayName(String v){displayName=v;}
         public String getAccountHandle(){return accountHandle;} public void setAccountHandle(String v){accountHandle=v;} public String getPublishMode(){return publishMode;} public void setPublishMode(String v){publishMode=v;} }
+    class CollectionAccountRecord {private Long id;private String displayName;private String adapterType;private String credentialEncrypted;private String credentialHint;
+        public Long getId(){return id;}public void setId(Long v){id=v;}public String getDisplayName(){return displayName;}public void setDisplayName(String v){displayName=v;}public String getAdapterType(){return adapterType;}public void setAdapterType(String v){adapterType=v;}public String getCredentialEncrypted(){return credentialEncrypted;}public void setCredentialEncrypted(String v){credentialEncrypted=v;}public String getCredentialHint(){return credentialHint;}public void setCredentialHint(String v){credentialHint=v;}}
     class SourceRecord { private Long id; private String platform; private String sourceType; private String externalUid; private String externalHandle; private String adapterType; private String name; private String sourceUrl; private String credentialEncrypted; private String credentialHint; private int pollIntervalMinutes; private int fetchLimit;
         public Long getId(){return id;} public void setId(Long v){id=v;} public String getPlatform(){return platform;} public void setPlatform(String v){platform=v;} public String getSourceType(){return sourceType;} public void setSourceType(String v){sourceType=v;}
         public String getExternalUid(){return externalUid;} public void setExternalUid(String v){externalUid=v;} public String getExternalHandle(){return externalHandle;} public void setExternalHandle(String v){externalHandle=v;} public String getAdapterType(){return adapterType;} public void setAdapterType(String v){adapterType=v;} public String getName(){return name;} public void setName(String v){name=v;} public String getSourceUrl(){return sourceUrl;} public void setSourceUrl(String v){sourceUrl=v;}

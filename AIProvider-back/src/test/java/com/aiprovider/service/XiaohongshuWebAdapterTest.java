@@ -35,4 +35,9 @@ class XiaohongshuWebAdapterTest {
         assertTrue(fields.contains("codeStatus=2"));assertTrue(fields.contains("result=0"));assertFalse(fields.contains("secret-ticket"));
         assertEquals(new TreeSet<>(Arrays.asList("web_session","a1")),XiaohongshuWebAdapter.setCookieNames(Arrays.asList("web_session=secret; Path=/","a1=value; Secure")));
     }
+
+    @Test void extractsTheUsefulPlaywrightMessageInsteadOfErrorBrace() {
+        String raw="Error {\n message='Timeout 60000ms exceeded while waiting for locator input[type=file]\n name='TimeoutError\n stack='ignored\n}";
+        assertEquals("Timeout 60000ms exceeded while waiting for locator input[type=file]",XiaohongshuWebAdapter.concisePlaywrightError(raw,"PlaywrightException"));
+    }
 }

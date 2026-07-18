@@ -28,6 +28,7 @@ public class ContentOperationsController {
     @PostMapping("/accounts") public Result<ContentAccountVO> createAccount(@RequestBody ContentAccountCreateDTO dto){return Result.success(service.createAccount(dto));}
     @PatchMapping("/accounts/{id}") public Result<ContentAccountVO> updateAccount(@PathVariable long id,@RequestBody ContentAccountModeDTO dto){return Result.success(service.updateAccount(id,dto));}
     @PostMapping("/sources") public Result<ContentSourceVO> createSource(@RequestBody ContentSourceCreateDTO dto){return Result.success(sourceService.create(dto));}
+    @PostMapping("/collection-accounts") public Result<ContentCollectionAccountVO> createCollectionAccount(@RequestBody ContentCollectionAccountCreateDTO dto){return Result.success(sourceService.createCollectionAccount(dto));}
     @PostMapping("/sources/{id}/test-fetch") public Result<ContentSourceTestVO> testSource(@PathVariable long id){return Result.success(sourceService.testFetch(id));}
     @GetMapping("/sources/{id}/items") public Result<List<ContentItemVO>> sourceItems(@PathVariable long id,@RequestParam(defaultValue="50") int limit){return Result.success(sourceService.items(id,limit));}
     @PostMapping("/items/{id}/classify") public Result<ContentRelevanceVO> classify(@PathVariable long id){return Result.success(relevanceService.classify(id));}

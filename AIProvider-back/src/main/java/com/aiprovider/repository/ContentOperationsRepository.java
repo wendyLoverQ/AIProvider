@@ -19,6 +19,10 @@ public class ContentOperationsRepository {
     public List<Map<String,Object>> findSources(){return mapper.findSources();}
     public Map<String,Object> findSource(long id){return mapper.findSource(id);}
     public long insertSource(ContentOperationsMapper.SourceRecord record){mapper.insertSource(record);return record.getId();}
+    public List<Map<String,Object>> findCollectionAccounts(){return mapper.findCollectionAccounts();}
+    public Map<String,Object> findCollectionAccount(long id){return mapper.findCollectionAccount(id);}
+    public long insertCollectionAccount(ContentOperationsMapper.CollectionAccountRecord record){mapper.insertCollectionAccount(record);return record.getId();}
+    public void insertSourceCollectionAccount(long sourceId,long collectionAccountId){if(mapper.insertSourceCollectionAccount(sourceId,collectionAccountId)!=1)throw new IllegalStateException("采集源账号绑定失败");}
     public int insertContentItem(ContentOperationsMapper.ContentItemRecord record){return mapper.insertContentItem(record);}
     public List<Map<String,Object>> findContentItems(long sourceId,int limit){return mapper.findContentItems(sourceId,limit);}
     public Map<String,Object> findContentItem(long id){return mapper.findContentItem(id);}

@@ -10,6 +10,7 @@ public class ContentSourceCreateDTO {
     private String externalHandle;
     private String adapterType;
     private String accessToken;
+    private Long collectionAccountId;
     public String getName() { return name; }
     public void setName(String value) { this.name = value; }
     public String getSourceType() { return sourceType; }
@@ -28,4 +29,6 @@ public class ContentSourceCreateDTO {
     public void setAdapterType(String value) { this.adapterType = value; }
     public String getAccessToken() { return accessToken; }
     public void setAccessToken(String value) { this.accessToken = value; }
+    public Long getCollectionAccountId(){return collectionAccountId;}
+    public void setCollectionAccountId(Long value){this.collectionAccountId=value;}
 }

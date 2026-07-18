@@ -110,27 +110,39 @@ public class XiaohongshuWebAdapter {
     }
 
     public String publish(String storageState, String title, String body, List<String> tags, Path card) {
+        String stage = "启动浏览器";
+        String pageLocation = "not-opened";
         try (Playwright playwright = Playwright.create(); Browser browser = launch(playwright); BrowserContext context = browser.newContext(new Browser.NewContextOptions().setStorageState(storageState).setViewportSize(1280, 720))) {
             context.setDefaultTimeout(timeoutMs);
             Page page = context.newPage();
+            stage = "打开发布页面";
             page.navigate("https://creator.xiaohongshu.com/publish/publish?source=official", new Page.NavigateOptions().setTimeout(timeoutMs));
             page.waitForTimeout(1000);
+            pageLocation = safeLocation(page.url());
             if (isLoginUrl(page.url())) throw new XiaohongshuAutomationException("小红书登录会话已过期，请重新扫码登录");
+            stage = "切换到图文发布";
             if (!clickIfVisible(page, "上传图文")) clickIfVisible(page, "发布图文");
+            stage = "查找图片上传控件";
             Locator imageInput = page.locator("input[type='file'][accept*='image'],input[type='file']").first();
             imageInput.waitFor(new Locator.WaitForOptions().setTimeout(timeoutMs));
+            stage = "上传文字卡";
             imageInput.setInputFiles(card);
             waitForUpload(page);
+            stage = "填写标题";
             Locator titleInput = page.locator("input[placeholder*='标题'],textarea[placeholder*='标题']").first();
             titleInput.waitFor(new Locator.WaitForOptions().setTimeout(timeoutMs));
             titleInput.fill(title);
+            stage = "填写正文";
             Locator editor = page.locator("[contenteditable='true'],textarea[placeholder*='正文'],textarea[placeholder*='描述']").first();
             editor.waitFor(new Locator.WaitForOptions().setTimeout(timeoutMs));
             String content = body + formatTags(tags);
             editor.fill(content);
+            stage = "查找发布按钮";
             Locator publish = page.getByText("发布", new Page.GetByTextOptions().setExact(true)).last();
             publish.waitFor(new Locator.WaitForOptions().setTimeout(timeoutMs));
+            stage = "点击发布按钮";
             publish.click();
+            stage = "等待发布结果";
             long deadline = System.currentTimeMillis() + (long) timeoutMs;
             while (System.currentTimeMillis() < deadline) {
                 if (page.url().contains("success") || page.getByText("发布成功").count() > 0) return page.url();
@@ -140,7 +152,9 @@ public class XiaohongshuWebAdapter {
         } catch (XiaohongshuAutomationException e) {
             throw e;
         } catch (PlaywrightException e) {
-            throw new XiaohongshuAutomationException("小红书网页发布失败：" + safe(e), e);
+            String reason = safe(e);
+            log.error("XHS_PUBLISH failed stage={} page={} reason={}", stage, pageLocation, reason, e);
+            throw new XiaohongshuAutomationException("小红书网页发布失败（" + stage + "）：" + reason, e);
         }
     }
 
@@ -326,11 +340,22 @@ public class XiaohongshuWebAdapter {
     }
 
     private String safe(Exception e) {
-        String v = e.getMessage();
-        if (blank(v)) return e.getClass().getSimpleName();
-        int line = v.indexOf('\n');
-        v = line < 0 ? v : v.substring(0, line);
-        return v.length() > 300 ? v.substring(0, 300) : v;
+        return concisePlaywrightError(e.getMessage(), e.getClass().getSimpleName());
+    }
+
+    static String concisePlaywrightError(String raw, String fallback) {
+        if (raw == null || raw.trim().isEmpty()) return fallback;
+        String value = raw.replace("\r", "");
+        int messageStart = value.indexOf("message='");
+        if (messageStart >= 0) {
+            messageStart += "message='".length();
+            int messageEnd = value.indexOf("\n name=", messageStart);
+            if (messageEnd < 0) messageEnd = value.indexOf("'\n", messageStart);
+            if (messageEnd > messageStart) value = value.substring(messageStart, messageEnd);
+        }
+        value = value.replaceAll("\\s+", " ").trim();
+        if (value.startsWith("Error {")) value = value.substring("Error {".length()).trim();
+        return value.length() > 700 ? value.substring(0, 700) : value;
     }
 
     public static class LoginSnapshot {

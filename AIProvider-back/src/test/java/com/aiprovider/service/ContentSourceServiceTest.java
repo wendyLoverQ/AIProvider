@@ -2,6 +2,7 @@ package com.aiprovider.service;
 
 import com.aiprovider.mapper.ContentOperationsMapper;
 import com.aiprovider.model.dto.ContentSourceCreateDTO;
+import com.aiprovider.model.dto.ContentCollectionAccountCreateDTO;
 import com.aiprovider.repository.ContentOperationsRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -12,12 +13,17 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class ContentSourceServiceTest {
-    @Test void createsWebSessionSourceAndEncryptsOnlyNormalizedCookies(){
-        ContentOperationsRepository repository=mock(ContentOperationsRepository.class);ContentPlatformSecretCipher cipher=mock(ContentPlatformSecretCipher.class);TwitterPublicWebClient web=mock(TwitterPublicWebClient.class);ContentSourceCreateDTO dto=new ContentSourceCreateDTO();dto.setPlatform("TWITTER");dto.setAdapterType("TWITTER_WEB");dto.setExternalHandle("@elonmusk");dto.setName("Elon Musk");dto.setAccessToken("auth_token=a; ct0=b; ignored=c");
-        when(web.normalizeCredential(dto.getAccessToken())).thenReturn("{\"auth_token\":\"a\",\"ct0\":\"b\"}");when(cipher.encrypt("{\"auth_token\":\"a\",\"ct0\":\"b\"}")).thenReturn("encrypted");
-        when(repository.insertSource(any())).thenReturn(9L);Map<String,Object> saved=new HashMap<>();saved.put("id",9L);saved.put("platform","TWITTER");saved.put("sourceType","PROFILE");saved.put("adapterType","TWITTER_WEB");saved.put("externalHandle","elonmusk");saved.put("sourceUrl","https://x.com/elonmusk");saved.put("pollIntervalMinutes",240);saved.put("fetchLimit",5);saved.put("enabled",true);when(repository.findSource(9L)).thenReturn(saved);
+    @Test void createsReusableCollectionAccountAndStoresNormalizedCookieOnce(){
+        ContentOperationsRepository repository=mock(ContentOperationsRepository.class);ContentPlatformSecretCipher cipher=mock(ContentPlatformSecretCipher.class);TwitterPublicWebClient web=mock(TwitterPublicWebClient.class);ContentCollectionAccountCreateDTO dto=new ContentCollectionAccountCreateDTO();dto.setDisplayName("主 X 账号");dto.setAdapterType("TWITTER_WEB");dto.setAccessToken("auth_token=a; ct0=b; ignored=c");
+        when(web.normalizeCredential(dto.getAccessToken())).thenReturn("{\"auth_token\":\"a\",\"ct0\":\"b\"}");when(cipher.encrypt(anyString())).thenReturn("encrypted");when(repository.insertCollectionAccount(any())).thenReturn(3L);Map<String,Object> saved=new HashMap<>();saved.put("id",3L);saved.put("platform","TWITTER");saved.put("displayName","主 X 账号");saved.put("adapterType","TWITTER_WEB");saved.put("credentialEncrypted","encrypted");saved.put("credentialHint","Cookie 会话");saved.put("enabled",true);when(repository.findCollectionAccount(3L)).thenReturn(saved);
+        assertEquals("主 X 账号",new ContentSourceService(repository,cipher,mock(TwitterTimelineClient.class),web,new ObjectMapper()).createCollectionAccount(dto).getDisplayName());verify(cipher).encrypt("{\"auth_token\":\"a\",\"ct0\":\"b\"}");
+    }
+    @Test void createsWebSourceByBindingAReusableCollectionAccount(){
+        ContentOperationsRepository repository=mock(ContentOperationsRepository.class);ContentPlatformSecretCipher cipher=mock(ContentPlatformSecretCipher.class);TwitterPublicWebClient web=mock(TwitterPublicWebClient.class);ContentSourceCreateDTO dto=new ContentSourceCreateDTO();dto.setPlatform("TWITTER");dto.setCollectionAccountId(3L);dto.setExternalHandle("@elonmusk");dto.setName("Elon Musk");
+        Map<String,Object> account=new HashMap<>();account.put("id",3L);account.put("platform","TWITTER");account.put("adapterType","TWITTER_WEB");account.put("enabled",true);when(repository.findCollectionAccount(3L)).thenReturn(account);
+        when(repository.insertSource(any())).thenReturn(9L);Map<String,Object> saved=new HashMap<>();saved.put("id",9L);saved.put("platform","TWITTER");saved.put("sourceType","PROFILE");saved.put("adapterType","TWITTER_WEB");saved.put("externalHandle","elonmusk");saved.put("sourceUrl","https://x.com/elonmusk");saved.put("collectionAccountId",3L);saved.put("collectionAccountName","主 X 账号");saved.put("credentialEncrypted","encrypted");saved.put("pollIntervalMinutes",240);saved.put("fetchLimit",5);saved.put("enabled",true);when(repository.findSource(9L)).thenReturn(saved);
         assertEquals("elonmusk",new ContentSourceService(repository,cipher,mock(TwitterTimelineClient.class),web,new ObjectMapper()).create(dto).getExternalHandle());
-        verify(repository).insertSource(argThat((ContentOperationsMapper.SourceRecord row)->row.getExternalUid()==null&&"elonmusk".equals(row.getExternalHandle())&&"https://x.com/elonmusk".equals(row.getSourceUrl())&&"encrypted".equals(row.getCredentialEncrypted())&&"Cookie 会话".equals(row.getCredentialHint())));
+        verify(repository).insertSource(argThat((ContentOperationsMapper.SourceRecord row)->row.getExternalUid()==null&&"elonmusk".equals(row.getExternalHandle())&&"https://x.com/elonmusk".equals(row.getSourceUrl())&&row.getCredentialEncrypted()==null));verify(repository).insertSourceCollectionAccount(9L,3L);
     }
     @Test void storesOnlyNewestPostWhenTwitterReturnsSeveral(){
         ContentOperationsRepository repository=mock(ContentOperationsRepository.class);ContentPlatformSecretCipher cipher=mock(ContentPlatformSecretCipher.class);TwitterTimelineClient twitter=mock(TwitterTimelineClient.class);ObjectMapper json=new ObjectMapper();
