@@ -98,6 +98,12 @@ describe("ComfyUIAgent durable generation ownership", () => {
     expect(source).toContain('statusCode: StatusCodes.Status202Accepted');
     expect(source).not.toContain('await RemoveBridgeQueuedGeneration(item.PromptId)');
   });
+
+  it("rejects a Krea2 diffusion model before queueing when the workflow has a non-Krea text encoder", () => {
+    const source = readFileSync(sourcePath, "utf8");
+    expect(source).toContain("selectedKrea2Model && !usesKrea2TextEncoder");
+    expect(source).toContain("请选择 Krea2 工作流");
+  });
 });
 
 describe("ComfyUIAgent local recycle bin", () => {

@@ -7,6 +7,22 @@ import WorkflowPanel from "./WorkflowPanel";
 describe("WorkflowPanel generation action", () => {
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
+  it("keeps Krea2 diffusion models out of Flux text-encoder workflows", () => {
+    const change = vi.fn();
+    const workflow = {
+      id: "flux", name: "Flux", capabilities: {}, models: ["fluxedUp.safetensors"],
+      definition: { "11": { class_type: "DualCLIPLoader", inputs: { type: "flux" } } },
+    };
+    render(<WorkflowPanel workflows={[workflow]} workflow={workflow}
+      fieldKeys={["checkpoint"]} fieldSpecs={{ checkpoint: { input: "unet_name" } }}
+      values={{ checkpoint: "redcraft_Krea2Edition.safetensors" }} mainModels={["fluxedUp.safetensors", "redcraft_Krea2Edition.safetensors"]}
+      referenceFiles={{}} presets={[]} presetQuery="" disabled={{ blocked: false, busy: false }} loading={false}
+      onWorkflowChange={vi.fn()} onFieldChange={change} onReference={vi.fn()} onPresetChange={vi.fn()} onGenerate={vi.fn()} />);
+    expect(screen.getByRole("option", { name: "fluxedUp.safetensors" })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: "redcraft_Krea2Edition.safetensors" })).toBeNull();
+    expect(change).toHaveBeenCalledWith("checkpoint", "fluxedUp.safetensors");
+  });
+
   it("keeps task progress away from the Generate button", () => {
     render(<WorkflowPanel
       workflows={[{ id: "wf", name: "测试工作流" }]}

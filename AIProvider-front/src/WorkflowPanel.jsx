@@ -53,9 +53,20 @@ function SelectField({ fieldKey, value, onChange }) {
 }
 
 function MainModelField({ fieldSpec, value, workflow, models, loading, onChange }) {
-  const current = value || workflow.models?.[0] || "";
-  const options = (models || []).map((model) => typeof model === "string" ? { name: model, displayName: model } : model).filter((model) => model?.name);
+  const workflowUsesKrea2 = Object.values(workflow?.definition || {}).some((node) =>
+    node?.class_type === "CLIPLoader" && String(node?.inputs?.type || "").toLowerCase() === "krea2");
+  const workflowDefault = workflow.models?.[0] || "";
+  const requested = value || workflowDefault;
+  const compatibleRequested = /krea2/i.test(requested) === workflowUsesKrea2;
+  const current = compatibleRequested ? requested : workflowDefault;
+  const options = (models || [])
+    .map((model) => typeof model === "string" ? { name: model, displayName: model } : model)
+    .filter((model) => model?.name)
+    .filter((model) => /krea2/i.test(model.name) === workflowUsesKrea2);
   if (current && !options.some((model) => model.name === current)) options.unshift({ name: current, displayName: current });
+  useEffect(() => {
+    if (requested && !compatibleRequested && workflowDefault) onChange("checkpoint", workflowDefault);
+  }, [compatibleRequested, onChange, requested, workflowDefault]);
   const modelKind = fieldSpec?.input === "unet_name" ? "扩散模型" : "Checkpoint";
   return <label className="workflow-panel__inline-field workflow-panel__main-model">{LABELS.checkpoint}<select aria-label={LABELS.checkpoint} value={current} disabled={loading || !options.length} title={`当前工作流使用 ${modelKind} 加载器`} onChange={(event) => onChange("checkpoint", event.target.value)}>
     {!options.length && <option value="">{loading ? "正在读取主模型…" : `未检测到可用 ${modelKind}`}</option>}

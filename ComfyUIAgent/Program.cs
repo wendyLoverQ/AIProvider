@@ -525,6 +525,14 @@ app.MapPost("/api/generate", async (HttpRequest request, IHttpClientFactory fact
     }
     var checkpoint = fields["checkpoint"] as JsonObject;
     if (checkpoint?["fixedValue"] is JsonNode fixedCheckpoint) WriteIf("checkpoint", fixedCheckpoint.DeepClone());
+    var selectedKrea2Model = prompt.Select(entry => entry.Value).OfType<JsonObject>().Any(node =>
+        node["class_type"]?.GetValue<string>() == "UNETLoader" &&
+        node["inputs"]?["unet_name"]?.GetValue<string>()?.Contains("krea2", StringComparison.OrdinalIgnoreCase) == true);
+    var usesKrea2TextEncoder = prompt.Select(entry => entry.Value).OfType<JsonObject>().Any(node =>
+        node["class_type"]?.GetValue<string>() == "CLIPLoader" &&
+        node["inputs"]?["type"]?.GetValue<string>()?.Equals("krea2", StringComparison.OrdinalIgnoreCase) == true);
+    if (selectedKrea2Model && !usesKrea2TextEncoder)
+        return Results.UnprocessableEntity(new { success = false, message = "当前工作流使用的不是 Krea2 文本编码器，不能加载 Krea2 主模型；请选择 Krea2 工作流" });
     var requestedPrefix = form["filenamePrefix"].ToString().Trim();
     var safePrefix = Path.GetFileName(requestedPrefix.Replace('\\', '/'));
     if (string.IsNullOrWhiteSpace(safePrefix)) safePrefix = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
