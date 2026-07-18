@@ -146,8 +146,13 @@ public class XiaohongshuWebAdapter {
             String content = body + formatTags(tags);
             editor.fill(content);
             stage = "查找发布按钮";
-            Locator publish = page.getByText("发布", new Page.GetByTextOptions().setExact(true)).last();
-            publish.waitFor(new Locator.WaitForOptions().setTimeout(timeoutMs));
+            Locator publishCandidates = page.getByText("发布", new Page.GetByTextOptions().setExact(true));
+            if (publishCandidates.count() == 0) {
+                String diagnostic = publishPageDiagnostic(page);
+                log.error("XHS_PUBLISH submit_missing page={} diagnostic={}", safeLocation(page.url()), diagnostic);
+                throw new XiaohongshuAutomationException("小红书图文发布页未找到最终发布按钮；页面诊断：" + diagnostic);
+            }
+            Locator publish = publishCandidates.last();
             stage = "点击发布按钮";
             publish.click();
             stage = "等待发布结果";
