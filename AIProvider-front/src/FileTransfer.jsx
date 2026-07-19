@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowClockwise, DownloadSimple, File, TrayArrowUp, Trash } from "@phosphor-icons/react";
+import { ArrowClockwise, Copy, DownloadSimple, File, PaperPlaneTilt, TrayArrowUp, Trash } from "@phosphor-icons/react";
 import { readJsonResponse } from "./apiResponse";
 import "./FileTransfer.css";
 
@@ -46,6 +46,9 @@ export default function FileTransfer() {
   const [uploading, setUploading] = useState({ active: false, name: "", index: 0, total: 0, percent: 0 });
   const [deleting, setDeleting] = useState("");
   const [selected, setSelected] = useState(() => new Set());
+  const [transferText, setTransferText] = useState("");
+  const [textLoading, setTextLoading] = useState(true);
+  const [textSaving, setTextSaving] = useState(false);
 
   const load = useCallback(async () => {
     setState("loading");
@@ -67,7 +70,21 @@ export default function FileTransfer() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const loadText = useCallback(async () => {
+    setTextLoading(true);
+    try {
+      const response = await fetch(`${API}/text`);
+      const body = await readJsonResponse(response, "文本中转响应异常");
+      if (!response.ok || body.code !== 200) throw new Error(body.message || `读取失败 · HTTP ${response.status}`);
+      setTransferText(body.data?.text || "");
+    } catch (exception) {
+      setError(exception.message);
+    } finally {
+      setTextLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); loadText(); }, [load, loadText]);
 
   const submitFiles = async (selected) => {
     const next = Array.from(selected || []);
@@ -133,11 +150,39 @@ export default function FileTransfer() {
     form.submit();
     form.remove();
   };
+  const sendText = async () => {
+    setTextSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch(`${API}/text`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: transferText }),
+      });
+      const body = await readJsonResponse(response, "文本发送响应异常");
+      if (!response.ok || body.code !== 200) throw new Error(body.message || `发送失败 · HTTP ${response.status}`);
+      setNotice("文本已发送到中转站");
+    } catch (exception) {
+      setError(exception.message);
+    } finally {
+      setTextSaving(false);
+    }
+  };
+  const copyText = async () => {
+    try {
+      await navigator.clipboard.writeText(transferText);
+      setNotice("文本已复制");
+      setError("");
+    } catch (exception) {
+      setError(exception.message || "复制失败");
+    }
+  };
 
   return <section className="file-transfer-page" aria-label="文件中转">
     <div className="file-transfer-toolbar">
       <div><strong>服务器文件夹</strong><span>同名文件会直接覆盖，仅手动删除</span></div>
-      <button type="button" onClick={load} disabled={state === "loading" || uploading.active}><ArrowClockwise />刷新列表</button>
+      <button type="button" onClick={() => { load(); loadText(); }} disabled={state === "loading" || uploading.active}><ArrowClockwise />刷新</button>
     </div>
 
     <label className={`file-transfer-dropzone${dragActive ? " is-dragging" : ""}${uploading.active ? " is-uploading" : ""}`}
@@ -181,5 +226,14 @@ export default function FileTransfer() {
         </tr>)}</tbody>
       </table></div>}
     </div>
+
+    <form className="file-transfer-text-card" onSubmit={(event) => { event.preventDefault(); sendText(); }}>
+      <header><div><strong>文本中转</strong><span>保存最新一份文本，发送后另一台设备刷新即可复制</span></div>
+        <button type="button" onClick={copyText} disabled={textLoading || !transferText}><Copy />复制</button>
+      </header>
+      <div><textarea value={transferText} onChange={(event) => setTransferText(event.target.value)} disabled={textLoading || textSaving} aria-label="中转文本" placeholder={textLoading ? "正在读取…" : "在这里粘贴要中转的文本"} />
+        <button type="submit" disabled={textLoading || textSaving}><PaperPlaneTilt />{textSaving ? "发送中" : "发送"}</button>
+      </div>
+    </form>
   </section>;
 }

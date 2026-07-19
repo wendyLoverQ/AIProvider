@@ -15,6 +15,7 @@ afterEach(() => {
 describe("FileTransfer", () => {
   it("loads files and refreshes after deletion", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((url, options = {}) => {
+      if (url === "/api/file-transfer/text") return jsonResponse({ text: "" });
       if (url === "/api/file-transfer/files") return jsonResponse([{ fileName: "设备文件.txt", fileSize: 2048, uploadedAt: "2026-07-19T01:02:03Z" }]);
       if (url === "/api/file-transfer/%E8%AE%BE%E5%A4%87%E6%96%87%E4%BB%B6.txt" && options.method === "DELETE") return jsonResponse({ deleted: "设备文件.txt" });
       throw new Error(`unexpected request: ${url}`);
@@ -26,13 +27,14 @@ describe("FileTransfer", () => {
     expect(screen.getByText("2.00 KB")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /删除/ }));
     expect(await screen.findByText("已删除 设备文件.txt")).toBeTruthy();
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it("reports upload progress and refreshes the list", async () => {
     let listCalls = 0;
     let activeRequest;
     vi.spyOn(globalThis, "fetch").mockImplementation((url) => {
+      if (url === "/api/file-transfer/text") return jsonResponse({ text: "" });
       if (url !== "/api/file-transfer/files") throw new Error(`unexpected request: ${url}`);
       listCalls += 1;
       return jsonResponse(listCalls === 1 ? [] : [{ fileName: "large.bin", fileSize: 4, uploadedAt: "2026-07-19T01:02:03Z" }]);
@@ -61,7 +63,9 @@ describe("FileTransfer", () => {
   });
 
   it("previews only images and submits selected files for batch download", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((url) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((url, options = {}) => {
+      if (url === "/api/file-transfer/text" && !options.method) return jsonResponse({ text: "两台设备之间" });
+      if (url === "/api/file-transfer/text" && options.method === "POST") return jsonResponse({ text: JSON.parse(options.body).text });
       if (url === "/api/file-transfer/files") return jsonResponse([
         { fileName: "照片.png", fileSize: 8, uploadedAt: "2026-07-19T01:02:03Z" },
         { fileName: "影片.mp4", fileSize: 16, uploadedAt: "2026-07-19T01:02:03Z" },
@@ -83,5 +87,10 @@ describe("FileTransfer", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "选择 影片.mp4" }));
     fireEvent.click(screen.getByRole("button", { name: "批量下载（2）" }));
     expect(submitted).toEqual(["照片.png", "影片.mp4"]);
+    const textarea = screen.getByRole("textbox", { name: "中转文本" });
+    expect(textarea.value).toBe("两台设备之间");
+    fireEvent.change(textarea, { target: { value: "新的字符串" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    expect(await screen.findByText("文本已发送到中转站")).toBeTruthy();
   });
 });

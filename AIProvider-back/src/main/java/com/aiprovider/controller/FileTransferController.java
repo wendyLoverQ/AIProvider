@@ -1,6 +1,7 @@
 package com.aiprovider.controller;
 
 import com.aiprovider.common.Result;
+import com.aiprovider.model.dto.FileTransferTextDTO;
 import com.aiprovider.model.vo.FileTransferDownload;
 import com.aiprovider.model.vo.FileTransferFileVO;
 import com.aiprovider.model.vo.FileTransferPreview;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
@@ -71,6 +73,18 @@ public class FileTransferController {
             .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
                 .filename("file-transfer.zip", StandardCharsets.UTF_8).build().toString())
             .body(service.downloadBatch(fileNames));
+    }
+
+    @GetMapping("/text")
+    public Result<Map<String, String>> text() throws IOException {
+        return Result.success(Collections.singletonMap("text", service.readText()));
+    }
+
+    @PostMapping("/text")
+    public Result<Map<String, String>> saveText(@RequestBody FileTransferTextDTO request) throws IOException {
+        String text = request == null ? "" : request.getText();
+        service.saveText(text);
+        return Result.success(Collections.singletonMap("text", text == null ? "" : text));
     }
 
     @DeleteMapping("/{fileName:.+}")

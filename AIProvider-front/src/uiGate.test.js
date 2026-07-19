@@ -47,12 +47,15 @@ describe("UI release gate", () => {
     expect(page).toContain('type="checkbox"');
     expect(page).toContain('/download-batch');
     expect(page).toContain('/preview/');
+    expect(page).toContain('aria-label="中转文本"');
+    expect(page).toContain('type="submit"');
     expect(page).not.toMatch(/<div[^>]+onClick=/);
     expect(css).toContain("var(--bg-surface)");
     expect(css).toMatch(/\.file-transfer-page\{[^}]*min-width:0[^}]*overflow:hidden/);
     expect(css).toMatch(/\.file-transfer-table-wrap\{[^}]*overflow:auto/);
     expect(css).not.toMatch(/td:first-child\{[^}]*display:flex/);
     expect(css).toMatch(/\.file-transfer-file-cell\{[^}]*display:flex/);
+    expect(css).toMatch(/\.file-transfer-text-card\{[^}]*grid-template-columns/);
   });
 
   it("keeps mobile navigation reachable and touch-safe", () => {

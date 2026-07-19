@@ -251,11 +251,10 @@ describe("Comfy image generation flow", () => {
       }
       throw new Error(`Unexpected request: ${url}`);
     }));
-    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:done");
-    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:done"), revokeObjectURL: vi.fn() });
   });
 
-  afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); });
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); localStorage.clear(); });
 
   it("offers the registered app launch action without an alert when the local bridge is missing", async () => {
     const availableFetch = fetch.getMockImplementation();

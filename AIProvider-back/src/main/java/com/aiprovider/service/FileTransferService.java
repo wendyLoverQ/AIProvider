@@ -30,11 +30,16 @@ import java.util.stream.Stream;
 public class FileTransferService {
     private static final String TEMP_PREFIX = ".file-transfer-upload-";
     private final Path storageDirectory;
+    private final Path textStorageFile;
 
-    public FileTransferService(@Value("${file-transfer.storage-directory}") String storageDirectory) {
+    public FileTransferService(@Value("${file-transfer.storage-directory}") String storageDirectory,
+                               @Value("${file-transfer.text-storage-file}") String textStorageFile) {
         if (storageDirectory == null || storageDirectory.trim().isEmpty())
             throw new IllegalArgumentException("文件中转存储目录未配置");
+        if (textStorageFile == null || textStorageFile.trim().isEmpty())
+            throw new IllegalArgumentException("文本中转存储文件未配置");
         this.storageDirectory = Paths.get(storageDirectory).toAbsolutePath().normalize();
+        this.textStorageFile = Paths.get(textStorageFile).toAbsolutePath().normalize();
     }
 
     public FileTransferFileVO upload(MultipartFile file) throws IOException {
@@ -100,6 +105,24 @@ public class FileTransferService {
 
     public void delete(String fileName) throws IOException {
         Files.delete(requireExisting(fileName));
+    }
+
+    public String readText() throws IOException {
+        if (!Files.isRegularFile(textStorageFile)) return "";
+        return new String(Files.readAllBytes(textStorageFile), java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    public void saveText(String text) throws IOException {
+        Path parent = textStorageFile.getParent();
+        if (parent == null) throw new IllegalArgumentException("文本中转存储文件配置不合法");
+        Files.createDirectories(parent);
+        Path temporary = Files.createTempFile(parent, ".file-transfer-text-", ".tmp");
+        try {
+            Files.write(temporary, (text == null ? "" : text).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            Files.move(temporary, textStorageFile, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
     }
 
     private Path requireExisting(String fileName) {

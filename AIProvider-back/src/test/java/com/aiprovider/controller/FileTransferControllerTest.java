@@ -47,6 +47,7 @@ class FileTransferControllerTest {
             "device-file.txt", 6, new ByteArrayResource("second".getBytes("UTF-8"))));
         when(service.preview("picture.png")).thenReturn(new FileTransferPreview(
             "picture.png", 5, "image/png", new ByteArrayResource("image".getBytes("UTF-8"))));
+        when(service.readText()).thenReturn("跨设备文本");
 
         mvc.perform(multipart("/api/file-transfer/upload")
                 .file(new MockMultipartFile("file", "device-file.txt", "text/plain", "second".getBytes("UTF-8"))))
@@ -61,6 +62,11 @@ class FileTransferControllerTest {
             .andExpect(status().isOk()).andExpect(header().string("Content-Type", "image/png"))
             .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.startsWith("inline;")))
             .andExpect(content().bytes("image".getBytes("UTF-8")));
+        mvc.perform(get("/api/file-transfer/text"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.text").value("跨设备文本"));
+        mvc.perform(post("/api/file-transfer/text").contentType("application/json").content("{\"text\":\"新文本\"}"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.text").value("新文本"));
+        verify(service).saveText("新文本");
         mvc.perform(delete("/api/file-transfer/{fileName}", "device-file.txt"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.deleted").value("device-file.txt"));
         verify(service).delete("device-file.txt");

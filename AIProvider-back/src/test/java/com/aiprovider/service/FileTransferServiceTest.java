@@ -25,7 +25,7 @@ class FileTransferServiceTest {
     @TempDir Path directory;
 
     @Test void uploadsListsDownloadsOverwritesAndDeletesOriginalFileName() throws Exception {
-        FileTransferService service = new FileTransferService(directory.toString());
+        FileTransferService service = new FileTransferService(directory.resolve("files").toString(), directory.resolve("text.txt").toString());
         service.upload(new MockMultipartFile("file", "设备文件.txt", "text/plain", "first".getBytes(StandardCharsets.UTF_8)));
         service.upload(new MockMultipartFile("file", "设备文件.txt", "text/plain", "second".getBytes(StandardCharsets.UTF_8)));
 
@@ -44,14 +44,14 @@ class FileTransferServiceTest {
     }
 
     @Test void rejectsPathsOutsideConfiguredStorageDirectory() {
-        FileTransferService service = new FileTransferService(directory.toString());
+        FileTransferService service = new FileTransferService(directory.resolve("files").toString(), directory.resolve("text.txt").toString());
         assertThatThrownBy(() -> service.upload(new MockMultipartFile("file", "../outside.txt", "text/plain", new byte[0])))
             .isInstanceOf(IllegalArgumentException.class).hasMessage("文件名不合法");
         assertThat(Files.exists(directory.getParent().resolve("outside.txt"))).isFalse();
     }
 
     @Test void streamsImagePreviewAndSelectedFilesAsZip() throws Exception {
-        FileTransferService service = new FileTransferService(directory.toString());
+        FileTransferService service = new FileTransferService(directory.resolve("files").toString(), directory.resolve("text.txt").toString());
         service.upload(new MockMultipartFile("file", "照片.png", "image/png", "image".getBytes(StandardCharsets.UTF_8)));
         service.upload(new MockMultipartFile("file", "说明.txt", "text/plain", "text".getBytes(StandardCharsets.UTF_8)));
 
@@ -78,5 +78,15 @@ class FileTransferServiceTest {
             put("照片.png", "image");
             put("说明.txt", "text");
         }});
+    }
+
+    @Test void persistsOnlyTheLatestTransferredText() throws Exception {
+        FileTransferService service = new FileTransferService(directory.resolve("files").toString(), directory.resolve("transfer.txt").toString());
+        assertThat(service.readText()).isEmpty();
+        service.saveText("第一台设备\n复制的文本");
+        assertThat(service.readText()).isEqualTo("第一台设备\n复制的文本");
+        service.saveText("最新文本");
+        assertThat(service.readText()).isEqualTo("最新文本");
+        assertThat(service.list()).isEmpty();
     }
 }

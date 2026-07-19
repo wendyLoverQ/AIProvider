@@ -21,6 +21,7 @@ spring:
 
 file-transfer:
   storage-directory: ${FILE_TRANSFER_STORAGE_DIRECTORY:/opt/aiprovider/file-transfer}
+  text-storage-file: ${FILE_TRANSFER_TEXT_STORAGE_FILE:/opt/aiprovider/file-transfer-text.txt}
 
 mybatis:
   mapper-locations: classpath:mapper/*.xml
