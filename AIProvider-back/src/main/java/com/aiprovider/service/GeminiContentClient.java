@@ -22,13 +22,17 @@ public class GeminiContentClient {
         return generate(config,systemPrompt,userPrompt,false);
     }
     public String generateJson(GeminiRuntimeConfig config,String systemPrompt,String userPrompt){
-        return generate(config,systemPrompt,userPrompt,true);
+        return generate(config,systemPrompt,userPrompt,true,null);
     }
-    private String generate(GeminiRuntimeConfig config,String systemPrompt,String userPrompt,boolean jsonResponse){
+    public String generateDraftJson(GeminiRuntimeConfig config,String systemPrompt,String userPrompt){
+        ObjectNode schema=json.createObjectNode();schema.put("type","object");ObjectNode properties=schema.putObject("properties");properties.putObject("title").put("type","string").put("maxLength",20);properties.putObject("body").put("type","string").put("maxLength",1000);properties.putObject("tags").put("type","array").put("maxItems",10).putObject("items").put("type","string").put("maxLength",30);schema.putArray("required").add("title").add("body").add("tags");schema.put("additionalProperties",false);return generate(config,systemPrompt,userPrompt,true,schema);
+    }
+    private String generate(GeminiRuntimeConfig config,String systemPrompt,String userPrompt,boolean jsonResponse){return generate(config,systemPrompt,userPrompt,jsonResponse,null);}
+    private String generate(GeminiRuntimeConfig config,String systemPrompt,String userPrompt,boolean jsonResponse,JsonNode schema){
         ObjectNode request=json.createObjectNode();request.putObject("system_instruction").putArray("parts").addObject().put("text",systemPrompt);
         request.putArray("contents").addObject().put("role","user").putArray("parts").addObject().put("text",userPrompt);
         ObjectNode generation=request.putObject("generationConfig");generation.put("temperature",config.temperature);generation.put("maxOutputTokens",config.maxOutputTokens);
-        if(jsonResponse)generation.put("responseMimeType","application/json");
+        if(jsonResponse)generation.put("responseMimeType","application/json");if(schema!=null)generation.set("responseJsonSchema",schema);
         HttpHeaders headers=new HttpHeaders();headers.setContentType(MediaType.APPLICATION_JSON);headers.set("x-goog-api-key",config.apiKey);
         URI uri=URI.create(config.apiBaseUrl+"/v1beta/models/"+config.model+":generateContent");
         try{ResponseEntity<JsonNode> response=http.exchange(uri,HttpMethod.POST,new HttpEntity<>(request,headers),JsonNode.class);return extract(response.getBody());}

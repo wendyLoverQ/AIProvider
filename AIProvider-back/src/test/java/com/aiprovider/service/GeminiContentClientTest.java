@@ -29,4 +29,14 @@ class GeminiContentClientTest {
         GeminiRuntimeConfig config=new GeminiRuntimeConfig(true,"https://generativelanguage.googleapis.com","model","key","relevance","rewrite","reply",BigDecimal.ZERO,512);
         assertEquals("{\"relevant\":true,\"score\":0.9,\"reason\":\"相关\"}",new GeminiContentClient(new ObjectMapper(),http).generateJson(config,"system","content"));server.verify();
     }
+    @Test void constrainsDraftJsonWithTheAcceptedSchema(){
+        RestTemplate http=new RestTemplate();MockRestServiceServer server=MockRestServiceServer.createServer(http);
+        server.expect(anything()).andExpect(jsonPath("$.generationConfig.responseJsonSchema.required[0]").value("title"))
+            .andExpect(jsonPath("$.generationConfig.responseJsonSchema.properties.title.maxLength").value(20))
+            .andExpect(jsonPath("$.generationConfig.responseJsonSchema.properties.body.maxLength").value(1000))
+            .andExpect(jsonPath("$.generationConfig.responseJsonSchema.properties.tags.maxItems").value(10))
+            .andRespond(withSuccess("{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"{\\\"title\\\":\\\"合规标题\\\",\\\"body\\\":\\\"正文\\\",\\\"tags\\\":[]}\"}]}}]}",MediaType.APPLICATION_JSON));
+        GeminiRuntimeConfig config=new GeminiRuntimeConfig(true,"https://generativelanguage.googleapis.com","model","key","relevance","rewrite","reply",BigDecimal.ZERO,512);
+        assertEquals("{\"title\":\"合规标题\",\"body\":\"正文\",\"tags\":[]}",new GeminiContentClient(new ObjectMapper(),http).generateDraftJson(config,"system","content"));server.verify();
+    }
 }
