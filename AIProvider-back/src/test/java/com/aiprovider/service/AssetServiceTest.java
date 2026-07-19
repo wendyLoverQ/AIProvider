@@ -16,7 +16,7 @@ class AssetServiceTest {
         AssetRepository repository = mock(AssetRepository.class);
         when(repository.upsert(anyString(), anyString(), any())).thenReturn(1);
         when(repository.findByPathHashes(anyString(), anyList())).thenReturn(Collections.emptyList());
-        AssetItemDTO item = new AssetItemDTO(); item.setLocalPath("C:\\assets\\result.png"); item.setLocalUrl("http://127.0.0.1/result.png"); item.setFileName("result.png");
+        AssetItemDTO item = new AssetItemDTO(); item.setLocalPath("C:\\assets\\result.png"); item.setLocalUrl("http://127.0.0.1/result.png"); item.setFileName("result.png"); item.setMainModel("  flux\\dev.safetensors  ");
         AssetBatchDTO dto = new AssetBatchDTO(); dto.setPlatform("Windows"); dto.setItems(Collections.singletonList(item));
 
         new AssetService(repository).saveBatch(dto);
@@ -25,6 +25,7 @@ class AssetServiceTest {
         verify(repository).upsert(eq("Windows"), anyString(), captor.capture());
         assertThat(captor.getValue().getAssetType()).isEqualTo("image");
         assertThat(captor.getValue().getMimeType()).isEqualTo("image/png");
+        assertThat(captor.getValue().getMainModel()).isEqualTo("flux\\dev.safetensors");
     }
 
     @Test void returnsOnlyTheRepositoryImagePromptPoolWithWeights() {

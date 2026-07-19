@@ -52,6 +52,7 @@ public class AssetService {
             item.setStatus(status == null ? "ACTIVE" : status.toUpperCase(Locale.ROOT));
             if (item.getGenerationDurationMs() != null) item.setGenerationDurationMs(Math.max(0, item.getGenerationDurationMs()));
             item.setLorasJson(clean(item.getLorasJson(), 16000));
+            item.setMainModel(clean(item.getMainModel(), 1000));
             String pathHash = sha256(pathKey);
             saved += repository.upsert(platform, pathHash, item) > 0 ? 1 : 0;
             pathHashes.add(pathHash);
@@ -165,7 +166,7 @@ public class AssetService {
     }
     private static AssetVO toVO(Map<String,Object> row) {
         return new AssetVO(number(row.get("id")), text(row.get("platform")), text(row.get("localPath")), text(row.get("localUrl")), text(row.get("fileName")), number(row.get("fileSize")),
-                integer(row.get("width")), integer(row.get("height")), text(row.get("assetType")), text(row.get("mimeType")), text(row.get("status")), text(row.get("trashOriginalStatus")), text(row.get("prompt")), text(row.get("negativePrompt")), text(row.get("lorasJson")), nullableLong(row.get("seed")), integer(row.get("steps")),
+                integer(row.get("width")), integer(row.get("height")), text(row.get("assetType")), text(row.get("mimeType")), text(row.get("status")), text(row.get("trashOriginalStatus")), text(row.get("prompt")), text(row.get("negativePrompt")), text(row.get("mainModel")), text(row.get("lorasJson")), nullableLong(row.get("seed")), integer(row.get("steps")),
                 decimal(row.get("cfg")), text(row.get("sampler")), text(row.get("scheduler")), text(row.get("workflowId")), date(row.get("generatedAt")),
                 date(row.get("generationCompletedAt")), nullableLong(row.get("generationDurationMs")), date(row.get("createdAt")));
     }

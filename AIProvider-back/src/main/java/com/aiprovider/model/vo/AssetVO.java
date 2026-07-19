@@ -17,6 +17,7 @@ public class AssetVO {
     private final String trashOriginalStatus;
     private final String prompt;
     private final String negativePrompt;
+    private final String mainModel;
     private final String lorasJson;
     private final Long seed;
     private final Integer steps;
@@ -30,12 +31,12 @@ public class AssetVO {
     private final LocalDateTime createdAt;
 
     public AssetVO(long id, String platform, String localPath, String localUrl, String fileName, long fileSize,
-                   Integer width, Integer height, String assetType, String mimeType, String status, String trashOriginalStatus, String prompt, String negativePrompt, String lorasJson, Long seed,
+                   Integer width, Integer height, String assetType, String mimeType, String status, String trashOriginalStatus, String prompt, String negativePrompt, String mainModel, String lorasJson, Long seed,
                    Integer steps, Double cfg, String sampler, String scheduler, String workflowId,
                    LocalDateTime generatedAt, LocalDateTime generationCompletedAt, Long generationDurationMs, LocalDateTime createdAt) {
         this.id = id; this.platform = platform; this.localPath = localPath; this.localUrl = localUrl; this.fileName = fileName;
         this.fileSize = fileSize; this.width = width; this.height = height; this.assetType = assetType; this.mimeType = mimeType; this.status = status; this.trashOriginalStatus = trashOriginalStatus; this.prompt = prompt;
-        this.negativePrompt = negativePrompt; this.lorasJson = lorasJson; this.seed = seed; this.steps = steps; this.cfg = cfg;
+        this.negativePrompt = negativePrompt; this.mainModel = mainModel; this.lorasJson = lorasJson; this.seed = seed; this.steps = steps; this.cfg = cfg;
         this.sampler = sampler; this.scheduler = scheduler; this.workflowId = workflowId;
         this.generatedAt = generatedAt; this.generationCompletedAt = generationCompletedAt;
         this.generationDurationMs = generationDurationMs; this.createdAt = createdAt;
@@ -54,6 +55,7 @@ public class AssetVO {
     public String getTrashOriginalStatus() { return trashOriginalStatus; }
     public String getPrompt() { return prompt; }
     public String getNegativePrompt() { return negativePrompt; }
+    public String getMainModel() { return mainModel; }
     public String getLorasJson() { return lorasJson; }
     public Long getSeed() { return seed; }
     public Integer getSteps() { return steps; }
