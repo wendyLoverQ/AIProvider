@@ -51,6 +51,7 @@ public class FavoriteMediaController {
         return ResponseEntity.ok().contentType(MediaType.parseMediaType(content.getContentType()))
                 .contentLength(content.getFileSize())
                 .header(HttpHeaders.CACHE_CONTROL, "private, max-age=86400")
+                .header(HttpHeaders.ACCEPT_RANGES, "bytes")
                 .body(content.getResource());
     }
 
@@ -68,6 +69,7 @@ public class FavoriteMediaController {
         return ResponseEntity.ok().contentType(mediaType).contentLength(content.getFileSize())
                 .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
                 .header(HttpHeaders.CACHE_CONTROL, "private, max-age=86400")
+                .header(HttpHeaders.ACCEPT_RANGES, "bytes")
                 .body(content.getResource());
     }
 }
