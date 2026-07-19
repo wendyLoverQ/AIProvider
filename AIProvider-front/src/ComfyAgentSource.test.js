@@ -73,8 +73,7 @@ describe("ComfyUIAgent main model discovery", () => {
     expect(source).toContain('type.Contains("UNET"');
     expect(source).toContain('node["inputs"]?["unet_name"]');
     expect(source).toContain('Bind("checkpoint", primaryModel, checkpoint != null ? "ckpt_name" : "unet_name", "主模型")');
-    expect(source).toContain('MainModel = Has("checkpoint") ? form["checkpoint"].ToString() : null');
-    expect(source).toContain('public string? MainModel { get; set; }');
+    expect(source).toContain('Write("checkpoint", PostedScalar("checkpoint"))');
   });
 });
 
@@ -113,13 +112,14 @@ describe("ComfyUIAgent durable generation ownership", () => {
   });
 });
 
-describe("ComfyUIAgent local recycle bin", () => {
-  it("keeps local files until a permanent delete is requested from the persisted trash index", () => {
+describe("ComfyUIAgent local file bridge", () => {
+  it("does not persist gallery or recycle-bin queue state in Bridge", () => {
     const source = readFileSync(sourcePath, "utf8");
-    expect(source).toContain('app.MapPost("/api/gallery/trash"');
-    expect(source).toContain('app.MapPost("/api/gallery/restore"');
-    expect(source).toContain('string GalleryTrashIndexPath()');
-    expect(source).toContain('只有回收站中的本机图片可以永久删除');
-    expect(source).toContain('trashedPaths.Contains(file.Path) == trashedOnly');
+    expect(source).not.toContain('app.MapPost("/api/gallery/trash"');
+    expect(source).not.toContain('app.MapPost("/api/gallery/restore"');
+    expect(source).not.toContain('string GalleryTrashIndexPath()');
+    expect(source).not.toContain('GalleryGenerationRecord');
+    expect(source).toContain('app.MapGet("/api/gallery/file"');
+    expect(source).toContain('app.MapPost("/api/gallery/delete"');
   });
 });

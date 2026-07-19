@@ -88,6 +88,9 @@ describe("UI release gate", () => {
 
   it("does not nest the Prompt favorite action inside another button", () => {
     const prompt = read("PromptManager.jsx");
+    expect(prompt).not.toContain('request("/api/prompt-catalog")');
+    expect(prompt).toContain('/api/prompt-options/resolve');
+    expect(prompt).toContain('category, status: "enabled"');
     expect(prompt).toContain('className={`prompt-scheme-row');
     expect(prompt).toContain('className="prompt-scheme-select"');
     expect(prompt).not.toContain('role="button"');

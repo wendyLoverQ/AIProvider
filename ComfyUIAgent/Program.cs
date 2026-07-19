@@ -26,7 +26,6 @@ var app = builder.Build();
 Process? comfyProcess = null;
 var bridgeInstanceId = Guid.NewGuid().ToString("N");
 var bridgeExitMode = 0; // 0 = keep running, 1 = stop, 2 = restart
-var galleryIndexLock = new SemaphoreSlim(1, 1);
 var agentLogLock = new SemaphoreSlim(1, 1);
 var generationQueueLock = new SemaphoreSlim(1, 1);
 var generationQueueSignal = new SemaphoreSlim(0);
@@ -302,13 +301,11 @@ app.MapGet("/api/tasks/{promptId}/state", async (string promptId, IHttpClientFac
         ?? throw new InvalidOperationException("ComfyUI queue 返回格式无效");
     bool Contains(string key) => queue[key] is JsonArray rows && rows.Any(row =>
         row is JsonArray cells && cells.Count > 1 && string.Equals(cells[1]?.ToString(), promptId, StringComparison.Ordinal));
-    var tracked = await FindGenerationRecord(promptId);
     var historyItem = history[promptId];
     var historyFailed = string.Equals(historyItem?["status"]?["status_str"]?.ToString(), "error", StringComparison.OrdinalIgnoreCase) ||
         historyItem?["status"]?["messages"] is JsonArray messages && messages.Any(message => message is JsonArray cells && cells[0]?.ToString() == "execution_error");
-    var recentlyTracked = tracked != null && DateTimeOffset.Now - tracked.CreatedAt < TimeSpan.FromSeconds(30);
-    var state = historyFailed ? "FAILED" : historyItem != null ? "COMPLETED" : Contains("queue_running") ? "RUNNING" : Contains("queue_pending") ? "QUEUED" : recentlyTracked ? "TRACKED" : tracked != null ? "MISSING" : "UNKNOWN";
-    return Results.Ok(new { success = true, promptId, state, tracked = tracked != null, createdAt = tracked?.CreatedAt, filesConfirmed = tracked?.FilesConfirmed ?? false });
+    var state = historyFailed ? "FAILED" : historyItem != null ? "COMPLETED" : Contains("queue_running") ? "RUNNING" : Contains("queue_pending") ? "QUEUED" : "UNKNOWN";
+    return Results.Ok(new { success = true, promptId, state, tracked = false, filesConfirmed = false });
 });
 
 app.MapGet("/api/twitter/status", (TwitterLocalPublisher twitter) => Results.Ok(new { success = true, data = twitter.Status() }));
@@ -570,50 +567,10 @@ app.MapPost("/api/generate", async (HttpRequest request, IHttpClientFactory fact
         CreatedAt = DateTimeOffset.Now,
         State = "PENDING"
     });
-    try { await AddGenerationRecord(new GalleryGenerationRecord {
-        PromptId = promptId,
-        FilenamePrefix = NormalizeRelativePath(filenamePrefix),
-        CreatedAt = DateTimeOffset.Now,
-        PositivePrompt = form["positivePrompt"].ToString(),
-        NegativePrompt = form["negativePrompt"].ToString(),
-        MainModel = Has("checkpoint") ? form["checkpoint"].ToString() : null,
-        PromptSchemeName = form["promptSchemeName"].ToString(),
-        Loras = ReadSelectedLoras(form["loras"].ToString()),
-        WorkflowId = form["workflowId"].ToString(),
-        Seed = actualSeed is JsonValue seedValue && seedValue.TryGetValue<long>(out var seed) ? seed : null,
-        Width = Has("width") ? PostedInt("width") : null,
-        Height = Has("height") ? PostedInt("height") : null,
-        Steps = Has("steps") ? PostedInt("steps") : null,
-        Cfg = Has("cfg") ? PostedDouble("cfg") : null,
-        Sampler = form["sampler"].ToString(),
-        Scheduler = form["scheduler"].ToString()
-    }); } catch {
-        await CancelPendingBridgeGeneration(promptId);
-        throw;
-    }
     return Results.Json(new { success = true, promptId, state = "PENDING", finalOutputNodeId = finalId, queueOwner = "BRIDGE",
         actualSeed = returnedSeed,
         width = Has("width") ? PostedInt("width") : null, height = Has("height") ? PostedInt("height") : null }, statusCode: StatusCodes.Status202Accepted);
 }).DisableAntiforgery();
-
-app.MapGet("/api/gallery", async (int? maxItems, int? page, int? pageSize) => {
-    if (page.HasValue || pageSize.HasValue) {
-        var requestedPage = Math.Max(1, page ?? 1);
-        var requestedPageSize = Math.Clamp(pageSize ?? maxItems ?? 100, 1, 100);
-        var allItems = await ScanGallery(5000);
-        var total = allItems.Sum(item => item.Images.Count);
-        var pages = total == 0 ? 0 : (int)Math.Ceiling(total / (double)requestedPageSize);
-        var currentPage = pages == 0 ? 1 : Math.Min(requestedPage, pages);
-        var items = TakeGalleryImagePage(allItems, (currentPage - 1) * requestedPageSize, requestedPageSize);
-        return Results.Ok(new { success = true, page = currentPage, pages, total, items });
-    }
-    var legacyItems = await ScanGallery(Math.Clamp(maxItems ?? 300, 1, 1000));
-    return Results.Ok(new { success = true, items = legacyItems });
-});
-app.MapGet("/api/gallery/trash", async (int? maxItems) => {
-    var items = await ScanGallery(Math.Clamp(maxItems ?? 5000, 1, 5000), trashedOnly: true);
-    return Results.Ok(new { success = true, total = items.Sum(item => item.Images.Count), items });
-});
 
 app.MapGet("/api/gallery/file", (string path) => {
     var file = ResolveGalleryPath(path, mustExist: true);
@@ -628,7 +585,6 @@ app.MapPost("/api/gallery/open-folder", (AssetPathRequest request) => {
     return Results.Ok(new { success = true, directory = Path.GetDirectoryName(file) });
 }).DisableAntiforgery();
 
-app.MapGet("/api/assets", (int? maxItems) => Results.Ok(new { success = true, items = ScanMigratedAssets(Math.Clamp(maxItems ?? 1000, 1, 5000)) }));
 app.MapGet("/api/assets/file", (string path) => {
     var file = ResolveAssetPath(path);
     var contentType = Path.GetExtension(file).ToLowerInvariant() switch { ".png" => "image/png", ".jpg" or ".jpeg" => "image/jpeg", ".webp" => "image/webp", _ => "application/octet-stream" };
@@ -697,49 +653,15 @@ app.MapPost("/api/migration/folders", async (FolderRequest request) => {
     return Results.Ok(new { success = true, directory });
 }).DisableAntiforgery();
 
-app.MapPost("/api/gallery/trash", async (GalleryPathsRequest request) => {
-    var paths = request.Paths.Select(NormalizeRelativePath).Where(path => path.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-    if (paths.Length == 0) return Results.BadRequest(new { success = false, message = "请选择要移入回收站的图片" });
-    await SetGalleryTrash(paths, trashed: true, requireExisting: true);
-    return Results.Ok(new { success = true, trashed = paths.Length });
-}).DisableAntiforgery();
-
-app.MapPost("/api/gallery/restore", async (GalleryPathsRequest request) => {
-    var paths = request.Paths.Select(NormalizeRelativePath).Where(path => path.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-    if (paths.Length == 0) return Results.BadRequest(new { success = false, message = "请选择要恢复的图片" });
-    await SetGalleryTrash(paths, trashed: false, requireExisting: true);
-    return Results.Ok(new { success = true, restored = paths.Length });
-}).DisableAntiforgery();
-
 app.MapPost("/api/gallery/delete", async (GalleryPathsRequest request) => {
     var paths = request.Paths.Select(NormalizeRelativePath).Where(path => path.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     if (paths.Length == 0) return Results.BadRequest(new { success = false, message = "请选择要删除的图片" });
-    var trash = await ReadGalleryTrashIndex();
-    var trashedPaths = trash.Items.Select(item => NormalizeRelativePath(item.Path)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-    if (paths.Any(path => !trashedPaths.Contains(path)))
-        return Results.BadRequest(new { success = false, message = "只有回收站中的本机图片可以永久删除" });
     var deleted = 0;
     foreach (var path in paths) {
         var file = ResolveGalleryPath(path, mustExist: false);
         if (File.Exists(file) && IsGalleryImage(file)) { File.Delete(file); deleted++; }
     }
-    await UpdateIndexedPaths(paths, null);
-    await SetGalleryTrash(paths, trashed: false, requireExisting: false);
     return Results.Ok(new { success = true, deleted });
-}).DisableAntiforgery();
-
-app.MapPost("/api/gallery/complete", async (GalleryCompleteRequest request) => {
-    if (!Guid.TryParse(request.PromptId, out _)) return Results.BadRequest(new { success = false, message = "生成任务 ID 无效" });
-    var files = request.Files.Select(NormalizeRelativePath).Where(path => path.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-    if (files.Count == 0) return Results.BadRequest(new { success = false, message = "生成任务没有输出图片" });
-    foreach (var path in files) {
-        var file = ResolveGalleryPath(path, mustExist: true);
-        if (!IsGalleryImage(file)) return Results.BadRequest(new { success = false, message = $"生成输出不是图片：{path}" });
-    }
-    var updated = await CompleteGenerationRecord(request.PromptId, files, request.GenerationCompletedAt, request.GenerationDurationMs);
-    return updated
-        ? Results.Ok(new { success = true, promptId = request.PromptId, files })
-        : Results.NotFound(new { success = false, message = "生成任务索引不存在" });
 }).DisableAntiforgery();
 
 app.MapPost("/api/gallery/move", async (GalleryMoveRequest request) => {
@@ -750,9 +672,6 @@ app.MapPost("/api/gallery/move", async (GalleryMoveRequest request) => {
     var externalDestination = folder.Length == 0;
     var destination = externalDestination ? GetMigrationDirectory() : ResolveGalleryPath(folder, mustExist: false);
     Directory.CreateDirectory(destination);
-    var gallery = await ScanGallery(1000);
-    var metadataByPath = gallery.SelectMany(item => item.Images.Select(image => new { image.Path, Item = item }))
-        .ToDictionary(x => x.Path, x => x.Item, StringComparer.OrdinalIgnoreCase);
     var sourceFiles = new List<(string OldPath, string Source)>();
     foreach (var oldPath in paths) {
         var source = ResolveGalleryPath(oldPath, mustExist: true);
@@ -774,20 +693,12 @@ app.MapPost("/api/gallery/move", async (GalleryMoveRequest request) => {
             moved.Add((oldPath, newPath, source, target));
         }
         if (moved.Count == 0) return Results.BadRequest(new { success = false, message = "图片已经在目标文件夹" });
-        foreach (var file in moved) await UpdateIndexedPaths(new[] { file.OldPath }, externalDestination ? null : file.NewPath);
         var assets = externalDestination ? moved.Select(file => {
-            metadataByPath.TryGetValue(file.OldPath, out var item);
             var image = ToGalleryImage(new GalleryFile { FullPath = file.Target, Path = file.Target, Filename = Path.GetFileName(file.Target), CreatedAt = new DateTimeOffset(File.GetLastWriteTime(file.Target)) });
             return new {
                 oldPath = file.OldPath,
                 localPath = file.Target, localUrl = $"http://127.0.0.1:32145/api/assets/file?path={Uri.EscapeDataString(file.Target)}", fileName = image.Filename, fileSize = image.SizeBytes,
-                width = image.Width ?? item?.Width, height = image.Height ?? item?.Height,
-                prompt = item?.Prompt, negativePrompt = item?.NegativePrompt,
-                lorasJson = item?.Loras == null ? null : JsonSerializer.Serialize(item.Loras, GalleryJsonOptions()), seed = item?.Seed,
-                steps = item?.Steps, cfg = item?.Cfg, sampler = item?.Sampler,
-                scheduler = item?.Scheduler, workflowId = item?.WorkflowId,
-                generatedAt = item?.CreatedAt ?? new DateTimeOffset(File.GetLastWriteTime(file.Target)),
-                generationCompletedAt = item?.GenerationCompletedAt, generationDurationMs = item?.GenerationDurationMs
+                width = image.Width, height = image.Height
             };
         }).ToArray() : Array.Empty<object>();
         return Results.Ok(new { success = true, moved = moved.Count, folder = destination, platform = settings.PlatformName, assets });
@@ -1541,8 +1452,6 @@ JsonObject BuildLocalWorkflow(string relative, DateTime modifiedAtUtc, JsonObjec
 }
 
 string GalleryRoot() => Path.GetFullPath(settings.ActiveProfile.OutputDirectory);
-string GalleryIndexPath() => Path.Combine(GalleryRoot(), ".aiprovider-gallery.json");
-string GalleryTrashIndexPath() => Path.Combine(GalleryRoot(), ".aiprovider-trash.json");
 string MigrationSettingsPath() => Path.Combine(AppContext.BaseDirectory, "bridge-user-settings.json");
 string GetMigrationDirectory() {
     try {
@@ -1630,179 +1539,11 @@ string ResolveAssetPath(string path, bool mustExist = true) {
     return full;
 }
 
-List<GalleryItem> ScanMigratedAssets(int maxItems) {
-    var root = Path.GetFullPath(GetMigrationDirectory());
-    if (!Directory.Exists(root)) return new List<GalleryItem>();
-    return Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Where(IsGalleryImage)
-        .Select(path => {
-            var relative = NormalizeRelativePath(Path.GetRelativePath(root, path));
-            var file = new GalleryFile { FullPath = path, Path = relative, Filename = Path.GetFileName(path), CreatedAt = new DateTimeOffset(File.GetLastWriteTime(path)) };
-            var embedded = ReadEmbeddedGeneration(path);
-            return new GalleryItem {
-                Id = "asset-" + Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(relative.ToLowerInvariant()))).ToLowerInvariant(),
-                Source = "asset", Prompt = embedded?.PositivePrompt, NegativePrompt = embedded?.NegativePrompt, MainModel = embedded?.MainModel,
-                CreatedAt = file.CreatedAt, Seed = embedded?.Seed, Steps = embedded?.Steps, Cfg = embedded?.Cfg,
-                Sampler = embedded?.Sampler, Scheduler = embedded?.Scheduler, Images = new List<GalleryImage> { ToGalleryImage(file) }
-            };
-        }).OrderByDescending(item => item.CreatedAt).Take(maxItems).ToList();
-}
-
-async Task<GalleryIndex> ReadGalleryIndex() {
-    var path = GalleryIndexPath();
-    if (!File.Exists(path)) return new GalleryIndex();
-    try {
-        return JsonSerializer.Deserialize<GalleryIndex>(await File.ReadAllTextAsync(path), GalleryJsonOptions()) ?? new GalleryIndex();
-    } catch (JsonException exception) {
-        throw new InvalidDataException($"Bridge 任务索引损坏，已停止覆盖原文件：{path}", exception);
-    }
-}
-
-async Task WriteGalleryIndex(GalleryIndex index) {
-    Directory.CreateDirectory(GalleryRoot());
-    var path = GalleryIndexPath();
-    var temporary = path + ".tmp";
-    await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(index, GalleryJsonOptions(writeIndented: true)));
-    File.Move(temporary, path, true);
-}
-
 JsonSerializerOptions GalleryJsonOptions(bool writeIndented = false) => new() {
     PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     PropertyNameCaseInsensitive = true,
     WriteIndented = writeIndented
 };
-
-async Task AddGenerationRecord(GalleryGenerationRecord record) {
-    await galleryIndexLock.WaitAsync();
-    try {
-        var index = await ReadGalleryIndex();
-        index.Generations.RemoveAll(item => string.Equals(item.PromptId, record.PromptId, StringComparison.OrdinalIgnoreCase));
-        index.Generations.Add(record);
-        if (index.Generations.Count > 2000)
-            index.Generations = index.Generations.OrderByDescending(item => item.CreatedAt).Take(2000).ToList();
-        await WriteGalleryIndex(index);
-    } finally { galleryIndexLock.Release(); }
-}
-
-async Task<GalleryGenerationRecord?> FindGenerationRecord(string promptId) {
-    await galleryIndexLock.WaitAsync();
-    try {
-        var index = await ReadGalleryIndex();
-        return index.Generations.FirstOrDefault(item => string.Equals(item.PromptId, promptId, StringComparison.OrdinalIgnoreCase));
-    } finally { galleryIndexLock.Release(); }
-}
-
-async Task<bool> CompleteGenerationRecord(string promptId, List<string> files, DateTimeOffset? completedAt, long? durationMs) {
-    await galleryIndexLock.WaitAsync();
-    try {
-        var index = await ReadGalleryIndex();
-        var generation = index.Generations.FirstOrDefault(item => string.Equals(item.PromptId, promptId, StringComparison.OrdinalIgnoreCase));
-        if (generation == null) return false;
-        generation.Files = files;
-        generation.FilesConfirmed = true;
-        generation.GenerationCompletedAt = completedAt;
-        generation.GenerationDurationMs = durationMs.HasValue ? Math.Max(0, durationMs.Value) : null;
-        await WriteGalleryIndex(index);
-        return true;
-    } finally { galleryIndexLock.Release(); }
-}
-
-async Task UpdateIndexedPaths(IEnumerable<string> oldPaths, string? newPath) {
-    var old = oldPaths.Select(NormalizeRelativePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
-    await galleryIndexLock.WaitAsync();
-    try {
-        var index = await ReadGalleryIndex();
-        var changed = false;
-        foreach (var generation in index.Generations) {
-            var retained = generation.Files.Where(path => !old.Contains(NormalizeRelativePath(path))).ToList();
-            if (retained.Count == generation.Files.Count) continue;
-            if (!string.IsNullOrWhiteSpace(newPath)) retained.Add(NormalizeRelativePath(newPath));
-            generation.Files = retained.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            changed = true;
-        }
-        if (changed || !File.Exists(GalleryIndexPath())) await WriteGalleryIndex(index);
-    } finally { galleryIndexLock.Release(); }
-}
-
-async Task<List<GalleryItem>> ScanGallery(int maxItems, bool trashedOnly = false) {
-    await galleryIndexLock.WaitAsync();
-    try {
-        var root = GalleryRoot();
-        if (!Directory.Exists(root)) return new List<GalleryItem>();
-        var index = await ReadGalleryIndex();
-        var trash = await ReadGalleryTrashIndex();
-        var trashedPaths = trash.Items.Select(item => NormalizeRelativePath(item.Path)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
-            .Where(IsGalleryImage)
-            .Select(path => new GalleryFile {
-                FullPath = path,
-                Path = NormalizeRelativePath(Path.GetRelativePath(root, path)),
-                Filename = Path.GetFileName(path),
-                CreatedAt = new DateTimeOffset(File.GetLastWriteTime(path))
-            })
-            .Where(file => trashedPaths.Contains(file.Path) == trashedOnly)
-            .OrderByDescending(file => file.CreatedAt)
-            .Take(5000)
-            .ToList();
-        var assigned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var changed = false;
-        var items = new List<GalleryItem>();
-        foreach (var generation in index.Generations.OrderByDescending(item => item.CreatedAt)) {
-            if (!generation.FilesConfirmed) continue;
-            var explicitPaths = generation.Files.Select(NormalizeRelativePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var matches = files.Where(file => !assigned.Contains(file.Path) && explicitPaths.Contains(file.Path)).ToList();
-            if (matches.Count == 0) continue;
-            foreach (var file in matches) assigned.Add(file.Path);
-            var confirmed = generation.Files.Select(NormalizeRelativePath).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            if (!confirmed.SequenceEqual(generation.Files, StringComparer.OrdinalIgnoreCase)) { generation.Files = confirmed; changed = true; }
-            if (string.IsNullOrWhiteSpace(generation.MainModel)) {
-                generation.MainModel = ReadEmbeddedGeneration(matches[0].FullPath)?.MainModel;
-                if (!string.IsNullOrWhiteSpace(generation.MainModel)) changed = true;
-            }
-            items.Add(new GalleryItem {
-                Id = generation.PromptId, PromptId = generation.PromptId,
-                Prompt = generation.PositivePrompt,
-                NegativePrompt = generation.NegativePrompt, MainModel = generation.MainModel, PromptSchemeName = generation.PromptSchemeName, CreatedAt = generation.CreatedAt,
-                GenerationCompletedAt = generation.GenerationCompletedAt, GenerationDurationMs = generation.GenerationDurationMs,
-                Loras = generation.Loras,
-                Width = generation.Width, Height = generation.Height, Seed = generation.Seed, Steps = generation.Steps,
-                Cfg = generation.Cfg, Sampler = generation.Sampler, Scheduler = generation.Scheduler, WorkflowId = generation.WorkflowId,
-                Images = matches.Select(ToGalleryImage).ToList()
-            });
-        }
-        foreach (var file in files.Where(file => !assigned.Contains(file.Path))) {
-            var id = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(file.Path.ToLowerInvariant()))).ToLowerInvariant();
-            var embedded = ReadEmbeddedGeneration(file.FullPath);
-            items.Add(new GalleryItem {
-                Id = id, Prompt = embedded?.PositivePrompt, NegativePrompt = embedded?.NegativePrompt, MainModel = embedded?.MainModel, Loras = embedded?.Loras ?? new List<GenerationLora>(),
-                CreatedAt = file.CreatedAt, Width = embedded?.Width, Height = embedded?.Height, Seed = embedded?.Seed,
-                Steps = embedded?.Steps, Cfg = embedded?.Cfg, Sampler = embedded?.Sampler, Scheduler = embedded?.Scheduler,
-                Images = new List<GalleryImage> { ToGalleryImage(file) }
-            });
-        }
-        if (changed || !File.Exists(GalleryIndexPath())) await WriteGalleryIndex(index);
-        return items.OrderByDescending(item => item.CreatedAt).Take(maxItems).ToList();
-    } finally { galleryIndexLock.Release(); }
-}
-
-List<GalleryItem> TakeGalleryImagePage(List<GalleryItem> items, int skip, int take) {
-    var pageItems = new List<GalleryItem>();
-    var remainingSkip = skip;
-    var remainingTake = take;
-    foreach (var item in items) {
-        if (remainingTake <= 0) break;
-        if (remainingSkip >= item.Images.Count) {
-            remainingSkip -= item.Images.Count;
-            continue;
-        }
-        var images = item.Images.Skip(remainingSkip).Take(remainingTake).ToList();
-        remainingSkip = 0;
-        if (images.Count == 0) continue;
-        item.Images = images;
-        pageItems.Add(item);
-        remainingTake -= images.Count;
-    }
-    return pageItems;
-}
 
 GalleryImage ToGalleryImage(GalleryFile file) {
     var (width, height) = ReadImageDimensions(file.FullPath);
@@ -1826,60 +1567,6 @@ void OpenFileInFolder(string file) {
             return (BinaryPrimitives.ReadInt32BigEndian(header[16..20]), BinaryPrimitives.ReadInt32BigEndian(header[20..24]));
     } catch { }
     return (null, null);
-}
-
-GalleryGenerationRecord? ReadEmbeddedGeneration(string path) {
-    try {
-        var text = ReadPngText(path, "prompt");
-        if (string.IsNullOrWhiteSpace(text) || JsonNode.Parse(text) is not JsonObject prompt) return null;
-        var samplerEntry = prompt.FirstOrDefault(entry => entry.Value?["class_type"]?.ToString().Contains("KSampler", StringComparison.OrdinalIgnoreCase) == true);
-        if (samplerEntry.Value is not JsonObject sampler || sampler["inputs"] is not JsonObject inputs) return null;
-        string? LinkedText(string name) {
-            if (inputs[name] is not JsonArray link || link[0] == null) return null;
-            return prompt[link[0]!.ToString()]?["inputs"]?["text"]?.ToString();
-        }
-        long? Long(string name) => long.TryParse(inputs[name]?.ToString(), out var value) ? value : null;
-        int? Int(string name) => int.TryParse(inputs[name]?.ToString(), out var value) ? value : null;
-        double? Double(string name) => double.TryParse(inputs[name]?.ToString(), out var value) ? value : null;
-        var modelEntry = prompt.FirstOrDefault(entry =>
-            entry.Value?["class_type"]?.ToString() is string nodeType &&
-            (nodeType.Contains("Checkpoint", StringComparison.OrdinalIgnoreCase) || nodeType.Contains("UNET", StringComparison.OrdinalIgnoreCase)) &&
-            (entry.Value?["inputs"]?["ckpt_name"] != null || entry.Value?["inputs"]?["unet_name"] != null));
-        return new GalleryGenerationRecord {
-            PositivePrompt = LinkedText("positive"), NegativePrompt = LinkedText("negative"),
-            MainModel = modelEntry.Value?["inputs"]?["ckpt_name"]?.ToString() ?? modelEntry.Value?["inputs"]?["unet_name"]?.ToString(),
-            Seed = Long("seed") ?? Long("noise_seed"), Steps = Int("steps"), Cfg = Double("cfg"),
-            Sampler = inputs["sampler_name"]?.ToString(), Scheduler = inputs["scheduler"]?.ToString()
-        };
-    } catch { return null; }
-}
-
-string? ReadPngText(string path, string keyword) {
-    using var stream = File.OpenRead(path);
-    Span<byte> signature = stackalloc byte[8];
-    if (stream.Read(signature) != 8 || !signature.SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 })) return null;
-    Span<byte> header = stackalloc byte[8];
-    while (stream.Read(header) == 8) {
-        var length = BinaryPrimitives.ReadInt32BigEndian(header[..4]);
-        if (length < 0 || length > 16 * 1024 * 1024) return null;
-        var type = System.Text.Encoding.ASCII.GetString(header[4..8]);
-        if (type is "tEXt" or "iTXt") {
-            var data = new byte[length];
-            if (stream.Read(data) != length) return null;
-            stream.Seek(4, SeekOrigin.Current);
-            var zero = Array.IndexOf(data, (byte)0);
-            if (zero < 0 || System.Text.Encoding.Latin1.GetString(data, 0, zero) != keyword) continue;
-            if (type == "tEXt") return System.Text.Encoding.Latin1.GetString(data, zero + 1, data.Length - zero - 1);
-            var cursor = zero + 1;
-            if (cursor + 2 > data.Length || data[cursor++] != 0) return null;
-            cursor++;
-            for (var fields = 0; fields < 2; fields++) { var end = Array.IndexOf(data, (byte)0, cursor); if (end < 0) return null; cursor = end + 1; }
-            return System.Text.Encoding.UTF8.GetString(data, cursor, data.Length - cursor);
-        }
-        stream.Seek(length + 4L, SeekOrigin.Current);
-        if (type == "IEND") break;
-    }
-    return null;
 }
 
 async Task<bool> IsComfyRunning(IHttpClientFactory factory) {
@@ -1992,33 +1679,6 @@ string CompactLoraDisplayName(string modelName) {
     return string.IsNullOrWhiteSpace(name) ? "未命名 LoRA" : name;
 }
 
-async Task<GalleryTrashIndex> ReadGalleryTrashIndex() {
-    var path = GalleryTrashIndexPath();
-    if (!File.Exists(path)) return new GalleryTrashIndex();
-    try {
-        return JsonSerializer.Deserialize<GalleryTrashIndex>(await File.ReadAllTextAsync(path), GalleryJsonOptions()) ?? new GalleryTrashIndex();
-    } catch (JsonException exception) {
-        throw new InvalidDataException($"Bridge 回收站索引损坏，已停止覆盖原文件：{path}", exception);
-    }
-}
-
-async Task SetGalleryTrash(IEnumerable<string> paths, bool trashed, bool requireExisting) {
-    var normalized = paths.Select(NormalizeRelativePath).Where(path => path.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-    foreach (var path in normalized) ResolveGalleryPath(path, mustExist: requireExisting);
-    await galleryIndexLock.WaitAsync();
-    try {
-        var index = await ReadGalleryTrashIndex();
-        var pathSet = normalized.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        index.Items.RemoveAll(item => pathSet.Contains(NormalizeRelativePath(item.Path)));
-        if (trashed) index.Items.AddRange(normalized.Select(path => new GalleryTrashRecord { Path = path, TrashedAt = DateTimeOffset.Now }));
-        Directory.CreateDirectory(GalleryRoot());
-        var target = GalleryTrashIndexPath();
-        var temporary = target + ".tmp";
-        await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(index, GalleryJsonOptions(writeIndented: true)));
-        File.Move(temporary, target, true);
-    } finally { galleryIndexLock.Release(); }
-}
-
 string CompactModelDisplayName(string modelName) {
     var normalized = modelName.Replace('\\', '/');
     var file = normalized.Split('/').Last();
@@ -2091,12 +1751,6 @@ sealed record ImageMigrationPlan(List<ImageMigrationFile> Files, string? Error);
 sealed class AssetPathRequest { public string? Path { get; set; } }
 sealed class HistoryMoveRequest { public string[] PromptIds { get; set; } = Array.Empty<string>(); public string? Folder { get; set; } }
 class GalleryPathsRequest { public string[] Paths { get; set; } = Array.Empty<string>(); }
-sealed class GalleryCompleteRequest {
-    public string PromptId { get; set; } = "";
-    public string[] Files { get; set; } = Array.Empty<string>();
-    public DateTimeOffset? GenerationCompletedAt { get; set; }
-    public long? GenerationDurationMs { get; set; }
-}
 sealed class ClientLogRequest { public string Scope { get; set; } = "unknown"; public string Message { get; set; } = ""; public string? PromptId { get; set; } public string? Path { get; set; } public string? Details { get; set; } }
 sealed class GalleryMoveRequest : GalleryPathsRequest { public string? Folder { get; set; } }
 sealed class MigrationSettingsRequest { public string? Directory { get; set; } }
@@ -2109,18 +1763,6 @@ sealed class LocalWorkflowRejection {
     public string Path { get; set; } = "";
     public string Message { get; set; } = "";
 }
-sealed class GalleryIndex {
-    public int Version { get; set; } = 1;
-    public List<GalleryGenerationRecord> Generations { get; set; } = new();
-}
-sealed class GalleryTrashIndex {
-    public int Version { get; set; } = 1;
-    public List<GalleryTrashRecord> Items { get; set; } = new();
-}
-sealed class GalleryTrashRecord {
-    public string Path { get; set; } = "";
-    public DateTimeOffset TrashedAt { get; set; }
-}
 sealed class BridgeQueuedGeneration {
     public string PromptId { get; set; } = "";
     public JsonObject Prompt { get; set; } = new();
@@ -2130,28 +1772,6 @@ sealed class BridgeQueuedGeneration {
     public DateTimeOffset? CompletedAt { get; set; }
     public string State { get; set; } = "PENDING";
     public string? Error { get; set; }
-}
-sealed class GalleryGenerationRecord {
-    public string PromptId { get; set; } = "";
-    public string FilenamePrefix { get; set; } = "";
-    public DateTimeOffset CreatedAt { get; set; }
-    public DateTimeOffset? GenerationCompletedAt { get; set; }
-    public long? GenerationDurationMs { get; set; }
-    public string? PositivePrompt { get; set; }
-    public string? NegativePrompt { get; set; }
-    public string? MainModel { get; set; }
-    public string? PromptSchemeName { get; set; }
-    public List<GenerationLora> Loras { get; set; } = new();
-    public string? WorkflowId { get; set; }
-    public long? Seed { get; set; }
-    public int? Width { get; set; }
-    public int? Height { get; set; }
-    public int? Steps { get; set; }
-    public double? Cfg { get; set; }
-    public string? Sampler { get; set; }
-    public string? Scheduler { get; set; }
-    public List<string> Files { get; set; } = new();
-    public bool FilesConfirmed { get; set; }
 }
 sealed class GalleryFile {
     public string FullPath { get; set; } = "";
@@ -2166,28 +1786,6 @@ sealed class GalleryImage {
     public long SizeBytes { get; set; }
     public int? Width { get; set; }
     public int? Height { get; set; }
-}
-sealed class GalleryItem {
-    public string Id { get; set; } = "";
-    public string? PromptId { get; set; }
-    public string Source { get; set; } = "output";
-    public string Prompt { get; set; } = "";
-    public string? NegativePrompt { get; set; }
-    public string? MainModel { get; set; }
-    public string? PromptSchemeName { get; set; }
-    public List<GenerationLora> Loras { get; set; } = new();
-    public DateTimeOffset CreatedAt { get; set; }
-    public DateTimeOffset? GenerationCompletedAt { get; set; }
-    public long? GenerationDurationMs { get; set; }
-    public int? Width { get; set; }
-    public int? Height { get; set; }
-    public long? Seed { get; set; }
-    public int? Steps { get; set; }
-    public double? Cfg { get; set; }
-    public string? Sampler { get; set; }
-    public string? Scheduler { get; set; }
-    public string? WorkflowId { get; set; }
-    public List<GalleryImage> Images { get; set; } = new();
 }
 sealed class GenerationLora {
     public string Name { get; set; } = "";

@@ -15,6 +15,10 @@ class PromptOptionServiceTest {
         when(repository.findOptionPage(null, null, null, 100, 0)).thenReturn(Collections.singletonList(row));
         when(repository.countOptions(null, null, null)).thenReturn(1L);
         assertThat(service.page(null, null, "all", 1, 100).getItems()).singleElement().satisfies(item -> { assertThat(item.getName()).isEqualTo("黑丝袜"); assertThat(item.isEnabled()).isTrue(); });
+        when(repository.findOptionsByIds(Collections.singletonList("black_stockings"))).thenReturn(Collections.singletonList(row));
+        assertThat(service.resolve(Arrays.asList("black_stockings", "black_stockings"))).singleElement().satisfies(item -> assertThat(item.getId()).isEqualTo("black_stockings"));
+        when(repository.findGeneralNegativePrompt()).thenReturn(" low quality ");
+        assertThat(service.config()).containsEntry("generalNegativePrompt", "low quality");
         PromptOptionDTO dto = valid(); service.create(dto); verify(repository).insertOption(any(PromptCatalogMapper.OptionRecord.class));
         when(repository.updateOption(any())).thenReturn(true); service.update(dto.getId(), dto);
         when(repository.countSchemeReferences(dto.getId())).thenReturn(0); when(repository.deleteOption(dto.getId())).thenReturn(true); service.delete(dto.getId());
@@ -38,6 +42,9 @@ class PromptOptionServiceTest {
         when(repository.countSchemeReferences(dto.getId())).thenReturn(1); assertThatThrownBy(() -> service.delete(dto.getId())).hasMessageContaining("正在被");
         dto.setAllowMultiple(false); assertThatThrownBy(() -> service.create(dto)).hasMessageContaining("多选规则");
         assertThatThrownBy(() -> service.delete("Bad-ID")).hasMessageContaining("小写字母");
+        assertThatThrownBy(() -> service.resolve(Collections.singletonList("Bad-ID"))).hasMessageContaining("小写字母");
+        assertThatThrownBy(() -> service.resolve(Collections.nCopies(501, "valid_id"))).hasMessageContaining("500");
+        when(repository.findGeneralNegativePrompt()).thenReturn(" "); assertThatThrownBy(service::config).hasMessageContaining("未配置");
     }
 
     private PromptOptionDTO valid() {

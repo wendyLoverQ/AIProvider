@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -6,14 +7,23 @@ const settingsPath = fileURLToPath(new URL(
   "../../ComfyUIAgent/bin/Release/net8.0/win-x64/publish/appsettings.json",
   import.meta.url,
 ));
-const bridgeDescribe = existsSync(settingsPath) ? describe : describe.skip;
+const bridgeDescribe = process.env.RUN_COMFY_BRIDGE_CONTRACT === "1" && existsSync(settingsPath)
+  ? describe
+  : describe.skip;
 const bridgeBaseUrl = "http://127.0.0.1:32145";
 const bridgeSettings = existsSync(settingsPath)
   ? JSON.parse(readFileSync(settingsPath, "utf8"))
   : null;
 
-const imagePaths = (payload) => (payload.items || []).flatMap((item) =>
-  (item.images || []).map((image) => image.path).filter(Boolean));
+const localImagePaths = () => {
+  const root = bridgeSettings?.OutputDirectory;
+  if (!root || !existsSync(root)) return [];
+  const walk = (directory) => readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    return entry.isDirectory() ? walk(path) : /\.(png|jpe?g|webp)$/i.test(entry.name) ? [relative(root, path).replace(/\\/g, "/")] : [];
+  });
+  return walk(root);
+};
 
 bridgeDescribe("ComfyUIAgent bridge contract", () => {
   const headers = bridgeSettings
@@ -42,21 +52,9 @@ bridgeDescribe("ComfyUIAgent bridge contract", () => {
     expect(status.platform).toMatch(/Windows|Linux|macOS/);
   });
 
-  it("serves 100-image pages without duplicate addresses", async () => {
-    const first = await bridgeJson("/api/gallery?page=1&pageSize=100");
-    const second = first.pages > 1
-      ? await bridgeJson("/api/gallery?page=2&pageSize=100")
-      : { page: 2, items: [] };
-    const firstPaths = imagePaths(first);
-    const secondPaths = imagePaths(second);
-    const allPaths = [...firstPaths, ...secondPaths];
-
-    expect(first.success).toBe(true);
-    expect(first.page).toBe(1);
-    expect(first.pages).toBe(first.total ? Math.ceil(first.total / 100) : 0);
-    expect(firstPaths).toHaveLength(Math.min(100, first.total));
-    expect(secondPaths.length).toBeLessThanOrEqual(100);
-    expect(new Set(allPaths).size).toBe(allPaths.length);
+  it("does not expose a Bridge-owned gallery pagination queue", async () => {
+    const response = await bridgeFetch("/api/gallery?page=1&pageSize=100");
+    expect(response.status).toBe(404);
   });
 
   it("proxies the latest 20 ComfyUI history records", async () => {
@@ -68,9 +66,8 @@ bridgeDescribe("ComfyUIAgent bridge contract", () => {
     expect(entries.every(([promptId, item]) => promptId && item && typeof item === "object")).toBe(true);
   });
 
-  it("returns image bytes for an address supplied by the gallery", async () => {
-    const gallery = await bridgeJson("/api/gallery?page=1&pageSize=1");
-    const [path] = imagePaths(gallery);
+  it("returns image bytes for a backend-record-compatible relative path", async () => {
+    const [path] = localImagePaths();
     expect(path).toBeTruthy();
 
     const query = new URLSearchParams({ path });
@@ -85,15 +82,12 @@ bridgeDescribe("ComfyUIAgent bridge contract", () => {
   });
 
   it("proxies a generated image whose filename contains non-ASCII characters", async () => {
-    const gallery = await bridgeJson("/api/gallery?page=1&pageSize=100");
-    const images = (gallery.items || []).flatMap((item) => item.images || []);
-    const image = images.find((candidate) => /[^\x00-\x7F]/.test(candidate.filename || ""));
-    expect(image, "local gallery should contain a non-ASCII filename fixture").toBeTruthy();
-    const normalizedPath = String(image.path || image.filename).replace(/\\/g, "/");
+    const normalizedPath = localImagePaths().find((path) => /[^\x00-\x7F]/.test(path));
+    expect(normalizedPath, "local gallery should contain a non-ASCII filename fixture").toBeTruthy();
     const slash = normalizedPath.lastIndexOf("/");
 
     const query = new URLSearchParams({
-      filename: image.filename,
+      filename: normalizedPath.slice(slash + 1),
       subfolder: slash < 0 ? "" : normalizedPath.slice(0, slash),
       type: "output",
     });

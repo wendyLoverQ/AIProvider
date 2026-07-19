@@ -23,7 +23,17 @@ describe("PromptManager", () => {
     window.history.replaceState({}, "", "/prompts");
     vi.stubGlobal("fetch", vi.fn(async (input, options = {}) => {
       const url = String(input);
-      if (url === "/api/prompt-catalog") return response(catalog);
+      if (url === "/api/prompt-options/config") return response({ generalNegativePrompt: catalog.generalNegativePrompt });
+      if (url === "/api/prompt-options/resolve") {
+        const ids = JSON.parse(options.body); return response(catalog.options.filter((option) => ids.includes(option.id)));
+      }
+      if (url.startsWith("/api/prompt-options?")) {
+        const params = new URL(url, "http://local").searchParams;
+        const keyword = (params.get("query") || "").toLowerCase();
+        const category = params.get("category");
+        const items = catalog.options.filter((option) => (!category || option.category === category) && (!keyword || [option.id, option.name, option.positivePrompt].join(" ").toLowerCase().includes(keyword)));
+        return response({ items, total: items.length, pages: items.length ? 1 : 0 });
+      }
       if (options.method === "POST") { saved = JSON.parse(options.body); return response({ id: 9 }); }
       return response([]);
     }));
@@ -35,16 +45,16 @@ describe("PromptManager", () => {
     await screen.findByLabelText("搜索人物");
     fireEvent.change(screen.getByLabelText("方案名称"), { target: { value: "结构化方案" } });
     fireEvent.change(screen.getByLabelText("搜索人物"), { target: { value: "单人" } });
-    fireEvent.click(screen.getByRole("button", { name: /单人/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /单人/ }));
     fireEvent.change(screen.getByLabelText("搜索人物"), { target: { value: "女孩" } });
-    fireEvent.click(screen.getByRole("button", { name: /女孩/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /女孩/ }));
     expect(screen.getByLabelText("最终正向 Prompt").value).toBe("solo, 1girl");
     expect(screen.getByLabelText("最终反向 Prompt").value).toBe("low quality, bad hands, crowd, male");
     fireEvent.change(screen.getByLabelText("最终正向 Prompt"), { target: { value: "temporary final edit" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(saved).not.toBeNull());
-    expect(saved).toEqual({
-      name: "结构化方案", selectedOptions: { Quality: [], Character: ["solo", "girl"], Clothing: [] },
+    expect(saved).toMatchObject({
+      name: "结构化方案", selectedOptions: { Character: ["solo", "girl"] },
       positiveExtra: "temporary final edit", negativeExtra: "", positivePrompt: "temporary final edit",
       negativePrompt: "low quality, bad hands, crowd, male", remark: "", isDefault: false,
     });
@@ -56,9 +66,9 @@ describe("PromptManager", () => {
     render(<PromptManager />);
     const search = await screen.findByLabelText("搜索服装");
     fireEvent.focus(search);
-    expect(screen.getByText("常用词条")).toBeTruthy();
+    expect(await screen.findByText("常用词条")).toBeTruthy();
     fireEvent.change(search, { target: { value: "黑丝袜" } });
-    expect(screen.getByRole("button", { name: /黑丝袜/ })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /黑丝袜/ })).toBeTruthy();
     fireEvent.change(search, { target: { value: "pantyhose" } });
     expect(screen.getByRole("button", { name: /black pantyhose/ })).toBeTruthy();
     fireEvent.pointerDown(document.body);
@@ -69,11 +79,36 @@ describe("PromptManager", () => {
     const selectedOptions = { ...emptySelectedOptions(), Quality: ["masterpiece"] };
     const preset = { id: 7, name: "已保存", selectedOptions, positiveExtra: "extra", negativeExtra: "", positivePrompt: "saved final", negativePrompt: "saved negative", remark: "memo", isDefault: true };
     window.history.replaceState({}, "", "/prompts?edit=7");
-    fetch.mockImplementation(async (input) => String(input) === "/api/prompt-catalog" ? response(catalog) : response([preset]));
+    fetch.mockImplementation(async (input, options = {}) => {
+      const url = String(input);
+      if (url === "/api/prompt-options/config") return response({ generalNegativePrompt: catalog.generalNegativePrompt });
+      if (url === "/api/prompt-options/resolve") {
+        const ids = JSON.parse(options.body); return response(catalog.options.filter((option) => ids.includes(option.id)));
+      }
+      return response([preset]);
+    });
     render(<PromptManager />);
     expect(await screen.findByDisplayValue("已保存")).toBeTruthy();
     expect(screen.getByText("杰作")).toBeTruthy();
     expect(screen.getByLabelText("最终正向 Prompt").value).toBe("saved final");
     expect(screen.getByLabelText("是否默认方案").checked).toBe(true);
+  });
+
+  it("does not download the full catalog when the page opens", async () => {
+    render(<PromptManager />);
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/comfy-presets", expect.objectContaining({ signal: expect.any(AbortSignal) })));
+    expect(fetch.mock.calls.some(([url]) => String(url) === "/api/prompt-catalog")).toBe(false);
+    expect(fetch.mock.calls.some(([url]) => String(url).includes("category="))).toBe(false);
+    fireEvent.focus(screen.getByLabelText("搜索人物"));
+    await waitFor(() => expect(fetch.mock.calls.some(([url]) => String(url).includes("category=Character"))).toBe(true));
+  });
+
+  it("cancels in-flight Prompt requests when switching workspaces", async () => {
+    const signals = [];
+    fetch.mockImplementation((_input, options = {}) => { signals.push(options.signal); return new Promise(() => {}); });
+    const view = render(<PromptManager />);
+    await waitFor(() => expect(signals).toHaveLength(2));
+    view.unmount();
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
   });
 });

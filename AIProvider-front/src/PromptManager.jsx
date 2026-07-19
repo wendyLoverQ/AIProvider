@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Copy, FloppyDisk, Plus, Star, Trash, Warning, X } from "@phosphor-icons/react";
-import { buildPromptCategories, composePrompts, emptySelectedOptions, extractNegativeExtra, extractPositiveExtra, normalizePrompt, relatedNegativePromptsForPositive, normalizeSelectedOptions } from "./promptComposer";
+import { PROMPT_CATEGORIES, composePrompts, emptySelectedOptions, extractNegativeExtra, extractPositiveExtra, normalizePrompt, relatedNegativePromptsForPositive, normalizeSelectedOptions } from "./promptComposer";
 import UiSearchField from "./UiSearchField";
 import { readJsonResponse } from "./apiResponse";
 import "./PromptManager.css";
@@ -18,7 +18,11 @@ function normalizePreset(item, definitions) {
   return { ...emptyDraft(definitions), ...item, selectedOptions: normalizeSelectedOptions(item?.selectedOptions, definitions) };
 }
 
-function MultiOptionPicker({ definition, options, value, onChange, onEditOptions }) {
+const OPTION_PAGE_SIZE = 100;
+const MULTIPLE_CATEGORIES = new Set(["Character", "Appearance", "Special", "Clothing", "Artist", "Relationship", "Action", "Composition", "Eyes", "Hair", "Background", "Lighting", "Style", "Quality"]);
+const DEFINITIONS = PROMPT_CATEGORIES.map((definition) => ({ ...definition, multiple: MULTIPLE_CATEGORIES.has(definition.category) }));
+
+function MultiOptionPicker({ definition, options, value, onChange, onEditOptions, onOpen, loading }) {
   const rootRef = useRef(null);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -37,18 +41,18 @@ function MultiOptionPicker({ definition, options, value, onChange, onEditOptions
         {selected.map((option) => <button type="button" key={option.id} title={option.positivePrompt} onClick={() => onChange(value.filter((id) => id !== option.id))}>{option.name}<X /></button>)}
       </div>}
     </div>
-    <UiSearchField className={`prompt-option-search ${open ? "is-open" : ""}`} aria-label={`搜索${definition.label}`} value={query} onFocus={() => setOpen(true)} onChange={(event) => { setQuery(event.target.value); setOpen(true); }} onKeyDown={(event) => event.key === "Escape" && setOpen(false)} placeholder={`搜索中文或英文 ${definition.label}`} />
+    <UiSearchField className={`prompt-option-search ${open ? "is-open" : ""}`} aria-label={`搜索${definition.label}`} value={query} onFocus={() => { setOpen(true); onOpen(); }} onChange={(event) => { setQuery(event.target.value); setOpen(true); onOpen(); }} onKeyDown={(event) => event.key === "Escape" && setOpen(false)} placeholder={`搜索中文或英文 ${definition.label}`} />
     {open && <div className="prompt-option-results">
-      <header><span>{keyword ? `找到 ${available.length} 项` : "常用词条"}</span><button type="button" onClick={() => setOpen(false)}>收起</button></header>
+      <header><span>{loading ? "正在加载词条…" : keyword ? `找到 ${available.length} 项` : "常用词条"}</span><button type="button" onClick={() => setOpen(false)}>收起</button></header>
       {available.map((option) => <button type="button" key={option.id} onClick={() => { onChange([...value, option.id]); setQuery(""); }}><span><strong>{option.name}</strong><small> · {option.positivePrompt}</small></span><Plus /></button>)}
-      {!available.length && <span>没有匹配词条，请换中文或英文关键词</span>}
+      {!loading && !available.length && <span>没有匹配词条，请换中文或英文关键词</span>}
     </div>}
     <button type="button" className="prompt-option-manage" onClick={() => onEditOptions(definition.category)}><Plus />编辑词条</button>
   </div>;
 }
 
-function SingleOptionPicker({ definition, options, value, onChange, onEditOptions }) {
-  return <div className="prompt-option-field"><span>{definition.label}<small>单选</small></span><select aria-label={definition.label} value={value[0] || ""} onChange={(event) => onChange(event.target.value ? [event.target.value] : [])}>
+function SingleOptionPicker({ definition, options, value, onChange, onEditOptions, onOpen, loading }) {
+  return <div className="prompt-option-field"><span>{definition.label}<small>{loading ? "加载中" : "单选"}</small></span><select aria-label={definition.label} value={value[0] || ""} onFocus={onOpen} onChange={(event) => onChange(event.target.value ? [event.target.value] : [])}>
     <option value="">不选择</option>
     {options.map((option) => <option key={option.id} value={option.id}>{option.name} · {option.positivePrompt}</option>)}
   </select><button type="button" className="prompt-option-manage" onClick={() => onEditOptions(definition.category)}><Plus />编辑词条</button></div>;
@@ -62,40 +66,89 @@ export default function PromptManager({ onEditOptions }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [globalOptionQuery, setGlobalOptionQuery] = useState("");
-  const definitions = useMemo(() => buildPromptCategories(catalog.options), [catalog.options]);
+  const [globalOptionResults, setGlobalOptionResults] = useState([]);
+  const [categoryLoading, setCategoryLoading] = useState({});
+  const requestControllers = useRef(new Set());
+  const loadedCategories = useRef(new Set());
+  const categoryLoads = useRef(new Map());
+  const latestGlobalSearch = useRef(0);
   const filtered = useMemo(() => items.filter((item) => item.name.toLowerCase().includes(query.trim().toLowerCase())), [items, query]);
-  const optionsByCategory = useMemo(() => Object.fromEntries(definitions.map(({ category }) => [category, catalog.options.filter((option) => option.category === category)])), [catalog.options, definitions]);
-  const globalOptionResults = useMemo(() => {
-    const keyword = globalOptionQuery.trim().toLocaleLowerCase("zh-CN");
-    if (!keyword) return [];
-    return catalog.options.filter((option) => [option.name, option.positivePrompt, option.negativePrompt, option.id].filter(Boolean).join(" ").toLocaleLowerCase("zh-CN").includes(keyword)).slice(0, 50);
-  }, [catalog.options, globalOptionQuery]);
+  const optionsByCategory = useMemo(() => Object.fromEntries(DEFINITIONS.map(({ category }) => [category, catalog.options.filter((option) => option.category === category && option.type !== "negative")])), [catalog.options]);
 
-  const select = (item) => setDraft(normalizePreset(item, definitions));
-  const load = async (preferredId) => {
-    const next = await request("/api/comfy-presets");
+  const call = useCallback(async (path, options = {}) => {
+    const controller = new AbortController();
+    requestControllers.current.add(controller);
+    try { return await request(path, { ...options, signal: controller.signal }); }
+    finally { requestControllers.current.delete(controller); }
+  }, []);
+  const mergeOptions = useCallback((next = []) => setCatalog((current) => {
+    const byId = new Map(current.options.map((option) => [option.id, option]));
+    next.forEach((option) => byId.set(option.id, option));
+    return { ...current, options: [...byId.values()] };
+  }), []);
+  const resolveSelections = useCallback(async (item) => {
+    const ids = [...new Set(Object.values(item?.selectedOptions || {}).flat())];
+    if (!ids.length) return;
+    mergeOptions(await call("/api/prompt-options/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(ids) }));
+  }, [call, mergeOptions]);
+  const select = useCallback((item) => {
+    setDraft(normalizePreset(item, DEFINITIONS));
+    resolveSelections(item).catch((exception) => { if (exception.name !== "AbortError") setError(exception.message); });
+  }, [resolveSelections]);
+  const load = useCallback(async (preferredId) => {
+    const next = await call("/api/comfy-presets");
     setItems(next || []);
     const queryId = new URLSearchParams(window.location.search).get("edit");
     const selected = next?.find((item) => String(item.id) === String(preferredId ?? queryId)) || next?.find((item) => item.isDefault) || next?.[0];
-    if (selected) select(selected); else setDraft(emptyDraft(definitions));
-  };
+    if (selected) select(selected); else setDraft(emptyDraft(DEFINITIONS));
+  }, [call, select]);
+  const loadCategory = useCallback((category) => {
+    if (loadedCategories.current.has(category)) return Promise.resolve();
+    if (categoryLoads.current.has(category)) return categoryLoads.current.get(category);
+    const task = (async () => {
+      setCategoryLoading((current) => ({ ...current, [category]: true }));
+      const found = [];
+      let page = 1; let pages = 1;
+      do {
+        const params = new URLSearchParams({ category, status: "enabled", page: String(page), pageSize: String(OPTION_PAGE_SIZE) });
+        const result = await call(`/api/prompt-options?${params}`);
+        found.push(...(result?.items || [])); pages = result?.pages || 0; page += 1;
+      } while (page <= pages);
+      mergeOptions(found); loadedCategories.current.add(category);
+    })().finally(() => {
+      categoryLoads.current.delete(category);
+      setCategoryLoading((current) => ({ ...current, [category]: false }));
+    });
+    categoryLoads.current.set(category, task); return task;
+  }, [call, mergeOptions]);
+
   useEffect(() => {
-    Promise.all([request("/api/prompt-catalog"), request("/api/comfy-presets")]).then(([nextCatalog, nextItems]) => {
-      const nextDefinitions = buildPromptCategories(nextCatalog?.options || []);
-      const next = nextItems || [];
-      const queryId = new URLSearchParams(window.location.search).get("edit");
-      const selected = next.find((item) => String(item.id) === String(queryId)) || next.find((item) => item.isDefault) || next[0];
-      setCatalog(nextCatalog); setItems(next);
-      setDraft(selected ? normalizePreset(selected, nextDefinitions) : emptyDraft(nextDefinitions));
-    }).catch((exception) => setError(exception.message));
-  }, []);
+    const controllers = requestControllers.current;
+    call("/api/prompt-options/config").then((config) => setCatalog((current) => ({ ...current, generalNegativePrompt: config?.generalNegativePrompt || "" }))).catch((exception) => { if (exception.name !== "AbortError") setError(exception.message); });
+    load().catch((exception) => { if (exception.name !== "AbortError") setError(exception.message); });
+    return () => { controllers.forEach((controller) => controller.abort()); controllers.clear(); };
+  }, [call, load]);
+  useEffect(() => {
+    const keyword = globalOptionQuery.trim();
+    const searchId = ++latestGlobalSearch.current;
+    if (!keyword) { setGlobalOptionResults([]); return undefined; }
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({ query: keyword, status: "enabled", page: "1", pageSize: "100" });
+      call(`/api/prompt-options?${params}`).then((result) => {
+        if (searchId !== latestGlobalSearch.current) return;
+        const found = (result?.items || []).filter((option) => option.type !== "negative").slice(0, 50);
+        mergeOptions(found); setGlobalOptionResults(found);
+      }).catch((exception) => { if (exception.name !== "AbortError" && searchId === latestGlobalSearch.current) setError(exception.message); });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [call, globalOptionQuery, mergeOptions]);
 
   const setRoot = (key, value) => setDraft((current) => ({ ...current, [key]: value }));
   const setFinalPositivePrompt = (value) => setDraft((current) => ({ ...current, positivePrompt: value, positiveExtra: extractPositiveExtra(value, current.selectedOptions, catalog.options), negativePrompt: normalizePrompt(current.negativePrompt, ...relatedNegativePromptsForPositive(value, catalog.options)) }));
   const setFinalNegativePrompt = (value) => setDraft((current) => ({ ...current, negativePrompt: value, negativeExtra: extractNegativeExtra(value, current.selectedOptions, catalog.options, catalog.generalNegativePrompt) }));
   const regenerate = (current, patch) => {
     const next = { ...current, ...patch };
-    return { ...next, ...composePrompts(next.selectedOptions, catalog.options, catalog.generalNegativePrompt, next.positiveExtra, next.negativeExtra, definitions) };
+    return { ...next, ...composePrompts(next.selectedOptions, catalog.options, catalog.generalNegativePrompt, next.positiveExtra, next.negativeExtra, DEFINITIONS) };
   };
   const setSelection = (key, value) => setDraft((current) => regenerate(current, { selectedOptions: { ...current.selectedOptions, [key]: value } }));
   const setExtra = (key, value) => setDraft((current) => regenerate(current, { [key]: value }));
@@ -110,9 +163,9 @@ export default function PromptManager({ onEditOptions }) {
     setBusy(true); setError("");
     try {
       let preferredId = draft.id;
-      if (draft.id) await request(`/api/comfy-presets/${draft.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload()) });
+      if (draft.id) await call(`/api/comfy-presets/${draft.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload()) });
       else {
-        const created = await request("/api/comfy-presets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload()) });
+        const created = await call("/api/comfy-presets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload()) });
         preferredId = created.id;
       }
       await load(preferredId);
@@ -121,16 +174,16 @@ export default function PromptManager({ onEditOptions }) {
   const remove = async () => {
     if (!draft.id || !window.confirm(`删除 Prompt 方案“${draft.name}”？`)) return;
     setBusy(true);
-    try { await request(`/api/comfy-presets/${draft.id}`, { method: "DELETE" }); await load(); }
+    try { await call(`/api/comfy-presets/${draft.id}`, { method: "DELETE" }); await load(); }
     catch (exception) { setError(exception.message); } finally { setBusy(false); }
   };
   const toggleDefault = async (item) => {
     setBusy(true); setError("");
-    try { await request(`/api/comfy-presets/${item.id}/default`, { method: item.isDefault ? "DELETE" : "POST" }); await load(item.id); }
+    try { await call(`/api/comfy-presets/${item.id}/default`, { method: item.isDefault ? "DELETE" : "POST" }); await load(item.id); }
     catch (exception) { setError(exception.message); } finally { setBusy(false); }
   };
-  const createNew = () => setDraft(emptyDraft(definitions));
-  const duplicate = () => setDraft({ ...draft, id: null, name: `${draft.name || "未命名方案"} - 副本`, isDefault: false, selectedOptions: normalizeSelectedOptions(draft.selectedOptions, definitions) });
+  const createNew = () => setDraft(emptyDraft(DEFINITIONS));
+  const duplicate = () => setDraft({ ...draft, id: null, name: `${draft.name || "未命名方案"} - 副本`, isDefault: false, selectedOptions: normalizeSelectedOptions(draft.selectedOptions, DEFINITIONS) });
 
   return <div className="prompt-manager">
     {error && <div className="prompt-manager-error"><Warning />{error}<button onClick={() => setError("")}>×</button></div>}
@@ -160,9 +213,9 @@ export default function PromptManager({ onEditOptions }) {
         </section>
         <section className="prompt-composer">
           <header><div><h3>Prompt 组合器</h3><small>词条来自数据库配置；修改选择后自动重建最终 Prompt</small></div><span>{Object.values(draft.selectedOptions).flat().length} 项</span></header>
-          <UiSearchField className="prompt-option-search prompt-global-search" aria-label="全局搜索 Prompt 词条" value={globalOptionQuery} onChange={(event) => setGlobalOptionQuery(event.target.value)} placeholder="搜索中文、英文或词条 ID"><div className="prompt-global-search-results">{globalOptionQuery.trim() && globalOptionResults.map((option) => { const definition = definitions.find((item) => item.category === option.category); const selected = draft.selectedOptions?.[option.category]?.includes(option.id); return <button type="button" key={option.id} className={selected ? "is-selected" : ""} onClick={() => { const current = draft.selectedOptions?.[option.category] || []; const next = definition?.multiple ? (current.includes(option.id) ? current : [...current, option.id]) : [option.id]; setSelection(option.category, next); setGlobalOptionQuery(""); window.setTimeout(() => document.querySelector(`[data-prompt-category="${CSS.escape(option.category)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 0); }}><span><strong>{option.name}</strong><small>{definition?.label || option.category} · {option.positivePrompt}</small></span>{selected && <span>已选</span>}</button>})}{globalOptionQuery.trim() && !globalOptionResults.length && <p>没有匹配词条</p>}</div></UiSearchField>
-          <div className="prompt-category-grid">{definitions.map((definition) => {
-            const props = { definition, options: optionsByCategory[definition.category] || [], value: draft.selectedOptions[definition.key], onChange: (value) => setSelection(definition.key, value), onEditOptions };
+          <UiSearchField className="prompt-option-search prompt-global-search" aria-label="全局搜索 Prompt 词条" value={globalOptionQuery} onChange={(event) => setGlobalOptionQuery(event.target.value)} placeholder="搜索中文、英文或词条 ID"><div className="prompt-global-search-results">{globalOptionQuery.trim() && globalOptionResults.map((option) => { const definition = DEFINITIONS.find((item) => item.category === option.category); const selected = draft.selectedOptions?.[option.category]?.includes(option.id); return <button type="button" key={option.id} className={selected ? "is-selected" : ""} onClick={() => { const current = draft.selectedOptions?.[option.category] || []; const next = definition?.multiple ? (current.includes(option.id) ? current : [...current, option.id]) : [option.id]; setSelection(option.category, next); setGlobalOptionQuery(""); window.setTimeout(() => document.querySelector(`[data-prompt-category="${CSS.escape(option.category)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 0); }}><span><strong>{option.name}</strong><small>{definition?.label || option.category} · {option.positivePrompt}</small></span>{selected && <span>已选</span>}</button>})}{globalOptionQuery.trim() && !globalOptionResults.length && <p>没有匹配词条</p>}</div></UiSearchField>
+          <div className="prompt-category-grid">{DEFINITIONS.map((definition) => {
+            const props = { definition, options: optionsByCategory[definition.category] || [], value: draft.selectedOptions[definition.key], onChange: (value) => setSelection(definition.key, value), onEditOptions, onOpen: () => loadCategory(definition.category).catch((exception) => { if (exception.name !== "AbortError") setError(exception.message); }), loading: Boolean(categoryLoading[definition.category]) };
             return definition.multiple ? <div key={definition.key} data-prompt-category={definition.category}><MultiOptionPicker {...props} /></div> : <div key={definition.key} data-prompt-category={definition.category}><SingleOptionPicker {...props} /></div>;
           })}</div>
         </section>

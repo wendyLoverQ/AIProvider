@@ -136,6 +136,7 @@ describe("Comfy image generation flow", () => {
         assetRequests += 1;
         return json({ code: 200, data: { page: 1, pages: 1, total: 1, items: [{ id: 12, platform: "Windows", localPath: "C:\\assets\\saved.png", localUrl: "http://127.0.0.1:32145/api/assets/file?path=saved.png", fileName: "saved.png", fileSize: 8 }] } });
       }
+      if (url.startsWith("/api/gallery-recycle-bin?")) return json({ code: 200, data: { page: 1, pages: 1, total: 1, items: [{ source: "asset", recordId: 12, assetId: 12, platform: "Windows", localPath: "C:\\assets\\saved.png", localUrl: "http://127.0.0.1:32145/api/assets/file?path=saved.png", fileName: "saved.png", fileSize: 8, status: "TRASHED", trashOriginalStatus: "ACTIVE" }] } });
       if (url.startsWith("/api/assets/prompt-pool?")) return json({ code: 200, data: [{ prompt: "black pantyhose, soft lighting, bedroom", negativePrompt: "watermark, extra fingers", weight: 5 }] });
       if (url.endsWith("/api/twitter/accounts")) return json({ code: 200, data: [{ id: 2, username: "tester", sessionStatus: "CONNECTED" }] });
       if (url.endsWith("/api/twitter/posts/local-scheduled") && options.method === "POST") {
@@ -167,12 +168,12 @@ describe("Comfy image generation flow", () => {
         deletedPaths.push(...JSON.parse(options.body).paths);
         return json({ success: true, deleted: deletedPaths.length });
       }
-      if (url.endsWith("/api/gallery/trash") && options.method === "POST") {
+      if (url.endsWith("/api/local-generated-images/trash") && options.method === "POST") {
         deletedPaths.push(...JSON.parse(options.body).paths);
-        return json({ success: true, trashed: deletedPaths.length });
+        return json({ code: 200, data: { trashed: deletedPaths.length } });
       }
-      if (url.includes("/api/gallery/trash?")) return json({ success: true, total: 0, items: [] });
-      if (url.endsWith("/api/gallery/restore") && options.method === "POST") return json({ success: true, restored: 1 });
+      if (url.endsWith("/api/local-generated-images/restore") && options.method === "POST") return json({ code: 200, data: { restored: 1 } });
+      if (url.endsWith("/api/local-generated-images/delete") && options.method === "POST") return json({ code: 200, data: { deleted: 1 } });
       if (["/api/assets/trash", "/api/assets/restore", "/api/assets/delete"].some((path) => url.endsWith(path)) && options.method === "POST") return json({ code: 200, data: { updated: 1 } });
       if (url.endsWith("/api/assets/status") && options.method === "PUT") return json({ code: 200, data: { updated: 1 } });
       if (url.endsWith("/comfy/queue")) {
@@ -182,7 +183,7 @@ describe("Comfy image generation flow", () => {
         return json({ queue_running: [], queue_pending: [] });
       }
       if (url.endsWith("/api/logs/client") && options.method === "POST") return json({ success: true });
-      if (url.endsWith("/api/gallery/complete") && options.method === "POST") return json({ success: true });
+      if (url.includes("/api/comfy-tasks/") && url.endsWith("/complete") && options.method === "POST") return json({ code: 200, data: { completed: true } });
       if (url.endsWith("/api/local-generated-images/batch") && options.method === "POST") return json({ code: 200, data: { saved: 1 } });
       if (url.endsWith("/comfy/aiprovider/progress") && progressFails) return json({ message: "progress extension unavailable" }, 404);
       if (url.endsWith("/comfy/aiprovider/progress")) return externalRun
@@ -199,7 +200,7 @@ describe("Comfy image generation flow", () => {
         registeredAssetStatus = item.status;
         return json({ code: 200, data: { saved: 1, items: [{ id: 13, platform: "Windows", ...item }] } });
       }
-      if (url.includes("/api/gallery?")) {
+      if (url.includes("/api/local-generated-images?")) {
         galleryRequests += 1;
         galleryRequestUrls.push(url);
         const items = multiImageGallery ? [{
@@ -220,7 +221,12 @@ describe("Comfy image generation flow", () => {
         }] : [];
         const page = Number(url.match(/[?&]page=(\d+)/)?.[1] || 1);
         const currentImages = items.reduce((sum, item) => sum + item.images.length, 0);
-        return json({ items, page, pages: localGalleryPages, total: currentImages + (localGalleryPages - 1) * 100 });
+        const records = items.flatMap((item) => item.images.map((image, index) => ({
+          id: `${item.id}-${index}`, platform: "Windows", promptId: item.promptId || item.id,
+          imagePath: image.path, fileName: image.filename, prompt: item.prompt, taskCreatedAt: item.createdAt,
+          status: "ACTIVE",
+        })));
+        return json({ code: 200, data: { items: records, page, pages: localGalleryPages, total: currentImages + (localGalleryPages - 1) * 100 } });
       }
       if (url.includes("/api/gallery/file?")) return new Response(new Blob(["image"], { type: "image/png" }), { headers: { "Content-Type": "image/png" } });
       if (url.includes("/api/assets/file?")) return new Response(new Blob(["image"], { type: "image/png" }), { headers: { "Content-Type": "image/png" } });
@@ -369,7 +375,7 @@ describe("Comfy image generation flow", () => {
     expect(galleryRequests).toBe(requestsBeforeSwitch);
   });
 
-  it("loads each gallery once and reuses its image addresses when switching tabs", async () => {
+  it("refreshes a gallery queue when revisiting it and reuses existing image addresses", async () => {
     submitted = true;
     render(<ComfyLocalWorkbench />);
     await screen.findByAltText("历史生成结果");
@@ -384,9 +390,12 @@ describe("Comfy image generation flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "我的资产" }));
     await waitFor(() => expect(screen.getByAltText("历史生成结果")).toBeTruthy());
 
-    expect(galleryRequests).toBe(1);
-    expect(assetRequests).toBe(1);
-    expect(galleryRequestUrls).toEqual(["http://127.0.0.1:32145/api/gallery?page=1&pageSize=100"]);
+    expect(galleryRequests).toBe(2);
+    expect(assetRequests).toBe(2);
+    expect(galleryRequestUrls).toEqual([
+      "/api/local-generated-images?platform=Windows&page=1&pageSize=100&status=ACTIVE",
+      "/api/local-generated-images?platform=Windows&page=1&pageSize=100&status=ACTIVE",
+    ]);
     expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
   });
 
@@ -425,8 +434,8 @@ describe("Comfy image generation flow", () => {
     await waitFor(() => expect(galleryRequests).toBe(2));
     expect(screen.getByText("第 2 / 2 页 · 每页 100 张")).toBeTruthy();
     expect(galleryRequestUrls).toEqual([
-      "http://127.0.0.1:32145/api/gallery?page=1&pageSize=100",
-      "http://127.0.0.1:32145/api/gallery?page=2&pageSize=100",
+      "/api/local-generated-images?platform=Windows&page=1&pageSize=100&status=ACTIVE",
+      "/api/local-generated-images?platform=Windows&page=2&pageSize=100&status=ACTIVE",
     ]);
   });
 
@@ -528,7 +537,7 @@ describe("Comfy image generation flow", () => {
     expect(recentHistoryRequests.length).toBeGreaterThanOrEqual(2);
     expect(incrementalImageRequests).toHaveLength(1);
     expect(galleryRequests).toBe(1);
-    expect(galleryRequestUrls).toEqual(["http://127.0.0.1:32145/api/gallery?page=1&pageSize=100"]);
+    expect(galleryRequestUrls).toEqual(["/api/local-generated-images?platform=Windows&page=1&pageSize=100&status=ACTIVE"]);
     expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
     expect(screen.getByText("2 张")).toBeTruthy();
     const tiles = Array.from(document.querySelectorAll(".local-image-tile"));

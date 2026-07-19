@@ -15,7 +15,7 @@ public interface AssetMapper {
     @Select("<script>SELECT Id id,Platform platform,LocalPath localPath,LocalUrl localUrl,FileName fileName,FileSize fileSize,Width width,Height height,AssetType assetType,Status status,TrashOriginalStatus trashOriginalStatus,MimeType mimeType,Prompt prompt,NegativePrompt negativePrompt,MainModel mainModel,LorasJson lorasJson,Seed seed,Steps steps,Cfg cfg,Sampler sampler,Scheduler scheduler,WorkflowId workflowId,GeneratedAt generatedAt,GenerationCompletedAt generationCompletedAt,GenerationDurationMs generationDurationMs,CreatedAt createdAt " +
             "FROM c_GeneratedAssets WHERE Platform=#{platform} " +
             "<if test='status != null and status != \"\"'>AND Status=#{status} </if>" +
-            "ORDER BY COALESCE(GeneratedAt,CreatedAt) DESC,Id DESC LIMIT #{limit} OFFSET #{offset}</script>")
+            "ORDER BY UpdatedAt DESC,Id DESC LIMIT #{limit} OFFSET #{offset}</script>")
     List<Map<String,Object>> findPage(@Param("platform") String platform, @Param("status") String status, @Param("limit") int limit, @Param("offset") int offset);
 
     @Select("<script>SELECT Id id,Platform platform,LocalPath localPath,LocalUrl localUrl,FileName fileName,FileSize fileSize,Width width,Height height,AssetType assetType,Status status,TrashOriginalStatus trashOriginalStatus,MimeType mimeType,Prompt prompt,NegativePrompt negativePrompt,MainModel mainModel,LorasJson lorasJson,Seed seed,Steps steps,Cfg cfg,Sampler sampler,Scheduler scheduler,WorkflowId workflowId,GeneratedAt generatedAt,GenerationCompletedAt generationCompletedAt,GenerationDurationMs generationDurationMs,CreatedAt createdAt " +

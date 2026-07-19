@@ -46,6 +46,27 @@ public class PromptOptionService {
         return new PromptOptionPageVO(result, repository.countOptions(normalizedQuery, normalizedCategory, enabled), page, pageSize);
     }
 
+    public List<PromptOptionVO> resolve(List<String> ids) {
+        if (ids == null || ids.isEmpty()) return Collections.emptyList();
+        if (ids.size() > 500) throw new IllegalArgumentException("一次最多解析 500 个词条");
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        for (String id : ids) { validateId(id); normalized.add(id); }
+        Map<String, PromptOptionVO> byId = new HashMap<>();
+        for (Map<String, Object> row : repository.findOptionsByIds(new ArrayList<>(normalized))) {
+            PromptOptionVO option = toVO(row); byId.put(option.getId(), option);
+        }
+        List<PromptOptionVO> result = new ArrayList<>();
+        for (String id : normalized) if (byId.containsKey(id)) result.add(byId.get(id));
+        return result;
+    }
+
+    public Map<String, String> config() {
+        String generalNegativePrompt = repository.findGeneralNegativePrompt();
+        if (generalNegativePrompt == null || generalNegativePrompt.trim().isEmpty())
+            throw new IllegalStateException("通用反向模板未配置或未启用");
+        return Collections.singletonMap("generalNegativePrompt", generalNegativePrompt.trim());
+    }
+
     @Transactional
     public void create(PromptOptionDTO dto) {
         PromptCatalogMapper.OptionRecord record = validate(dto);
