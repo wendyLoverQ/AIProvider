@@ -88,6 +88,9 @@ describe("Comfy image generation flow", () => {
   let bridgeRequests;
   let registeredAssetStatus;
   let transferredFileName;
+  let favoriteUpload;
+  let maidAiCopyPaths;
+  let maidAiSavedDirectory;
 
   beforeEach(() => {
     submitted = false;
@@ -119,6 +122,9 @@ describe("Comfy image generation flow", () => {
     bridgeRequests = [];
     registeredAssetStatus = null;
     transferredFileName = null;
+    favoriteUpload = null;
+    maidAiCopyPaths = null;
+    maidAiSavedDirectory = null;
     vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
     vi.stubGlobal("confirm", vi.fn(() => true));
     vi.stubGlobal("ClipboardItem", class { constructor(items) { this.items = items; } });
@@ -146,6 +152,14 @@ describe("Comfy image generation flow", () => {
       if (url === "blob:done") return new Response(new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], { type: "image/png" }), { headers: { "Content-Type": "image/png" } });
       if (url.endsWith("/api/folders")) return json({ folders: ["aimaid", "favorites"] });
       if (url.endsWith("/api/migration/settings")) return json({ directory: "C:\\Users\\49213\\Desktop\\A\\ai成品" });
+      if (url.endsWith("/api/maid-ai/settings")) {
+        if (options.method === "POST") maidAiSavedDirectory = JSON.parse(options.body).directory;
+        return json({ success: true, directory: maidAiSavedDirectory || "C:\\Users\\49213\\Desktop\\A\\codex\\AI_maid\\Assets\\image_tiles\\动漫扶她" });
+      }
+      if (url.endsWith("/api/maid-ai/copy") && options.method === "POST") {
+        maidAiCopyPaths = JSON.parse(options.body).paths;
+        return json({ success: true, copied: maidAiCopyPaths.length, existing: 0 });
+      }
       if (url.includes("/api/tasks/") && url.endsWith("/state")) {
         const promptId = decodeURIComponent(url.split("/api/tasks/")[1].replace("/state", ""));
         if (promptId === PROMPT_ID) return json({ success: true, state: submitted ? "SUCCEEDED" : "QUEUED", tracked: true });
@@ -155,6 +169,10 @@ describe("Comfy image generation flow", () => {
       if (url.endsWith("/api/file-transfer/upload") && options.method === "POST") {
         transferredFileName = options.body.get("file").name;
         return json({ code: 200, data: { fileName: transferredFileName } });
+      }
+      if (url === "/api/favorites" && options.method === "POST") {
+        favoriteUpload = options.body;
+        return json({ code: 200, data: { id: 91, title: "saved", contentUrl: "/api/favorites/91/content" } });
       }
       if (url.includes("/api/tasks/") && url.endsWith("/cancel") && options.method === "POST") {
         cancelledTask = decodeURIComponent(url.split("/api/tasks/")[1].replace("/cancel", ""));
@@ -696,6 +714,48 @@ describe("Comfy image generation flow", () => {
     await waitFor(() => expect(transferredFileName).toBe("saved.png"));
     expect(screen.getByText("已转到文件中转站：saved.png")).toBeTruthy();
   }, 15000);
+
+  it("uploads selected registered assets to the server-backed My Favorites library", async () => {
+    render(<ComfyLocalWorkbench />);
+    fireEvent.click(await screen.findByRole("button", { name: "我的资产" }));
+    const image = await screen.findByAltText("历史生成结果");
+    fireEvent.click(screen.getByRole("button", { name: "选择" }));
+    fireEvent.click(image.closest("button"));
+    fireEvent.click(screen.getByRole("button", { name: /转到我的最爱 1/ }));
+    await waitFor(() => expect(favoriteUpload).toBeInstanceOf(FormData));
+    expect(favoriteUpload.get("assetId")).toBe("12");
+    expect(favoriteUpload.get("file").name).toBe("saved.png");
+    expect(screen.getByText("已将 1 张资产原图上传到服务器“我的最爱”")).toBeTruthy();
+  }, 15000);
+
+  it("copies an asset to Maid AI from both the right-click menu and selection actions", async () => {
+    render(<ComfyLocalWorkbench />);
+    fireEvent.click(await screen.findByRole("button", { name: "我的资产" }));
+    const image = await screen.findByAltText("历史生成结果");
+
+    fireEvent.contextMenu(image.closest("button"));
+    fireEvent.click(screen.getByRole("button", { name: "迁移到女仆AI" }));
+    await waitFor(() => expect(maidAiCopyPaths).toEqual(["C:\\assets\\saved.png"]));
+    expect(screen.getByText("已迁移到女仆AI：1 张")).toBeTruthy();
+    expect(screen.getByAltText("历史生成结果")).toBeTruthy();
+
+    maidAiCopyPaths = null;
+    fireEvent.click(screen.getByRole("button", { name: "选择" }));
+    fireEvent.click(image.closest("button"));
+    fireEvent.click(screen.getByRole("button", { name: /迁移到女仆AI 1/ }));
+    await waitFor(() => expect(maidAiCopyPaths).toEqual(["C:\\assets\\saved.png"]));
+    expect(screen.getByAltText("历史生成结果")).toBeTruthy();
+  });
+
+  it("loads and saves the Maid AI image directory in system settings", async () => {
+    render(<ComfyLocalWorkbench mode="settings" />);
+    const field = await screen.findByRole("textbox", { name: "女仆AI 图片文件夹路径" });
+    expect(field.value).toBe("C:\\Users\\49213\\Desktop\\A\\codex\\AI_maid\\Assets\\image_tiles\\动漫扶她");
+    fireEvent.change(field, { target: { value: "D:\\MaidAI\\tiles" } });
+    fireEvent.click(within(field.closest(".local-inline")).getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(maidAiSavedDirectory).toBe("D:\\MaidAI\\tiles"));
+    expect(screen.getByText("女仆AI 图片目录已保存：D:\\MaidAI\\tiles")).toBeTruthy();
+  });
 
   it("asks Bridge to cancel every active generation from one native button", async () => {
     render(<ComfyLocalWorkbench />);

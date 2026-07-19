@@ -52,6 +52,13 @@ bridgeDescribe("ComfyUIAgent bridge contract", () => {
     expect(status.platform).toMatch(/Windows|Linux|macOS/);
   });
 
+  it("enumerates Windows monitors for targeted wallpaper application", async () => {
+    const result = await bridgeJson("/api/wallpaper/monitors");
+    expect(result.success).toBe(true);
+    expect(result.monitors.length).toBeGreaterThan(0);
+    expect(result.monitors.every((monitor) => monitor.id && monitor.width > 0 && monitor.height > 0)).toBe(true);
+  });
+
   it("does not expose a Bridge-owned gallery pagination queue", async () => {
     const response = await bridgeFetch("/api/gallery?page=1&pageSize=100");
     expect(response.status).toBe(404);

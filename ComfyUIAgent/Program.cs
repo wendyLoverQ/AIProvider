@@ -18,6 +18,7 @@ var settings = builder.Configuration.Get<BridgeSettings>() ?? throw new InvalidO
 settings.Validate();
 builder.Services.AddSingleton(settings);
 builder.Services.AddSingleton<TwitterLocalPublisher>();
+builder.Services.AddSingleton<WallpaperService>();
 builder.Services.AddHttpClient("comfy", client => {
     client.BaseAddress = new Uri(settings.ComfyUiBaseUrl.TrimEnd('/') + "/");
     client.Timeout = TimeSpan.FromMinutes(15);
@@ -27,6 +28,7 @@ Process? comfyProcess = null;
 var bridgeInstanceId = Guid.NewGuid().ToString("N");
 var bridgeExitMode = 0; // 0 = keep running, 1 = stop, 2 = restart
 var agentLogLock = new SemaphoreSlim(1, 1);
+var bridgeUserSettingsLock = new SemaphoreSlim(1, 1);
 var generationQueueLock = new SemaphoreSlim(1, 1);
 var generationQueueSignal = new SemaphoreSlim(0);
 var generationQueue = ReadBridgeGenerationQueue();
@@ -74,6 +76,7 @@ app.Use(async (context, next) => {
                         context.Request.Path.StartsWithSegments("/api/tasks") ||
                         context.Request.Path.StartsWithSegments("/api/gallery") ||
                         context.Request.Path.StartsWithSegments("/api/assets") ||
+                        context.Request.Path.StartsWithSegments("/api/maid-ai") ||
                         context.Request.Path.StartsWithSegments("/api/migration") ||
                         context.Request.Path.StartsWithSegments("/api/folders") ||
                         context.Request.Path.StartsWithSegments("/api/generate") ||
@@ -82,6 +85,7 @@ app.Use(async (context, next) => {
                         context.Request.Path.StartsWithSegments("/api/local-workflows") ||
                         context.Request.Path.StartsWithSegments("/api/logs") ||
                         context.Request.Path.StartsWithSegments("/api/twitter") ||
+                        context.Request.Path.StartsWithSegments("/api/wallpaper") ||
                         context.Request.Path.StartsWithSegments("/api/workflows");
     if (protectedPath && !CryptographicOperations.FixedTimeEquals(
             System.Text.Encoding.UTF8.GetBytes(settings.LocalToken),
@@ -100,6 +104,17 @@ app.MapGet("/api/config", () => Results.Ok(new {
     configured = settings.IsPlatformConfigured,
     expectedComfyDirectory = settings.ExpectedComfyDirectory
 }));
+app.MapGet("/api/wallpaper/monitors", (WallpaperService wallpaper) =>
+    Results.Ok(new { success = true, monitors = wallpaper.Monitors() }));
+app.MapPost("/api/wallpaper/apply", async (HttpRequest request, WallpaperService wallpaper) => {
+    if (!request.HasFormContentType) return Results.BadRequest(new { success = false, message = "壁纸请求必须使用表单上传" });
+    var form = await request.ReadFormAsync();
+    var file = form.Files.GetFile("file");
+    var monitorId = form["monitorId"].ToString();
+    if (file == null) return Results.BadRequest(new { success = false, message = "缺少壁纸文件" });
+    await wallpaper.ApplyAsync(file, monitorId);
+    return Results.Ok(new { success = true, monitorId });
+}).DisableAntiforgery();
 app.MapPost("/api/logs/client", async (ClientLogRequest request) => {
     await AppendAgentLog("error", $"frontend.{request.Scope}", request.Message, new { request.PromptId, request.Path, request.Details });
     return Results.Ok(new { success = true });
@@ -630,14 +645,44 @@ app.MapPost("/api/assets/move", (GalleryPathsRequest request) => {
     return Results.Ok(new { success = true, platform = settings.PlatformName, assets });
 }).DisableAntiforgery();
 
+app.MapGet("/api/maid-ai/settings", () => Results.Ok(new { success = true, directory = GetMaidAiDirectory() }));
+app.MapPost("/api/maid-ai/settings", async (MaidAiSettingsRequest request) => {
+    var directory = (request.Directory ?? "").Trim();
+    if (!Path.IsPathFullyQualified(directory)) return Results.BadRequest(new { success = false, message = "女仆AI 图片目录必须是完整路径" });
+    directory = Path.GetFullPath(directory);
+    Directory.CreateDirectory(directory);
+    var saved = await UpdateBridgeUserSettings(userSettings => userSettings.MaidAiDirectory = directory);
+    return Results.Ok(new { success = true, directory = saved.MaidAiDirectory });
+}).DisableAntiforgery();
+app.MapPost("/api/maid-ai/copy", (GalleryPathsRequest request) => {
+    var paths = request.Paths.Select(path => (path ?? "").Trim()).Where(path => path.Length > 0).Distinct(PathComparer()).ToArray();
+    if (paths.Length == 0) return Results.BadRequest(new { success = false, message = "请选择要迁移到女仆AI的资产" });
+    var destination = Path.GetFullPath(GetMaidAiDirectory());
+    Directory.CreateDirectory(destination);
+    var copied = new List<string>();
+    var existing = new List<string>();
+    foreach (var path in paths) {
+        var source = ResolveAssetPath(path);
+        var sourceHash = FileSha256(source);
+        var target = ResolveMaidAiCopyTarget(source, sourceHash, destination, out var alreadyExists);
+        if (alreadyExists) {
+            existing.Add(target);
+            continue;
+        }
+        File.Copy(source, target, overwrite: false);
+        copied.Add(target);
+    }
+    return Results.Ok(new { success = true, directory = destination, copied = copied.Count, existing = existing.Count, files = copied.Concat(existing) });
+}).DisableAntiforgery();
+
 app.MapGet("/api/migration/settings", () => Results.Ok(new { success = true, directory = GetMigrationDirectory() }));
 app.MapPost("/api/migration/settings", async (MigrationSettingsRequest request) => {
     var directory = (request.Directory ?? "").Trim();
     if (!Path.IsPathFullyQualified(directory)) return Results.BadRequest(new { success = false, message = "迁移目录必须是完整路径" });
     directory = Path.GetFullPath(directory);
     Directory.CreateDirectory(directory);
-    await File.WriteAllTextAsync(MigrationSettingsPath(), JsonSerializer.Serialize(new { directory }, GalleryJsonOptions(writeIndented: true)));
-    return Results.Ok(new { success = true, directory });
+    var saved = await UpdateBridgeUserSettings(userSettings => userSettings.Directory = directory);
+    return Results.Ok(new { success = true, directory = saved.Directory });
 }).DisableAntiforgery();
 app.MapPost("/api/migration/folders", async (FolderRequest request) => {
     var name = (request.Name ?? "").Trim();
@@ -649,7 +694,7 @@ app.MapPost("/api/migration/folders", async (FolderRequest request) => {
     if (!directory.StartsWith(prefix, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
         return Results.BadRequest(new { success = false, message = "迁移文件夹路径不合法" });
     Directory.CreateDirectory(directory);
-    await File.WriteAllTextAsync(MigrationSettingsPath(), JsonSerializer.Serialize(new { directory }, GalleryJsonOptions(writeIndented: true)));
+    await UpdateBridgeUserSettings(userSettings => userSettings.Directory = directory);
     return Results.Ok(new { success = true, directory });
 }).DisableAntiforgery();
 
@@ -1453,14 +1498,34 @@ JsonObject BuildLocalWorkflow(string relative, DateTime modifiedAtUtc, JsonObjec
 
 string GalleryRoot() => Path.GetFullPath(settings.ActiveProfile.OutputDirectory);
 string MigrationSettingsPath() => Path.Combine(AppContext.BaseDirectory, "bridge-user-settings.json");
-string GetMigrationDirectory() {
+BridgeUserSettings ReadBridgeUserSettings() {
+    if (!File.Exists(MigrationSettingsPath())) return new BridgeUserSettings();
+    return JsonSerializer.Deserialize<BridgeUserSettings>(File.ReadAllText(MigrationSettingsPath()), GalleryJsonOptions())
+        ?? throw new InvalidOperationException("Bridge 用户配置文件内容无效");
+}
+async Task<BridgeUserSettings> UpdateBridgeUserSettings(Action<BridgeUserSettings> update) {
+    await bridgeUserSettingsLock.WaitAsync();
     try {
-        if (File.Exists(MigrationSettingsPath())) {
-            var saved = JsonNode.Parse(File.ReadAllText(MigrationSettingsPath()))?["directory"]?.GetValue<string>();
-            if (!string.IsNullOrWhiteSpace(saved) && Path.IsPathFullyQualified(saved)) return Path.GetFullPath(saved);
-        }
-    } catch { }
+        var userSettings = ReadBridgeUserSettings();
+        update(userSettings);
+        var path = MigrationSettingsPath();
+        var temporaryPath = path + ".tmp";
+        await File.WriteAllTextAsync(temporaryPath, JsonSerializer.Serialize(userSettings, GalleryJsonOptions(writeIndented: true)));
+        File.Move(temporaryPath, path, overwrite: true);
+        return userSettings;
+    } finally {
+        bridgeUserSettingsLock.Release();
+    }
+}
+string GetMigrationDirectory() {
+    var saved = ReadBridgeUserSettings().Directory;
+    if (!string.IsNullOrWhiteSpace(saved) && Path.IsPathFullyQualified(saved)) return Path.GetFullPath(saved);
     return Path.GetFullPath(settings.MigrationDirectory);
+}
+string GetMaidAiDirectory() {
+    var saved = ReadBridgeUserSettings().MaidAiDirectory;
+    if (!string.IsNullOrWhiteSpace(saved) && Path.IsPathFullyQualified(saved)) return Path.GetFullPath(saved);
+    return Path.GetFullPath(settings.MaidAiDirectory);
 }
 string NormalizeRelativePath(string? path) => (path ?? "").Replace('\\', '/').TrimStart('/');
 bool IsGalleryImage(string path) => new[] { ".png", ".jpg", ".jpeg", ".webp" }.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
@@ -1679,6 +1744,32 @@ string CompactLoraDisplayName(string modelName) {
     return string.IsNullOrWhiteSpace(name) ? "未命名 LoRA" : name;
 }
 
+string ResolveMaidAiCopyTarget(string source, string sourceHash, string destination, out bool alreadyExists) {
+    var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+    var extension = Path.GetExtension(source);
+    var stem = Path.GetFileNameWithoutExtension(source);
+    var candidates = new[] {
+        Path.Combine(destination, Path.GetFileName(source)),
+        Path.Combine(destination, $"{stem}_{sourceHash[..12].ToLowerInvariant()}{extension}"),
+        Path.Combine(destination, $"{stem}_{sourceHash.ToLowerInvariant()}{extension}")
+    };
+    foreach (var candidate in candidates) {
+        if (string.Equals(source, candidate, comparison)) {
+            alreadyExists = true;
+            return candidate;
+        }
+        if (!File.Exists(candidate)) {
+            alreadyExists = false;
+            return candidate;
+        }
+        if (string.Equals(FileSha256(candidate), sourceHash, StringComparison.OrdinalIgnoreCase)) {
+            alreadyExists = true;
+            return candidate;
+        }
+    }
+    throw new IOException($"女仆AI 目录中无法为 {Path.GetFileName(source)} 创建唯一文件名");
+}
+
 string CompactModelDisplayName(string modelName) {
     var normalized = modelName.Replace('\\', '/');
     var file = normalized.Split('/').Last();
@@ -1713,6 +1804,7 @@ sealed class BridgeSettings {
     public string WorkflowPath { get; set; } = "";
     public string OutputDirectory { get; set; } = "";
     public string MigrationDirectory { get; set; } = @"C:\Users\49213\Desktop\A\ai成品";
+    public string MaidAiDirectory { get; set; } = @"C:\Users\49213\Desktop\A\codex\AI_maid\Assets\image_tiles\动漫扶她";
     public PlatformProfile? Windows { get; set; }
     public PlatformProfile? MacOS { get; set; }
     public string LocalToken { get; set; } = "";
@@ -1754,6 +1846,8 @@ class GalleryPathsRequest { public string[] Paths { get; set; } = Array.Empty<st
 sealed class ClientLogRequest { public string Scope { get; set; } = "unknown"; public string Message { get; set; } = ""; public string? PromptId { get; set; } public string? Path { get; set; } public string? Details { get; set; } }
 sealed class GalleryMoveRequest : GalleryPathsRequest { public string? Folder { get; set; } }
 sealed class MigrationSettingsRequest { public string? Directory { get; set; } }
+sealed class MaidAiSettingsRequest { public string? Directory { get; set; } }
+sealed class BridgeUserSettings { public string? Directory { get; set; } public string? MaidAiDirectory { get; set; } }
 sealed class LocalWorkflowSettingsRequest { public string? Directory { get; set; } }
 sealed class LocalWorkflowScanResult {
     public List<JsonObject> Workflows { get; set; } = new();

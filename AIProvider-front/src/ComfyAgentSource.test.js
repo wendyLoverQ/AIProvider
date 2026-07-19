@@ -122,4 +122,22 @@ describe("ComfyUIAgent local file bridge", () => {
     expect(source).toContain('app.MapGet("/api/gallery/file"');
     expect(source).toContain('app.MapPost("/api/gallery/delete"');
   });
+
+  it("copies registered asset files to the configured Maid AI directory without moving originals", () => {
+    const source = readFileSync(sourcePath, "utf8");
+    expect(source).toContain('app.MapGet("/api/maid-ai/settings"');
+    expect(source).toContain('app.MapPost("/api/maid-ai/copy"');
+    expect(source).toContain("File.Copy(source, target, overwrite: false)");
+    expect(source).toContain("MaidAiDirectory");
+  });
+
+  it("enumerates monitors and applies an uploaded wallpaper to one selected Windows display", () => {
+    const source = readFileSync(sourcePath, "utf8");
+    const wallpaper = readFileSync(fileURLToPath(new URL("../../ComfyUIAgent/WallpaperService.cs", import.meta.url)), "utf8");
+    expect(source).toContain('app.MapGet("/api/wallpaper/monitors"');
+    expect(source).toContain('app.MapPost("/api/wallpaper/apply"');
+    expect(source).toContain('StartsWithSegments("/api/wallpaper")');
+    expect(wallpaper).toContain("GetMonitorDevicePathCount");
+    expect(wallpaper).toContain("desktop.SetWallpaper(monitorId, destination)");
+  });
 });

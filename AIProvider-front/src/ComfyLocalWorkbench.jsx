@@ -16,6 +16,7 @@ import {
   PaperPlaneTilt,
   Power,
   SpinnerGap,
+  Star,
   TrayArrowUp,
   Trash,
   Warning,
@@ -347,7 +348,8 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   const [folders, setFolders] = useState([]),
     [folder, setFolder] = useState(() => localStorage.getItem("comfy_output_folder") || "aimaid"),
     [migrationNewFolder, setMigrationNewFolder] = useState(""),
-    [migrationDirectory, setMigrationDirectory] = useState("C:\\Users\\49213\\Desktop\\A\\ai成品");
+    [migrationDirectory, setMigrationDirectory] = useState("C:\\Users\\49213\\Desktop\\A\\ai成品"),
+    [maidAiDirectory, setMaidAiDirectory] = useState("C:\\Users\\49213\\Desktop\\A\\codex\\AI_maid\\Assets\\image_tiles\\动漫扶她");
   const [workflows, setWorkflows] = useState([]);
   const [loraModels, setLoraModels] = useState([]);
   const [loraModelsLoading, setLoraModelsLoading] = useState(false);
@@ -576,6 +578,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         if (status.running) resumeActive(config.token);
         loadFolders(config.token);
         loadMigrationSettings(config.token);
+        loadMaidAiSettings(config.token);
         loadWorkflowSettings(config.token);
         loadPresets();
       }
@@ -884,6 +887,21 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     if (!response.ok) throw new Error(data.message || "保存迁移目录失败");
     setMigrationDirectory(data.directory);
     setNotice(`迁移目录已保存：${data.directory}`);
+  };
+  const loadMaidAiSettings = async (authToken = token) => {
+    const response = await call("/api/maid-ai/settings", {}, 10000, authToken);
+    const data = await readJson(response, "女仆AI 图片目录接口");
+    if (response.ok && data.directory) setMaidAiDirectory(data.directory);
+  };
+  const saveMaidAiSettings = async () => {
+    const response = await call("/api/maid-ai/settings", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ directory: maidAiDirectory }),
+    });
+    const data = await readJson(response, "女仆AI 图片目录保存接口");
+    if (!response.ok) throw new Error(data.message || "保存女仆AI 图片目录失败");
+    setMaidAiDirectory(data.directory);
+    setNotice(`女仆AI 图片目录已保存：${data.directory}`);
   };
   const loadWorkflowSettings = async (authToken = token) => {
     const response = await call("/api/local-workflows/settings", {}, 10000, authToken);
@@ -2445,6 +2463,68 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       setError(`转到文件中转站失败：${exception.message}`);
     }
   };
+  const transferEntriesToFavorites = async (entries) => {
+    if (!entries.length) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      let uploaded = 0;
+      for (const entry of entries) {
+        if (!entry.item.assetId) throw new Error(`${entry.image.filename || "所选图片"}缺少资产 ID`);
+        const fileName = entry.image.filename || entry.image.fileName || entry.image.path?.split(/[\\/]/).pop();
+        const imageSource = entry.image.url || entry.image.localUrl;
+        if (!fileName || !imageSource) throw new Error("资产图片缺少可读取的文件地址");
+        const imageResponse = await fetch(imageSource);
+        if (!imageResponse.ok) throw new Error(`读取 ${fileName} 失败 · HTTP ${imageResponse.status}`);
+        const form = new FormData();
+        form.append("file", await imageResponse.blob(), fileName);
+        form.append("assetId", String(entry.item.assetId));
+        form.append("title", fileName.replace(/\.[^.]+$/, ""));
+        if (entry.image.width || entry.item.width) form.append("width", String(entry.image.width || entry.item.width));
+        if (entry.image.height || entry.item.height) form.append("height", String(entry.image.height || entry.item.height));
+        if (entry.item.prompt) form.append("prompt", entry.item.prompt);
+        form.append("sourcePlatform", platform);
+        const response = await fetch("/api/favorites", { method: "POST", body: form });
+        const data = await readJson(response, "我的最爱上传接口");
+        if (!response.ok || data.code !== 200) throw new Error(`${fileName}：${data.message || "上传失败"}`);
+        uploaded += 1;
+      }
+      setSelectedImages(new Set()); setSelectionMode(false);
+      setNotice(`已将 ${uploaded} 张资产原图上传到服务器“我的最爱”`);
+    } catch (exception) { setError(`转到我的最爱失败：${exception.message}`); }
+    finally { setBusy(false); }
+  };
+  const contextFavorite = async () => {
+    const entry = contextEntry();
+    if (!entry) return;
+    setImageMenu(null);
+    await transferEntriesToFavorites([entry]);
+  };
+  const copyEntriesToMaidAi = async (entries) => {
+    if (!entries.length) return;
+    const paths = [...new Set(entries.map(({ item, image }) => {
+      if (item.source !== "asset" || !image.path) throw new Error("只能迁移已登记的本机资产原图");
+      return image.path;
+    }))];
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await call("/api/maid-ai/copy", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paths }),
+      }, 120000);
+      const data = await readJson(response, "迁移到女仆AI接口");
+      if (!response.ok || !data.success) throw new Error(data.message || "复制图片失败");
+      setSelectedImages(new Set()); setSelectionMode(false);
+      setNotice(`已迁移到女仆AI：${paths.length} 张`);
+    } catch (exception) {
+      setError(`迁移到女仆AI失败：${exception.message}`);
+    } finally { setBusy(false); }
+  };
+  const contextMaidAi = async () => {
+    const entry = contextEntry();
+    if (!entry) return;
+    setImageMenu(null);
+    await copyEntriesToMaidAi([entry]);
+  };
   const moveEntriesToTrash = async (entries) => {
     const localPaths = entries.filter(({ item }) => item.source !== "asset").map(({ image }) => image.path);
     const assetIds = [...new Set(entries.filter(({ item }) => item.source === "asset").map(({ item }) => item.assetId).filter(Boolean))];
@@ -2720,6 +2800,13 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
               <button type="button" disabled={launcher !== "ready"} onClick={() => createMigrationFolder().catch((e) => setError(e.message))}>新建并切换</button>
             </div>
           </div>
+          <div className="local-tool-block migration-panel">
+            <div className="local-tool-title"><strong>女仆AI 图片文件夹</strong><small>“迁移到女仆AI”只会把资产原图复制到这里</small></div>
+            <div className="local-inline">
+              <input value={maidAiDirectory} onChange={(e) => setMaidAiDirectory(e.target.value)} aria-label="女仆AI 图片文件夹路径" />
+              <button type="button" disabled={launcher !== "ready"} onClick={() => saveMaidAiSettings().catch((e) => setError(e.message))}>保存</button>
+            </div>
+          </div>
         </section>
       </div>
     );
@@ -2874,6 +2961,8 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
                   </button>
                   {galleryMode === "trash" && <button disabled={!selectedImages.size} onClick={restoreSelected}>恢复 {selectedImages.size || ""}</button>}
                   {galleryMode !== "trash" && <button disabled={!selectedImages.size || !batchInputWorkflows.length} onClick={openBatchOperation}>批量操作 {selectedImages.size || ""}</button>}
+                  {galleryMode === "assets" && <button disabled={!selectedImages.size || busy} onClick={() => transferEntriesToFavorites(selectedGalleryImages())}><Star weight="fill" />转到我的最爱 {selectedImages.size || ""}</button>}
+                  {galleryMode === "assets" && <button disabled={!selectedImages.size || busy} onClick={() => copyEntriesToMaidAi(selectedGalleryImages())}><Copy />迁移到女仆AI {selectedImages.size || ""}</button>}
                   {galleryMode === "output" && <>
                     <button
                       className="move-action"
@@ -3055,6 +3144,8 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         <button type="button" onClick={() => contextCopy()}><Copy />复制图片</button>
         <button type="button" onClick={() => contextOpenFolder()}><FolderOpen />打开所在文件夹</button>
         {galleryMode !== "trash" && <button type="button" onClick={() => contextTransfer()}><TrayArrowUp />转到文件中转站</button>}
+        {galleryMode === "assets" && <button type="button" onClick={contextFavorite}><Star weight="fill" />转到我的最爱</button>}
+        {galleryMode === "assets" && <button type="button" onClick={contextMaidAi}><Copy />迁移到女仆AI</button>}
         <button type="button" className="danger" onClick={contextDelete}><Trash />{galleryMode === "trash" ? "永久删除" : "删除"}</button>
         {galleryMode === "trash" && <button onClick={() => { const entry = contextEntry(); if (!entry) return; setImageMenu(null); restoreEntries([entry]).then(() => { advanceDetailAfterAction(entry.item, entry.image); setNotice("图片已恢复"); }).catch((e) => setError(`恢复失败：${e.message}`)); }}><ArrowClockwise />恢复</button>}
         {galleryMode !== "trash" && imageMenu.item.source !== "asset" && <button onClick={contextMigrate}><FolderOpen />加入待处理</button>}

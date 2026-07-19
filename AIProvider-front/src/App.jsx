@@ -80,6 +80,7 @@ import FoundryWorkbench from "./FoundryWorkbench";
 import CryptoMarket from "./CryptoMarket";
 import RemoteCodex from "./RemoteCodex";
 import FileTransfer from "./FileTransfer";
+import FavoriteMediaLibrary from "./FavoriteMediaLibrary";
 import { RELEASE_VERSION } from "./releaseVersion";
 import { readJsonResponse } from "./apiResponse";
 import "./App.css";
@@ -90,6 +91,7 @@ import "./DesktopShell.css";
 
 const API = "/api";
 const NAV = [
+  { key: "favorites", label: "我的最爱", icon: Star, group: "create" },
   { key: "workshop", label: "图像工坊", icon: ImageSquare, group: "create" },
   { key: "prompts", label: "Prompt 管理", icon: SlidersHorizontal, group: "create" },
   { key: "manualEditor", label: "图片编辑", icon: PaintBrush, group: "create" },
@@ -113,6 +115,7 @@ const NAV_GROUPS = [
   { key: "system", label: "系统" },
 ];
 const PAGE_DESCRIPTIONS = {
+  favorites: "收藏并管理保存在服务器上的媒体原件",
   manualEditor: "本机画布、抠图与 AI 修补",
   videoEditor: "素材、画布与时间线编辑",
   market: "实时行情、K 线与订单簿",
@@ -269,13 +272,13 @@ function useDashboardData() {
 }
 
 function App() {
-  const viewFromPath = () => ({ "/workshop": "workshop", "/manual-editor": "manualEditor", "/video-editor": "videoEditor", "/market": "market", "/prompts": "prompts", "/prompt-options": "promptOptions", "/maid": "maid", "/admin/monitor": "monitor", "/remote-codex": "remoteCodex", "/foundry": "foundry", "/file-transfer": "fileTransfer", "/camera": "camera", "/twitter": "twitter", "/content-operations": "contentOperations", "/appearance": "appearance", "/settings": "settings" })[window.location.pathname] || "home";
+  const viewFromPath = () => ({ "/favorites": "favorites", "/workshop": "workshop", "/manual-editor": "manualEditor", "/video-editor": "videoEditor", "/market": "market", "/prompts": "prompts", "/prompt-options": "promptOptions", "/maid": "maid", "/admin/monitor": "monitor", "/remote-codex": "remoteCodex", "/foundry": "foundry", "/file-transfer": "fileTransfer", "/camera": "camera", "/twitter": "twitter", "/content-operations": "contentOperations", "/appearance": "appearance", "/settings": "settings" })[window.location.pathname] || "home";
   const [view, setView] = useState(viewFromPath);
   const [promptOptionCategory, setPromptOptionCategory] = useState("");
   const dashboard = useDashboardData();
   const current = NAV.find((item) => item.key === (view === "promptOptions" ? "prompts" : view));
   useEffect(() => {
-    const path = ({ workshop: "/workshop", manualEditor: "/manual-editor", videoEditor: "/video-editor", market: "/market", prompts: "/prompts", promptOptions: "/prompt-options", maid: "/maid", monitor: "/admin/monitor", remoteCodex: "/remote-codex", foundry: "/foundry", fileTransfer: "/file-transfer", camera: "/camera", twitter: "/twitter", contentOperations: "/content-operations", appearance: "/appearance", settings: "/settings" })[view] || "/";
+    const path = ({ favorites: "/favorites", workshop: "/workshop", manualEditor: "/manual-editor", videoEditor: "/video-editor", market: "/market", prompts: "/prompts", promptOptions: "/prompt-options", maid: "/maid", monitor: "/admin/monitor", remoteCodex: "/remote-codex", foundry: "/foundry", fileTransfer: "/file-transfer", camera: "/camera", twitter: "/twitter", contentOperations: "/content-operations", appearance: "/appearance", settings: "/settings" })[view] || "/";
     if (window.location.pathname !== path) window.history.replaceState({}, "", path);
   }, [view]);
   useEffect(() => {
@@ -337,6 +340,7 @@ function App() {
           </div>
         )}
         {view === "home" && <HomeView data={dashboard} onOpenWorkshop={() => setView("workshop")} />}
+        {view === "favorites" && <FavoriteMediaLibrary />}
         <div className={`tool-home compact-home persistent-workshop ${view === "workshop" ? "" : "persistent-view-hidden"}`} aria-hidden={view !== "workshop"}>
           <ComfyConsole embedded active={view === "workshop"} />
         </div>

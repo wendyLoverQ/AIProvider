@@ -26,13 +26,29 @@ describe("UI release gate", () => {
   it("keeps every primary workspace on semantic theme tokens", () => {
     const theme = read("SemanticTheme.css");
     const tokens = read("uiTheme.js");
-    ["video-editor-shell", "foundry-workbench", "system-settings-shell", "file-transfer-page", "twitter-publisher", "content-operations-center", "prompt-scheme-list", "maid-panel", "universe-toolbar"].forEach((root) => {
+    ["favorite-library", "video-editor-shell", "foundry-workbench", "system-settings-shell", "file-transfer-page", "twitter-publisher", "content-operations-center", "prompt-scheme-list", "maid-panel", "universe-toolbar"].forEach((root) => {
       expect(theme, `${root} 未接入全局语义主题`).toContain(root);
     });
     const copy = read("UiControl.jsx");
     ["视频编辑", "我的女仆", "链上工具", "Twitter", "系统设置"].forEach((label) => expect(copy).toContain(label));
     expect(tokens).toContain('"--text-muted-readable"');
     expect(tokens).toContain('"--border-interactive"');
+  });
+
+  it("keeps My Favorites server-backed, searchable, semantic, and native", () => {
+    const app = read("App.jsx");
+    const page = read("FavoriteMediaLibrary.jsx");
+    const css = read("FavoriteMediaLibrary.css");
+    expect(app.indexOf('{ key: "favorites"')).toBeLessThan(app.indexOf('{ key: "workshop"'));
+    expect(app).toContain('favorites: "/favorites"');
+    expect(page).toContain('import UiSearchField from "./UiSearchField"');
+    expect(page).toContain('import UiToast from "./UiToast"');
+    expect(page).toContain('fetch("/api/favorites"');
+    expect(page).toContain('/api/wallpaper/monitors');
+    expect(page).toContain('renderWallpaper');
+    expect(page).not.toMatch(/<div[^>]+onClick=/);
+    expect(css).toContain("var(--bg-surface)");
+    expect(css).toContain("var(--text-primary)");
   });
 
   it("keeps file transfer reachable, semantic, and horizontally contained", () => {

@@ -1,0 +1,21 @@
+CREATE TABLE c_FavoriteMedia (
+    Id BIGINT NOT NULL AUTO_INCREMENT,
+    AssetId BIGINT NULL,
+    StoragePath VARCHAR(1000) NOT NULL,
+    OriginalFileName VARCHAR(255) NOT NULL,
+    Title VARCHAR(255) NOT NULL,
+    MediaType VARCHAR(32) NOT NULL DEFAULT 'image',
+    ContentType VARCHAR(100) NOT NULL,
+    FileSize BIGINT NOT NULL,
+    Sha256 CHAR(64) NOT NULL,
+    Width INT NULL,
+    Height INT NULL,
+    Prompt TEXT NULL,
+    SourcePlatform VARCHAR(20) NULL,
+    CreatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    UpdatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (Id),
+    UNIQUE KEY UK_FavoriteMedia_Sha256 (Sha256),
+    KEY IX_FavoriteMedia_CreatedAt (CreatedAt DESC),
+    KEY IX_FavoriteMedia_AssetId (AssetId)
+);
