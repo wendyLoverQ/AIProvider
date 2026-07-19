@@ -12,6 +12,7 @@ import com.aiprovider.service.ContentPipelineService;
 import com.aiprovider.service.XiaohongshuAccountService;
 import com.aiprovider.service.XiaohongshuPublicationService;
 import java.util.List;
+import java.util.Map;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -38,6 +39,9 @@ public class ContentOperationsController {
     @PutMapping("/accounts/{id}/sources") public Result<List<Long>> bindAccountSources(@PathVariable long id,@RequestBody ContentAccountSourcesDTO dto){return Result.success(sourceService.bindAccountSources(id,dto));}
     @PostMapping("/accounts/{id}/test-pipeline") public Result<List<ContentPipelineTestVO>> testPipeline(@PathVariable long id){return Result.success(pipelineService.testAccount(id));}
     @PostMapping("/publications/{id}/retry") public Result<XhsPublicationResultVO> retryPublication(@PathVariable long id){return Result.success(publicationService.publish(id));}
+    @GetMapping("/publications/{id}") public Result<Map<String,Object>> publicationDetails(@PathVariable long id){return Result.success(service.publicationDetails(id));}
+    @GetMapping("/items") public Result<List<Map<String,Object>>> collectionHistory(@RequestParam(required=false) String query,@RequestParam(required=false) Long sourceId,@RequestParam(defaultValue="100") int limit){return Result.success(service.collectionHistory(query,sourceId,limit));}
+    @GetMapping("/automation-runs") public Result<List<Map<String,Object>>> automationRuns(@RequestParam(defaultValue="30") int limit){return Result.success(service.automationRuns(limit));}
     @PostMapping("/accounts/{id}/xhs-login") public Result<XhsLoginSessionVO> startXhsLogin(@PathVariable long id){return Result.success(xhsAccountService.startLogin(id));}
     @GetMapping("/accounts/{id}/xhs-login/{sessionId}") public Result<XhsLoginSessionVO> pollXhsLogin(@PathVariable long id,@PathVariable String sessionId){return Result.success(xhsAccountService.poll(id,sessionId));}
     @PutMapping("/settings") public Result<ContentOperationSettingsVO> updateSettings(@RequestBody ContentOperationSettingsDTO dto){return Result.success(service.updateSettings(dto));}

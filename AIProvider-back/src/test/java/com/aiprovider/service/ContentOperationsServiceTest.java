@@ -25,6 +25,6 @@ class ContentOperationsServiceTest {
         when(repository.findSettings()).thenReturn(saved);
         ContentOperationsService service=new ContentOperationsService(repository);ContentOperationSettingsDTO dto=new ContentOperationSettingsDTO();
         dto.setAutomationEnabled(true);dto.setDefaultPublishMode("AUTO");dto.setCrawlIntervalMinutes(240);dto.setCommentIntervalMinutes(30);dto.setContentModel("gemini");
-        ContentOperationSettingsVO result=service.updateSettings(dto);assertTrue(result.isAutomationEnabled());assertEquals("AUTO",result.getDefaultPublishMode());verify(repository).updateSettings(any());
+        ContentOperationSettingsVO result=service.updateSettings(dto);assertTrue(result.isAutomationEnabled());assertEquals("AUTO",result.getDefaultPublishMode());verify(repository).updateSettings(any());verify(repository).updateAllSourcePollIntervals(240);
     }
 }

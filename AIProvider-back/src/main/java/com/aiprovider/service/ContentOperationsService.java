@@ -49,8 +49,12 @@ public class ContentOperationsService {
         ContentOperationsMapper.SettingsRecord record=new ContentOperationsMapper.SettingsRecord(); record.setAutomationEnabled(dto.getAutomationEnabled());
         record.setDefaultPublishMode(mode(dto.getDefaultPublishMode()));record.setCrawlIntervalMinutes(crawl);record.setCommentIntervalMinutes(comments);
         String contentModel=dto.getContentModel()==null?text(currentSettings.get("contentModel")):required(dto.getContentModel(),"内容模型",100);
-        record.setContentModel(contentModel);repository.updateSettings(record);return settingsFrom(repository.findSettings());
+        record.setContentModel(contentModel);repository.updateSettings(record);repository.updateAllSourcePollIntervals(crawl);return settingsFrom(repository.findSettings());
     }
+
+    public Map<String,Object> publicationDetails(long id){Map<String,Object> result=repository.findPublicationFullDetails(id);if(result==null)throw new IllegalArgumentException("发布任务不存在");return result;}
+    public List<Map<String,Object>> collectionHistory(String query,Long sourceId,int limit){String normalized=query==null||query.trim().isEmpty()?null:query.trim();return repository.searchContentItems(normalized,sourceId,bounded(limit,1,200));}
+    public List<Map<String,Object>> automationRuns(int limit){return repository.findRecentOperationRuns(bounded(limit,1,100));}
 
     private List<ContentAccountVO> accounts(){List<ContentAccountVO> result=new ArrayList<>();for(Map<String,Object> row:repository.findAccounts())result.add(accountFrom(row));return result;}
     private List<ContentCollectionAccountVO> collectionAccounts(){List<ContentCollectionAccountVO> result=new ArrayList<>();for(Map<String,Object> r:repository.findCollectionAccounts()){String encrypted=text(r.get("credentialEncrypted"));result.add(new ContentCollectionAccountVO(number(r.get("id")),text(r.get("platform")),text(r.get("displayName")),text(r.get("adapterType")),encrypted!=null,text(r.get("credentialHint")),truth(r.get("enabled"))));}return result;}
@@ -63,6 +67,7 @@ public class ContentOperationsService {
     private String required(String value,String label,int max){String v=value==null?"":value.trim();if(v.isEmpty())throw new IllegalArgumentException(label+"不能为空");if(v.length()>max)throw new IllegalArgumentException(label+"长度不能超过 "+max);return v;}
     private String optional(String value,int max){if(value==null||value.trim().isEmpty())return null;String v=value.trim();if(v.length()>max)throw new IllegalArgumentException("账号标识过长");return v;}
     private void range(int value,int min,int max,String label){if(value<min||value>max)throw new IllegalArgumentException(label+"必须在 "+min+" 到 "+max+" 分钟之间");}
+    private int bounded(int value,int min,int max){return Math.max(min,Math.min(max,value));}
     private String text(Object v){return v==null?null:String.valueOf(v);} private Long number(Object v){return v==null?null:((Number)v).longValue();}
     private int integer(Object v){return v==null?0:((Number)v).intValue();} private boolean truth(Object v){return v instanceof Boolean?(Boolean)v:v!=null&&((Number)v).intValue()!=0;}
     private LocalDateTime time(Object v){if(v instanceof LocalDateTime)return (LocalDateTime)v;if(v instanceof java.sql.Timestamp)return ((java.sql.Timestamp)v).toLocalDateTime();return null;}

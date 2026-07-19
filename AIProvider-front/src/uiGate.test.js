@@ -71,6 +71,10 @@ describe("UI release gate", () => {
     expect(toastCss).toMatch(/\.ui-toast\{[^}]*position:fixed[^}]*max-width:min\(360px,calc\(100vw - 24px\)\)/);
     expect(toastCss).toContain("var(--bg-surface)");
     expect(toastCss).not.toMatch(/width:\s*100%/);
+    const operations = read("ContentOperationsCenter.jsx");
+    expect(operations).toContain('import UiToast from "./UiToast"');
+    expect(operations).toContain("<UiToast message={error||notice}");
+    expect(operations).not.toContain("content-ops-error");
   });
 
   it("keeps mobile navigation reachable and touch-safe", () => {
@@ -129,7 +133,9 @@ describe("UI release gate", () => {
     expect(css).toMatch(/\.content-ops-dialog\{[^}]*max-height:\s*calc\(100vh\s*-\s*32px\)/);
     expect(css).toMatch(/\.content-ops-dialog\{[^}]*overflow-y:\s*auto/);
     expect(shell).toMatch(/\.workspace-contentOperations \.content-operations-center\s*\{[^}]*height:\s*calc\(100vh\s*-\s*68px\)/);
-    expect(shell).toMatch(/\.workspace-contentOperations \.content-ops-error\s*\{[^}]*position:\s*sticky/);
+    expect(css).toMatch(/\.settings-inline\{[^}]*grid-template-columns:/);
+    expect(css).toMatch(/\.collection-history-row\{[^}]*display:grid/);
+    expect(css).toMatch(/\.publication-row\{[^}]*width:100%/);
   });
 
   it("keeps image-workshop detail actions grouped and keyboard accessible", () => {

@@ -72,8 +72,11 @@ public interface ContentOperationsMapper {
     @Select("SELECT SourceId FROM c_ContentAccountSources WHERE AccountId=#{accountId} AND Enabled=TRUE ORDER BY SourceId")
     List<Long> findAccountSourceIds(long accountId);
 
-    @Select("SELECT a.Id accountId,s.Id sourceId FROM c_ContentAccounts a JOIN c_ContentAccountSources b ON b.AccountId=a.Id AND b.Enabled=TRUE JOIN c_ContentSources s ON s.Id=b.SourceId AND s.Enabled=TRUE JOIN c_ContentOperationSettings cfg ON cfg.Id=1 WHERE cfg.AutomationEnabled=TRUE AND a.Platform='XIAOHONGSHU' AND a.Enabled=TRUE AND a.PublishMode='AUTO' AND a.ConnectionStatus='CONNECTED' AND a.SessionEncrypted IS NOT NULL AND (s.LastCollectedAt IS NULL OR TIMESTAMPDIFF(MINUTE,s.LastCollectedAt,NOW(3))>=s.PollIntervalMinutes) ORDER BY s.Id,a.Id")
+    @Select("SELECT a.Id accountId,s.Id sourceId FROM c_ContentAccounts a JOIN c_ContentAccountSources b ON b.AccountId=a.Id AND b.Enabled=TRUE JOIN c_ContentSources s ON s.Id=b.SourceId AND s.Enabled=TRUE JOIN c_ContentOperationSettings cfg ON cfg.Id=1 WHERE cfg.AutomationEnabled=TRUE AND a.Platform='XIAOHONGSHU' AND a.Enabled=TRUE AND a.PublishMode='AUTO' AND a.ConnectionStatus='CONNECTED' AND a.SessionEncrypted IS NOT NULL AND (s.LastCollectedAt IS NULL OR TIMESTAMPDIFF(MINUTE,s.LastCollectedAt,NOW(3))>=cfg.CrawlIntervalMinutes) ORDER BY s.Id,a.Id")
     List<Map<String,Object>> findDueBindings();
+
+    @Update("UPDATE c_ContentSources SET PollIntervalMinutes=#{minutes}")
+    int updateAllSourcePollIntervals(int minutes);
 
     @Insert("INSERT INTO c_ContentOperationRuns(RunType,Platform,Status,TriggerType) VALUES(#{runType},'XIAOHONGSHU','PROCESSING',#{triggerType})")
     @Options(useGeneratedKeys=true,keyProperty="id")
@@ -129,6 +132,15 @@ public interface ContentOperationsMapper {
 
     @Select("SELECT p.Id id,d.Title title,a.DisplayName accountName,p.PublishMode publishMode,p.Status status,p.AttemptCount attemptCount,p.ErrorCode errorCode,p.ErrorMessage errorMessage,p.ScheduledAt scheduledAt,p.StartedAt startedAt,p.PublishedAt publishedAt FROM c_ContentPublications p JOIN c_ContentDrafts d ON d.Id=p.DraftId JOIN c_ContentAccounts a ON a.Id=p.AccountId WHERE d.Platform='XIAOHONGSHU' ORDER BY p.CreatedAt DESC LIMIT 20")
     List<Map<String,Object>> findRecentPublications();
+
+    @Select("SELECT p.Id id,d.Title title,d.Body body,CAST(d.TagsJson AS CHAR) tagsJson,d.ModelName modelName,d.ReviewStatus reviewStatus,a.DisplayName accountName,p.PublishMode publishMode,p.Status status,p.AttemptCount attemptCount,p.ExternalPostUrl externalPostUrl,p.ErrorCode errorCode,p.ErrorMessage errorMessage,p.ScheduledAt scheduledAt,p.StartedAt startedAt,p.PublishedAt publishedAt,i.Id contentItemId,i.AuthorName sourceAuthor,i.RawText sourceText,i.SourceUrl sourceUrl,s.Name sourceName FROM c_ContentPublications p JOIN c_ContentDrafts d ON d.Id=p.DraftId JOIN c_ContentAccounts a ON a.Id=p.AccountId LEFT JOIN c_ContentItems i ON i.Id=d.ContentItemId LEFT JOIN c_ContentSources s ON s.Id=i.SourceId WHERE p.Id=#{id} AND d.Platform='XIAOHONGSHU'")
+    Map<String,Object> findPublicationFullDetails(long id);
+
+    @Select("<script>SELECT i.Id id,i.SourceId sourceId,s.Name sourceName,i.ExternalId externalId,i.SourceUrl sourceUrl,i.AuthorName authorName,i.RawText rawText,i.PublishedAt publishedAt,i.ProcessingStatus processingStatus,i.RelevanceStatus relevanceStatus,i.RelevanceScore relevanceScore,i.RelevanceReason relevanceReason,i.RelevanceCheckedAt relevanceCheckedAt,i.CollectedAt collectedAt FROM c_ContentItems i JOIN c_ContentSources s ON s.Id=i.SourceId WHERE (#{sourceId} IS NULL OR i.SourceId=#{sourceId}) <if test='query != null'>AND (i.RawText LIKE CONCAT('%',#{query},'%') OR i.AuthorName LIKE CONCAT('%',#{query},'%') OR s.Name LIKE CONCAT('%',#{query},'%'))</if> ORDER BY i.CollectedAt DESC LIMIT #{limit}</script>")
+    List<Map<String,Object>> searchContentItems(@Param("query") String query,@Param("sourceId") Long sourceId,@Param("limit") int limit);
+
+    @Select("SELECT Id id,RunType runType,Platform platform,Status status,TriggerType triggerType,CAST(MetricsJson AS CHAR) metricsJson,ErrorMessage errorMessage,StartedAt startedAt,FinishedAt finishedAt FROM c_ContentOperationRuns ORDER BY StartedAt DESC LIMIT #{limit}")
+    List<Map<String,Object>> findRecentOperationRuns(int limit);
 
     @Select("SELECT COUNT(*) FROM c_ContentItems WHERE CollectedAt >= CURRENT_DATE()") long countCollectedToday();
     @Select("SELECT COUNT(*) FROM c_ContentDrafts WHERE Platform='XIAOHONGSHU' AND ReviewStatus='READY'") long countReadyDrafts();

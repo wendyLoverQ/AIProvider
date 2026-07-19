@@ -31,6 +31,7 @@ public class ContentOperationsRepository {
     public void markSourceTestFailed(long id,String error){mapper.markSourceTestFailed(id,error);}
     public List<Long> findAccountSourceIds(long accountId){return mapper.findAccountSourceIds(accountId);}
     public List<Map<String,Object>> findDueBindings(){return mapper.findDueBindings();}
+    public void updateAllSourcePollIntervals(int minutes){mapper.updateAllSourcePollIntervals(minutes);}
     public long insertOperationRun(ContentOperationsMapper.OperationRunRecord record){mapper.insertOperationRun(record);return record.getId();}
     public void finishOperationRun(long id,String metricsJson){if(mapper.finishOperationRun(id,metricsJson)!=1)throw new IllegalStateException("运行记录成功状态更新失败");}
     public void failOperationRun(long id,String error){mapper.failOperationRun(id,error);}
@@ -48,6 +49,9 @@ public class ContentOperationsRepository {
     public void insertAccountSource(long accountId,long sourceId){mapper.insertAccountSource(accountId,sourceId);}
     public boolean isEnabledSource(long id){return mapper.countEnabledSource(id)>0;}
     public List<Map<String,Object>> findRecentPublications(){return mapper.findRecentPublications();}
+    public Map<String,Object> findPublicationFullDetails(long id){return mapper.findPublicationFullDetails(id);}
+    public List<Map<String,Object>> searchContentItems(String query,Long sourceId,int limit){return mapper.searchContentItems(query,sourceId,limit);}
+    public List<Map<String,Object>> findRecentOperationRuns(int limit){return mapper.findRecentOperationRuns(limit);}
     public long countCollectedToday(){return mapper.countCollectedToday();} public long countReadyDrafts(){return mapper.countReadyDrafts();}
     public long countPublishedToday(){return mapper.countPublishedToday();} public long countPendingComments(){return mapper.countPendingComments();}
     public long countFailedPublications(){return mapper.countFailedPublications();}
