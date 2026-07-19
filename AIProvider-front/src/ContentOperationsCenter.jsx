@@ -593,9 +593,11 @@ function CollectionHistory({ items, sources, query, sourceId, onQuery, onSource,
   return <section className="content-ops-panel collection-history">
     <SectionHeading eyebrow="COLLECTION HISTORY" title="采集历史" description="查询已入库内容和 Gemini 判断结果" actions={<div className="collection-history-filters"><UiSearchField value={query} onChange={(event) => onQuery(event.target.value)} placeholder="查询作者、来源或正文" aria-label="查询采集历史" /><select aria-label="按采集源筛选" value={sourceId} onChange={(event) => onSource(event.target.value)}><option value="">全部来源</option>{sources.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}</select></div>} />
     <div className="collection-history-list">
+      {items.length ? <div className="collection-history-head" aria-hidden="true"><span>作者 / 来源</span><span>内容摘要</span><span>采集时间</span><span>判断</span><span>操作</span></div> : null}
       {items.length ? items.map((item) => <button type="button" key={item.id} className="collection-history-row" onClick={() => onSelect(item)} aria-label={`查看采集内容 ${item.rawText}`}>
-        <span><b>{item.authorName || item.sourceName}</b><small>{item.sourceName} · {formatTime(item.collectedAt)}</small></span>
+        <span className="collection-history-identity"><b>{item.authorName || item.sourceName}</b><small>{item.sourceName}</small></span>
         <p>{item.rawText}</p>
+        <time dateTime={item.collectedAt}>{formatTime(item.collectedAt)}</time>
         <StatusBadge value={item.relevanceStatus} />
         <span className="ops-row-link">详情</span>
       </button>) : <p className="publication-group-empty">没有匹配的采集记录</p>}
