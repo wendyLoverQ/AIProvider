@@ -59,4 +59,29 @@ describe("FileTransfer", () => {
     expect(await screen.findByText("large.bin")).toBeTruthy();
     await waitFor(() => expect(listCalls).toBe(2));
   });
+
+  it("previews only images and submits selected files for batch download", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((url) => {
+      if (url === "/api/file-transfer/files") return jsonResponse([
+        { fileName: "照片.png", fileSize: 8, uploadedAt: "2026-07-19T01:02:03Z" },
+        { fileName: "影片.mp4", fileSize: 16, uploadedAt: "2026-07-19T01:02:03Z" },
+      ]);
+      throw new Error(`unexpected request: ${url}`);
+    });
+    let submitted = [];
+    vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(function submit() {
+      submitted = Array.from(this.querySelectorAll('input[name="fileName"]')).map((input) => input.value);
+      expect(this.method).toBe("post");
+      expect(this.action).toContain("/api/file-transfer/download-batch");
+    });
+
+    render(<FileTransfer />);
+    await screen.findByText("照片.png");
+    expect(document.querySelectorAll(".file-transfer-thumbnail")).toHaveLength(1);
+    expect(document.querySelector(".file-transfer-thumbnail").getAttribute("src")).toBe("/api/file-transfer/preview/%E7%85%A7%E7%89%87.png");
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择 照片.png" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择 影片.mp4" }));
+    fireEvent.click(screen.getByRole("button", { name: "批量下载（2）" }));
+    expect(submitted).toEqual(["照片.png", "影片.mp4"]);
+  });
 });

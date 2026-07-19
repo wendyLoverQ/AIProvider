@@ -4,6 +4,7 @@ import { readJsonResponse } from "./apiResponse";
 import "./FileTransfer.css";
 
 const API = "/api/file-transfer";
+const PREVIEWABLE_IMAGE = /\.(?:avif|bmp|gif|jpe?g|png|webp)$/i;
 
 function formatSize(bytes) {
   const value = Number(bytes || 0);
@@ -44,6 +45,7 @@ export default function FileTransfer() {
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState({ active: false, name: "", index: 0, total: 0, percent: 0 });
   const [deleting, setDeleting] = useState("");
+  const [selected, setSelected] = useState(() => new Set());
 
   const load = useCallback(async () => {
     setState("loading");
@@ -52,7 +54,12 @@ export default function FileTransfer() {
       const response = await fetch(`${API}/files`);
       const body = await readJsonResponse(response, "文件列表响应异常");
       if (!response.ok || body.code !== 200) throw new Error(body.message || `读取失败 · HTTP ${response.status}`);
-      setFiles(body.data || []);
+      const nextFiles = body.data || [];
+      setFiles(nextFiles);
+      setSelected((current) => {
+        const available = new Set(nextFiles.map((file) => file.fileName));
+        return new Set(Array.from(current).filter((fileName) => available.has(fileName)));
+      });
       setState("ready");
     } catch (exception) {
       setError(exception.message);
@@ -101,6 +108,32 @@ export default function FileTransfer() {
     }
   };
 
+  const allSelected = files.length > 0 && selected.size === files.length;
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(files.map((file) => file.fileName)));
+  const toggleFile = (fileName) => setSelected((current) => {
+    const next = new Set(current);
+    if (next.has(fileName)) next.delete(fileName);
+    else next.add(fileName);
+    return next;
+  });
+  const downloadSelected = () => {
+    if (!selected.size) return;
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = `${API}/download-batch`;
+    form.hidden = true;
+    selected.forEach((fileName) => {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "fileName";
+      input.value = fileName;
+      form.appendChild(input);
+    });
+    document.body.appendChild(form);
+    form.submit();
+    form.remove();
+  };
+
   return <section className="file-transfer-page" aria-label="文件中转">
     <div className="file-transfer-toolbar">
       <div><strong>服务器文件夹</strong><span>同名文件会直接覆盖，仅手动删除</span></div>
@@ -123,14 +156,22 @@ export default function FileTransfer() {
     {(error || notice) && <div className={`file-transfer-message${error ? " is-error" : " is-success"}`} role={error ? "alert" : "status"}>{error || notice}</div>}
 
     <div className="file-transfer-list-card">
-      <header><strong>现有文件</strong><span>{state === "ready" ? `${files.length} 个` : "读取中"}</span></header>
+      <header><div><strong>现有文件</strong><span>{state === "ready" ? `${files.length} 个` : "读取中"}</span></div>
+        <button type="button" onClick={downloadSelected} disabled={!selected.size}><DownloadSimple />批量下载{selected.size ? `（${selected.size}）` : ""}</button>
+      </header>
       {state === "loading" && <div className="file-transfer-state" role="status">正在读取服务器文件…</div>}
       {state === "error" && <div className="file-transfer-state is-error"><span>文件列表读取失败</span><button type="button" onClick={load}>重新加载</button></div>}
       {state === "ready" && files.length === 0 && <div className="file-transfer-state"><File weight="duotone" /><span>服务器文件夹为空</span></div>}
       {state === "ready" && files.length > 0 && <div className="file-transfer-table-wrap"><table>
-        <thead><tr><th>文件名</th><th>大小</th><th>上传时间</th><th>操作</th></tr></thead>
+        <thead><tr><th className="file-transfer-select"><input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="全选文件" /></th><th>文件名</th><th>大小</th><th>上传时间</th><th>操作</th></tr></thead>
         <tbody>{files.map((file) => <tr key={file.fileName}>
-          <td><File /><span title={file.fileName}>{file.fileName}</span></td>
+          <td className="file-transfer-select"><input type="checkbox" checked={selected.has(file.fileName)} onChange={() => toggleFile(file.fileName)} aria-label={`选择 ${file.fileName}`} /></td>
+          <td><div className="file-transfer-file-cell">
+            {PREVIEWABLE_IMAGE.test(file.fileName)
+              ? <img className="file-transfer-thumbnail" src={`${API}/preview/${encodeURIComponent(file.fileName)}`} alt="" loading="lazy" />
+              : <File />}
+            <span title={file.fileName}>{file.fileName}</span>
+          </div></td>
           <td>{formatSize(file.fileSize)}</td>
           <td>{new Date(file.uploadedAt).toLocaleString("zh-CN", { hour12: false })}</td>
           <td><div className="file-transfer-actions">

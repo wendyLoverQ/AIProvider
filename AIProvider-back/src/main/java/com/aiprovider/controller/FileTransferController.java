@@ -3,6 +3,7 @@ package com.aiprovider.controller;
 import com.aiprovider.common.Result;
 import com.aiprovider.model.vo.FileTransferDownload;
 import com.aiprovider.model.vo.FileTransferFileVO;
+import com.aiprovider.model.vo.FileTransferPreview;
 import com.aiprovider.service.FileTransferService;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -49,6 +51,26 @@ public class FileTransferController {
             .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
                 .filename(download.getFileName(), StandardCharsets.UTF_8).build().toString())
             .body(download.getResource());
+    }
+
+    @GetMapping("/preview/{fileName:.+}")
+    public ResponseEntity<org.springframework.core.io.Resource> preview(@PathVariable String fileName) throws IOException {
+        FileTransferPreview preview = service.preview(fileName);
+        return ResponseEntity.ok()
+            .contentType(MediaType.parseMediaType(preview.getMediaType()))
+            .contentLength(preview.getFileSize())
+            .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.inline()
+                .filename(preview.getFileName(), StandardCharsets.UTF_8).build().toString())
+            .body(preview.getResource());
+    }
+
+    @PostMapping("/download-batch")
+    public ResponseEntity<StreamingResponseBody> downloadBatch(@RequestParam("fileName") List<String> fileNames) {
+        return ResponseEntity.ok()
+            .contentType(MediaType.parseMediaType("application/zip"))
+            .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                .filename("file-transfer.zip", StandardCharsets.UTF_8).build().toString())
+            .body(service.downloadBatch(fileNames));
     }
 
     @DeleteMapping("/{fileName:.+}")

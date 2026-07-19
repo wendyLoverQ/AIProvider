@@ -2,19 +2,27 @@ package com.aiprovider.service;
 
 import com.aiprovider.model.vo.FileTransferDownload;
 import com.aiprovider.model.vo.FileTransferFileVO;
+import com.aiprovider.model.vo.FileTransferPreview;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
+import java.io.InputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -61,6 +69,35 @@ public class FileTransferService {
         return new FileTransferDownload(path.getFileName().toString(), Files.size(path), new FileSystemResource(path));
     }
 
+    public FileTransferPreview preview(String fileName) throws IOException {
+        Path path = requireExisting(fileName);
+        String mediaType = imageMediaType(path.getFileName().toString());
+        if (mediaType == null) throw new IllegalArgumentException("该文件不支持图片预览");
+        return new FileTransferPreview(path.getFileName().toString(), Files.size(path), mediaType, new FileSystemResource(path));
+    }
+
+    public StreamingResponseBody downloadBatch(List<String> fileNames) {
+        if (fileNames == null || fileNames.isEmpty()) throw new IllegalArgumentException("请选择要下载的文件");
+        Set<Path> uniquePaths = new LinkedHashSet<>();
+        for (String fileName : fileNames) uniquePaths.add(requireExisting(fileName));
+        return outputStream -> {
+            try (ZipOutputStream zip = new ZipOutputStream(outputStream)) {
+                byte[] buffer = new byte[64 * 1024];
+                for (Path path : uniquePaths) {
+                    ZipEntry entry = new ZipEntry(path.getFileName().toString());
+                    entry.setTime(Files.getLastModifiedTime(path).toMillis());
+                    zip.putNextEntry(entry);
+                    try (InputStream input = Files.newInputStream(path)) {
+                        int read;
+                        while ((read = input.read(buffer)) != -1) zip.write(buffer, 0, read);
+                    }
+                    zip.closeEntry();
+                }
+                zip.finish();
+            }
+        };
+    }
+
     public void delete(String fileName) throws IOException {
         Files.delete(requireExisting(fileName));
     }
@@ -87,6 +124,17 @@ public class FileTransferService {
 
     private FileTransferFileVO describe(Path path) throws IOException {
         return new FileTransferFileVO(path.getFileName().toString(), Files.size(path), Files.getLastModifiedTime(path).toInstant());
+    }
+
+    private String imageMediaType(String fileName) {
+        String lower = fileName.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".gif")) return "image/gif";
+        if (lower.endsWith(".webp")) return "image/webp";
+        if (lower.endsWith(".bmp")) return "image/bmp";
+        if (lower.endsWith(".avif")) return "image/avif";
+        return null;
     }
 
     private FileTransferFileVO describeUnchecked(Path path) {
