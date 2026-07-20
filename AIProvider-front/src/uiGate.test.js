@@ -232,6 +232,9 @@ describe("UI release gate", () => {
     expect(workbenchCss).toMatch(/\.queue-pill__detail:focus-visible/);
     expect(workbench).toContain('<button type="button" className="task-cancel-all"');
     expect(workbench).toContain('取消全部生成任务（${cancelableTaskCount}）');
-    expect(workbenchCss).toMatch(/\.task-queue-controls \.task-cancel-all/);
+    expect(workbenchCss).toMatch(/\.task-queue-overview \.task-cancel-all/);
+    expect(workbench).not.toContain('className="task-queue-controls"');
+    expect(workbenchCss).toMatch(/\.compact-home \.comfy-form,\.compact-home \.comfy-history\{height:100%!important;min-height:0!important;max-height:100%!important\}/);
+    expect(workbenchCss).not.toContain("height:calc(100vh - 158px)!important");
   });
 });

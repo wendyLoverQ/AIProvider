@@ -19,6 +19,7 @@ class LocalGeneratedImageServiceTest {
         LocalGeneratedImageItemDTO item = new LocalGeneratedImageItemDTO();
         item.setPromptId("prompt-without-text"); item.setImagePath("aimaid/no-prompt.png");
         item.setPrompt("   "); item.setNegativePrompt("");
+        item.setMainModel("  flux\\dev.safetensors  ");
         LocalGeneratedImageBatchDTO batch = new LocalGeneratedImageBatchDTO();
         batch.setPlatform("Windows"); batch.setItems(Collections.singletonList(item));
 
@@ -28,6 +29,7 @@ class LocalGeneratedImageServiceTest {
         assertThat(result.getItems()).extracting(row -> row.get("id")).containsExactly(7L);
         assertThat(item.getPrompt()).isNull();
         assertThat(item.getNegativePrompt()).isNull();
+        assertThat(item.getMainModel()).isEqualTo("flux\\dev.safetensors");
         verify(repository).upsertBatch(eq("Windows"), argThat(rows -> rows.size() == 1 && rows.get(0).get("item") == item));
     }
 

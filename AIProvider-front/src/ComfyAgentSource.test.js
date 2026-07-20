@@ -115,6 +115,12 @@ describe("ComfyUIAgent durable generation ownership", () => {
 });
 
 describe("ComfyUIAgent local file bridge", () => {
+  it("returns 404 when a database-backed local image file no longer exists", () => {
+    const source = readFileSync(sourcePath, "utf8");
+    expect(source).toContain("error is FileNotFoundException");
+    expect(source).toContain("StatusCodes.Status404NotFound");
+  });
+
   it("does not persist gallery or recycle-bin queue state in Bridge", () => {
     const source = readFileSync(sourcePath, "utf8");
     expect(source).not.toContain('app.MapPost("/api/gallery/trash"');

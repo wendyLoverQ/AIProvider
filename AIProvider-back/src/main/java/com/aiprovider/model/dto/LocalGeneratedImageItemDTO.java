@@ -13,6 +13,7 @@ public class LocalGeneratedImageItemDTO {
     private String workflowName;
     private String prompt;
     private String negativePrompt;
+    private String mainModel;
     private String lorasJson;
     private Long seed;
     private Integer steps;
@@ -39,6 +40,8 @@ public class LocalGeneratedImageItemDTO {
     public void setPrompt(String prompt) { this.prompt = prompt; }
     public String getNegativePrompt() { return negativePrompt; }
     public void setNegativePrompt(String negativePrompt) { this.negativePrompt = negativePrompt; }
+    public String getMainModel() { return mainModel; }
+    public void setMainModel(String mainModel) { this.mainModel = mainModel; }
     public String getLorasJson() { return lorasJson; }
     public void setLorasJson(String lorasJson) { this.lorasJson = lorasJson; }
     public Long getSeed() { return seed; }

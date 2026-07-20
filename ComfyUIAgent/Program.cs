@@ -44,7 +44,9 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context => {
         context.Response.Headers["Access-Control-Allow-Private-Network"] = "true";
         context.Response.Headers.Vary = "Origin";
     }
-    context.Response.StatusCode = StatusCodes.Status502BadGateway;
+    context.Response.StatusCode = error is FileNotFoundException
+        ? StatusCodes.Status404NotFound
+        : StatusCodes.Status502BadGateway;
     context.Response.ContentType = "application/json";
     await context.Response.WriteAsJsonAsync(new { success = false, message = error?.Message ?? "Local ComfyUI bridge request failed" });
 }));

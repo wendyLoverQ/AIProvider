@@ -28,6 +28,16 @@ const BRIDGE = "http://127.0.0.1:32145";
 const BRIDGE_LAUNCH_URL = "aiprovider-bridge://start";
 const initial = FALLBACK_FORM;
 const taskStateRank = { RUNNING: 0, CANCEL_REQUESTED: 1, QUEUED: 2, FAILED: 3 };
+const executedMainModel = (historyItem) => {
+  const graph = Array.isArray(historyItem?.prompt) ? historyItem.prompt[2] : null;
+  if (!graph || typeof graph !== "object") return "";
+  for (const node of Object.values(graph)) {
+    const type = String(node?.class_type || "");
+    if (type === "CheckpointLoaderSimple" && typeof node?.inputs?.ckpt_name === "string") return node.inputs.ckpt_name;
+    if (type === "UNETLoader" && typeof node?.inputs?.unet_name === "string") return node.inputs.unet_name;
+  }
+  return "";
+};
 function PromptViewToggle({ value, onChange }) {
   return <div className="prompt-view-toggle" aria-label="Prompt 显示方式">
     <button type="button" aria-pressed={value === "zh"} onClick={() => onChange("zh")}>中文映射</button>
@@ -85,6 +95,7 @@ const persistActiveTasks = (items) => {
       workflowId: task.workflowId,
       workflowName: task.workflowName,
       promptSchemeName: task.promptSchemeName,
+      mainModel: task.mainModel,
       finalOutputNodeId: task.finalOutputNodeId,
       batchRunId: task.batchRunId,
       folder: task.folder,
@@ -180,6 +191,7 @@ const parseLoras = (value) => {
   catch { return []; }
 };
 const loraDisplayName = (value) => String(value || "").replace(/\\/g, "/").split("/").pop().replace(/\.(safetensors|ckpt|pt)$/i, "");
+const modelDisplayName = (value) => String(value || "").trim().replace(/\\/g, "/").split("/").filter(Boolean).pop() || "";
 const assetRecordToGalleryEntry = (item) => ({
   id: `asset-${item.id}`, assetId: item.id, source: "asset", platform: item.platform,
   status: item.status, trashOriginalStatus: item.trashOriginalStatus,
@@ -414,6 +426,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   const [twitterSubmitting, setTwitterSubmitting] = useState(false);
   const externalTaskIds = useRef(new Set()),
     tasksRef = useRef([]),
+    taskMetadataRef = useRef(new Map()),
     draggedHistoryImage = useRef(null),
     selectedWorkflowIdRef = useRef(""),
     historyLoaded = useRef(false),
@@ -428,6 +441,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     pendingGenerationSourceIds = useRef(new Set()),
     pendingSourceImageRef = useRef(false),
     comfyHistoryLoadingIds = useRef(new Set()),
+    localHistoryRecordedIds = useRef(new Set()),
     galleryCompletionRegisteredIds = useRef(new Set()),
     historyTimingCache = useRef(new Map()),
     bridgeInstanceIdRef = useRef(""),
@@ -443,7 +457,15 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   const handleGalleryTileAction = useCallback((action, item, image, event) => {
     galleryTileActionsRef.current?.[action]?.(item, image, event);
   }, []);
-  useEffect(() => { tasksRef.current = tasks; }, [tasks]);
+  useEffect(() => {
+    tasksRef.current = tasks;
+    tasks.forEach((task) => {
+      if (task?.form || task?.mainModel) taskMetadataRef.current.set(String(task.id), {
+        form: task.form,
+        mainModel: task.mainModel,
+      });
+    });
+  }, [tasks]);
   useEffect(() => {
     if (!notice) return undefined;
     const timer = setTimeout(() => setNotice(""), 3000);
@@ -1281,7 +1303,13 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       const keep = (image, item) => recordKeys.has(galleryRecordKey(item, image)) ? null : image;
       const serverEntries = mapGalleryEntries(source.serverEntries, keep);
       const recentEntries = mapGalleryEntries(source.recentEntries, keep);
-      const retainedUrls = new Set([...galleryEntryUrls(serverEntries), ...galleryEntryUrls(recentEntries)]);
+      const retainedUrls = new Set([
+        ...galleryEntryUrls(serverEntries),
+        ...galleryEntryUrls(recentEntries),
+        ...Object.entries(gallerySourcesRef.current)
+          .filter(([sourceMode]) => sourceMode !== mode)
+          .flatMap(([, otherSource]) => galleryEntryUrls([...otherSource.serverEntries, ...otherSource.recentEntries])),
+      ]);
       removedUrls.forEach((url) => { if (!retainedUrls.has(url)) URL.revokeObjectURL(url); });
       const total = Math.max(0, source.total - existingRecordKeys.size);
       return { ...source, serverEntries, recentEntries, total, pages: total ? Math.ceil(total / 100) : 0 };
@@ -1357,6 +1385,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       promptSchemeName: entry.promptSchemeName,
       prompt: entry.prompt,
       negativePrompt: entry.negativePrompt,
+      mainModel: entry.mainModel,
       lorasJson: JSON.stringify(parseLoras(entry.loras)),
       seed: entry.seed,
       steps: entry.steps,
@@ -1397,7 +1426,8 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   const appendTaskToHistory = async (promptId, task, loadedImages, authToken = token, historyItem = null) => {
     if (!loadedImages.length) return;
     const images = loadedImages.map(({ blob, ...image }) => ({ ...image, blob, url: URL.createObjectURL(blob) }));
-    const form = task?.form || {};
+    const trackedMetadata = taskMetadataRef.current.get(String(promptId));
+    const form = task?.form || trackedMetadata?.form || {};
     const timing = historyItem ? readGenerationTiming(historyItem) : {};
     if (timing.generationCompletedAt) historyTimingCache.current.set(String(promptId), timing);
     const entry = {
@@ -1405,6 +1435,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       promptId,
       prompt: form.positivePrompt || "",
       negativePrompt: form.negativePrompt || "",
+      mainModel: executedMainModel(historyItem) || task?.mainModel || trackedMetadata?.mainModel || form.checkpoint || "",
       loras: form.loras || [],
       seed: task?.actualSeed ?? form.seed,
       steps: form.steps,
@@ -1421,6 +1452,8 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       images,
     };
     addRecentOutputEntry(await recordLocalGeneratedImages(entry));
+    localHistoryRecordedIds.current.add(String(promptId));
+    taskMetadataRef.current.delete(String(promptId));
   };
   const registerGalleryCompletion = async (promptId, historyItem, task, authToken) => {
     const id = String(promptId);
@@ -1437,6 +1470,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   };
   const appendCompletedHistoryItem = async (promptId, task, historyItem, authToken) => {
     const id = String(promptId);
+    if (localHistoryRecordedIds.current.has(id)) return true;
     if (comfyHistoryLoadingIds.current.has(id)) return false;
     comfyHistoryLoadingIds.current.add(id);
     try {
@@ -1643,6 +1677,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         form: { ...submissionForm, workflowId: active.id },
         workflowId: active.id,
         workflowName: active.name || active.id,
+        mainModel: submissionForm.checkpoint || "",
         promptSchemeName: appliedPresetTitle || "",
         inputSha256,
         inputImages: Object.entries(submissionReferences).filter(([, file]) => file instanceof File).map(([key, file]) => ({ key, name: file.name, url: URL.createObjectURL(file) })),
@@ -1654,6 +1689,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         folder,
         createdAt: new Date().toISOString(),
       };
+      taskMetadataRef.current.set(String(nextTask.id), { form: nextTask.form, mainModel: nextTask.mainModel });
       setTasks((current) => {
         const next = [nextTask, ...current].slice(0, 2000);
         persistActiveTasks(next);
@@ -1736,10 +1772,12 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
           id: task.promptId, sourceType: "AIPROVIDER", external: false, state: cancelAllRequested.current ? "CANCEL_REQUESTED" : "QUEUED",
           bridgeState: cancelAllRequested.current ? "CANCEL_REQUESTED" : (task.state || "PENDING"), progress: 0,
           form: { ...submission, workflowId: active.id }, workflowId: active.id, workflowName: active.name || active.id,
+          mainModel: submission.checkpoint || "",
           promptSchemeName: appliedPresetTitle || "", inputSha256: null, inputImages, finalOutputNodeId: task.finalOutputNodeId,
           progressPlan, progressDetail: null, actualSeed: task.actualSeed, batchRunId, folder, createdAt,
         };
       });
+      nextTasks.forEach((task) => taskMetadataRef.current.set(String(task.id), { form: task.form, mainModel: task.mainModel }));
       if (pendingSourceImageRef.current) {
         nextTasks.forEach((task) => pendingGenerationSourceIds.current.add(String(task.id)));
         pendingSourceImageRef.current = false;
@@ -2056,6 +2094,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         folder,
         createdAt,
       }));
+      nextTasks.forEach((task) => taskMetadataRef.current.set(String(task.id), { form: task.form, mainModel: task.mainModel }));
       setTasks((current) => {
         const next = [...nextTasks, ...current].slice(0, 2000);
         persistActiveTasks(next);
@@ -3067,10 +3106,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
           {tasks.length > 0 && (
             <div className="task-queue-area">
               <div className="task-queue-header">
-                <div className="task-queue-overview"><strong>当前 {tasks.length} 个任务</strong><span>执行中 {runningTaskCount}</span><span>排队 {queuedTaskCount}</span>{failedTaskCount > 0 && <span>失败 {failedTaskCount}</span>}{batchProgress && <span>Bridge 已接收 {batchProgress.submitted} / {batchProgress.total}</span>}</div>
-                <div className="task-queue-controls" aria-label="生成任务控制">
-                  {cancelableTaskCount > 0 && <button type="button" className="task-cancel-all" disabled={cancelAllBusy} onClick={cancelAllTasks}><Warning weight="fill" />{cancelAllBusy ? "正在取消全部生成任务…" : `取消全部生成任务（${cancelableTaskCount}）`}</button>}
-                </div>
+                <div className="task-queue-overview"><strong>当前 {tasks.length} 个任务</strong><span>执行中 {runningTaskCount}</span><span>排队 {queuedTaskCount}</span>{cancelableTaskCount > 0 && <button type="button" className="task-cancel-all" disabled={cancelAllBusy} onClick={cancelAllTasks}><Warning weight="fill" />{cancelAllBusy ? "正在取消全部生成任务…" : `取消全部生成任务（${cancelableTaskCount}）`}</button>}{failedTaskCount > 0 && <span>失败 {failedTaskCount}</span>}{batchProgress && <span>Bridge 已接收 {batchProgress.submitted} / {batchProgress.total}</span>}</div>
               </div>
               <div className="task-queue-strip">
               {sortedTasks.map((task) => (
@@ -3218,7 +3254,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
           <div className="image-info-summary">
             <span><small>工作流</small>{infoDetail.item.workflowName || workflows.find((entry) => entry.id === infoDetail.item.workflowId)?.name || infoDetail.item.workflowId || "未记录"}</span>
             <span><small>Prompt 方案</small>{infoDetail.item.promptSchemeName || "未使用方案"}</span>
-            <span><small>主模型</small>{infoDetail.item.mainModel || "未记录"}</span>
+            <span><small>主模型</small>{modelDisplayName(infoDetail.item.mainModel) || "未记录"}</span>
             <span><small>分辨率</small>{infoDetail.image.width || infoDetail.item.width || "-"} × {infoDetail.image.height || infoDetail.item.height || "-"}</span>
             <span><small>生成平台</small>{infoDetail.item.platform || platform || "未记录"}</span>
             <span><small>任务创建时间</small>{infoDetail.item.createdAt ? new Date(infoDetail.item.createdAt).toLocaleString("zh-CN", { hour12: false }) : "未记录"}</span>

@@ -11,16 +11,23 @@ const PROMPT_ID = "11111111-1111-1111-1111-111111111111";
 const workflow = {
   id: "futa01",
   name: "Futa 01 · 竖版文生图",
-  fields: ["positivePrompt", "negativePrompt", "width", "height", "batchSize", "seed", "steps", "cfg", "sampler", "scheduler", "denoise", "secondPassSteps", "secondPassDenoise", "secondPassSeed"],
-  defaults: { positivePrompt: "portrait", negativePrompt: "bad", width: 1080, height: 1920, batchSize: 1, seed: 11, steps: 30, cfg: 5, sampler: "uni_pc", scheduler: "normal", denoise: 1, secondPassSteps: 22, secondPassDenoise: 0.28, secondPassSeed: 12 },
+  fields: ["positivePrompt", "negativePrompt", "checkpoint", "width", "height", "batchSize", "seed", "steps", "cfg", "sampler", "scheduler", "denoise", "secondPassSteps", "secondPassDenoise", "secondPassSeed"],
+  defaults: { positivePrompt: "portrait", negativePrompt: "bad", checkpoint: "flux\\dev.safetensors", width: 1080, height: 1920, batchSize: 1, seed: 11, steps: 30, cfg: 5, sampler: "uni_pc", scheduler: "normal", denoise: 1, secondPassSteps: 22, secondPassDenoise: 0.28, secondPassSeed: 12 },
   capabilities: { styleReference: false, poseReference: false, controlNet: false },
   definition: {
+    "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "flux\\dev.safetensors" } },
     "4": { class_type: "KSampler", inputs: { positive: ["28", 0], latent_image: ["5", 0], steps: 30, cfg: 5, seed: 1 } },
     "5": { class_type: "EmptyLatentImage", inputs: { width: 1080, height: 1920 } },
     "7": { class_type: "SaveImage", _meta: { title: "最终输出" }, inputs: {} },
     "28": { inputs: { text: "portrait" } },
   },
-  binding: { fields: {}, outputNode: { title: "最终输出" } },
+  binding: {
+    fields: {
+      ...Object.fromEntries(["positivePrompt", "negativePrompt", "width", "height", "batchSize", "seed", "steps", "cfg", "sampler", "scheduler", "denoise", "secondPassSteps", "secondPassDenoise", "secondPassSeed"].map((key) => [key, {}])),
+      checkpoint: { nodeId: "1", nodeType: "CheckpointLoaderSimple", input: "ckpt_name" },
+    },
+    outputNode: { title: "最终输出" },
+  },
 };
 const workflow2 = { ...workflow, id: "futa02", name: "Futa 02 · 透明双输出", definition: { ...workflow.definition, "99": { class_type: "WorkflowTwoMarker", inputs: {} } }, fields: undefined, binding: { ...workflow.binding, fields: { ...Object.fromEntries(workflow.fields.map((key) => [key, {}])), node_4_control_after_generate: { nodeId: "4", input: "control_after_generate", label: "KSampler 4 · control_after_generate" } } }, defaults: { ...workflow.defaults, positivePrompt: "changed by workflow", width: 832, height: 1216, batchSize: 3, seed: 99, steps: 42, cfg: 7, sampler: "euler", scheduler: "karras", node_4_control_after_generate: false } };
 const cutoutWorkflow = {
@@ -98,6 +105,11 @@ describe("Comfy image generation flow", () => {
   let configBatchBody;
   let configBatchRequests;
   let taskRecordBatchBody;
+  let localImageBatchBody;
+  let localImageBatchBodies;
+  let localGalleryMainModel;
+  let staleLocalGallery;
+  let staleCleanupIds;
 
   beforeEach(() => {
     submitted = false;
@@ -139,6 +151,11 @@ describe("Comfy image generation flow", () => {
     configBatchBody = null;
     configBatchRequests = 0;
     taskRecordBatchBody = null;
+    localImageBatchBody = null;
+    localImageBatchBodies = [];
+    localGalleryMainModel = null;
+    staleLocalGallery = false;
+    staleCleanupIds = [];
     vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
     vi.stubGlobal("confirm", vi.fn(() => true));
     vi.stubGlobal("ClipboardItem", class { constructor(items) { this.items = items; } });
@@ -151,6 +168,7 @@ describe("Comfy image generation flow", () => {
       if (url.endsWith("/api/local-workflows/settings")) return json({ directory: "F:\\ComfyUI\\user\\default\\workflows", exists: true });
       if (url.endsWith("/api/local-workflows")) return json({ directory: "F:\\ComfyUI\\user\\default\\workflows", workflows: [workflow, workflow2, cutoutWorkflow, interactiveWorkflow], rejected: [] });
       if (url.endsWith("/api/lora-models")) return json({ models: [] });
+      if (url.includes("/api/main-models?")) return json({ models: [{ name: "flux\\dev.safetensors", displayName: "dev" }] });
       if (url === "/api/prompt-options/config") return json({ code: 200, data: { generalNegativePrompt: "" } });
       if (url === "/api/prompt-options/analyze") return json({ code: 200, data: [] });
       if (url.startsWith("/api/prompt-options?")) return json({ code: 200, data: { items: [], total: 0, pages: 0, page: 1, pageSize: 100 } });
@@ -222,7 +240,11 @@ describe("Comfy image generation flow", () => {
         return json({ code: 200, data: { trashed: ids.length } });
       }
       if (url.endsWith("/api/local-generated-images/restore") && options.method === "POST") return json({ code: 200, data: { restored: 1 } });
-      if (url.endsWith("/api/local-generated-images/delete") && options.method === "POST") return json({ code: 200, data: { deleted: 1 } });
+      if (url.endsWith("/api/local-generated-images/delete") && options.method === "POST") {
+        const ids = JSON.parse(options.body).ids;
+        staleCleanupIds.push(...ids);
+        return json({ code: 200, data: { deleted: ids.length } });
+      }
       if (["/api/assets/trash", "/api/assets/restore", "/api/assets/delete"].some((path) => url.endsWith(path)) && options.method === "POST") return json({ code: 200, data: { updated: 1 } });
       if (url.endsWith("/api/assets/status") && options.method === "PUT") return json({ code: 200, data: { updated: 1 } });
       if (url.endsWith("/comfy/queue")) {
@@ -234,7 +256,9 @@ describe("Comfy image generation flow", () => {
       if (url.endsWith("/api/logs/client") && options.method === "POST") return json({ success: true });
       if (url.includes("/api/comfy-tasks/") && url.endsWith("/complete") && options.method === "POST") return json({ code: 200, data: { completed: true } });
       if (url.endsWith("/api/local-generated-images/batch") && options.method === "POST") {
-        const items = JSON.parse(options.body).items;
+        localImageBatchBody = JSON.parse(options.body);
+        localImageBatchBodies.push(localImageBatchBody);
+        const items = localImageBatchBody.items;
         return json({ code: 200, data: { saved: items.length, items: items.map((item, index) => ({ ...item, id: 900 + index })) } });
       }
       if (url.endsWith("/comfy/aiprovider/progress") && progressFails) return json({ message: "progress extension unavailable" }, 404);
@@ -255,6 +279,13 @@ describe("Comfy image generation flow", () => {
       if (url.includes("/api/local-generated-images?")) {
         galleryRequests += 1;
         galleryRequestUrls.push(url);
+        if (staleLocalGallery) {
+          const valid = { id: 778, platform: "Windows", promptId: "valid", imagePath: "aimaid/valid.png", fileName: "valid.png", prompt: "valid", status: "ACTIVE" };
+          const stale = { id: 777, platform: "Windows", promptId: "stale", imagePath: "aimaid/stale.png", fileName: "stale.png", prompt: "stale", status: "ACTIVE" };
+          return staleCleanupIds.length
+            ? json({ code: 200, data: { items: [valid], page: 1, pages: 1, total: 1 } })
+            : json({ code: 200, data: { items: [stale, valid], page: 1, pages: 2, total: 101 } });
+        }
         const items = multiImageGallery ? [{
           id: PROMPT_ID,
           promptId: PROMPT_ID,
@@ -276,10 +307,11 @@ describe("Comfy image generation flow", () => {
         const records = items.flatMap((item) => item.images.map((image, index) => ({
           id: 100 + index, platform: "Windows", promptId: item.promptId || item.id,
           imagePath: image.path, fileName: image.filename, prompt: item.prompt, taskCreatedAt: item.createdAt,
-          status: "ACTIVE",
+          status: "ACTIVE", mainModel: localGalleryMainModel,
         })));
         return json({ code: 200, data: { items: records, page, pages: localGalleryPages, total: currentImages + (localGalleryPages - 1) * 100 } });
       }
+      if (url.includes("/api/gallery/file?") && url.includes("stale.png")) return json({ message: "本机图片不存在" }, 404);
       if (url.includes("/api/gallery/file?")) return new Response(new Blob(["image"], { type: "image/png" }), { headers: { "Content-Type": "image/png" } });
       if (url.includes("/api/assets/file?")) return new Response(new Blob(["image"], { type: "image/png" }), { headers: { "Content-Type": "image/png" } });
       if (url.includes("/comfy/history?")) {
@@ -301,6 +333,7 @@ describe("Comfy image generation flow", () => {
           definition: options.body.get("workflowDefinition"),
           positivePrompt: options.body.get("positivePrompt"),
           negativePrompt: options.body.get("negativePrompt"),
+          checkpoint: options.body.get("checkpoint"),
         };
         submittedEditorData = options.body.get("node_5_editor_data");
         expect(options.body.get("workflowDefinition")).toContain("SaveImage");
@@ -359,7 +392,19 @@ describe("Comfy image generation flow", () => {
     const image = await screen.findByAltText("历史生成结果", {}, { timeout: 10000 });
     expect(image.getAttribute("src")).toBe("blob:done");
     expect(screen.getByText("1 张")).toBeTruthy();
+    await waitFor(() => expect(localImageBatchBodies.map((body) => ({ promptId: body?.items?.[0]?.promptId, mainModel: body?.items?.[0]?.mainModel }))).toEqual([{ promptId: PROMPT_ID, mainModel: "flux\\dev.safetensors" }]));
   }, 15000);
+
+  it("shows only the main-model filename in image details", async () => {
+    submitted = true;
+    localGalleryMainModel = "flux\\dev.safetensors";
+    render(<ComfyLocalWorkbench />);
+    const image = await screen.findByAltText("历史生成结果");
+    fireEvent.contextMenu(image.closest("button"));
+    fireEvent.click(screen.getByRole("button", { name: "详细" }));
+    expect(screen.getByText("dev.safetensors")).toBeTruthy();
+    expect(screen.queryByText("flux\\dev.safetensors")).toBeNull();
+  });
 
   it("cancels a queued generation from its compact close button", async () => {
     render(<ComfyLocalWorkbench />);
@@ -630,6 +675,15 @@ describe("Comfy image generation flow", () => {
     expect(screen.getByText("已一次提交 3 个任务到 Bridge 队列")).toBeTruthy();
   });
 
+  it("batch-removes missing local rows and reloads the corrected total and pages", async () => {
+    staleLocalGallery = true;
+    render(<ComfyLocalWorkbench />);
+    await waitFor(() => expect(staleCleanupIds).toEqual([777]));
+    expect(await screen.findByText("1 张")).toBeTruthy();
+    expect(screen.queryByText(/第 1 \/ 2 页/)).toBeNull();
+    expect(galleryRequests).toBe(2);
+  });
+
   it("stays responsive after Bridge accepts 100 tasks", async () => {
     render(<ComfyLocalWorkbench />);
     const quantity = await screen.findByRole("spinbutton", { name: "生成数量" });
@@ -732,6 +786,21 @@ describe("Comfy image generation flow", () => {
     await waitFor(() => expect(localMutationIds).toEqual([100]));
   });
 
+  it("keeps a moved local image URL alive while the recycle bin retains it", async () => {
+    submitted = true;
+    render(<ComfyLocalWorkbench />);
+    fireEvent.click(await screen.findByRole("button", { name: "回收站" }));
+    await screen.findByAltText("历史生成结果");
+    fireEvent.click(screen.getByRole("button", { name: "本机图片" }));
+    const localImage = await screen.findByAltText("历史生成结果");
+    fireEvent.contextMenu(localImage.closest("button"));
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    await waitFor(() => expect(localMutationIds).toEqual([100]));
+    fireEvent.click(screen.getByRole("button", { name: "回收站" }));
+    expect((await screen.findAllByAltText("历史生成结果")).some((image) => image.getAttribute("src") === "blob:done")).toBe(true);
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith("blob:done");
+  });
+
   it("submits selected image operations with one duplicate request, one Bridge batch and one task-record batch", async () => {
     multiImageGallery = true;
     render(<ComfyLocalWorkbench />);
@@ -810,6 +879,9 @@ describe("Comfy image generation flow", () => {
     await waitFor(() => expect(generate.disabled).toBe(false));
     fireEvent.click(generate);
     const cancelAll = await screen.findByRole("button", { name: "取消全部生成任务（1）" });
+    const overview = cancelAll.closest(".task-queue-overview");
+    expect(overview).toBeTruthy();
+    expect(cancelAll.previousElementSibling?.textContent).toContain("排队 1");
     fireEvent.click(cancelAll);
     await waitFor(() => expect(cancelAllRequests).toBe(1));
     expect(screen.getByText("Bridge 已接收全部 1 个任务的取消请求")).toBeTruthy();
