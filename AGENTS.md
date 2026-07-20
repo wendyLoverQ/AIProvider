@@ -18,8 +18,8 @@ UI 门禁：
 
 - 开发、修改和测试在本地工作区完成，只提交源码到 GitHub `master`，禁止创建或推送额外功能分支。
 - 开始发布如果需要停止 Bridge可以停止，避免旧进程干扰发布前契约测试和源码边界校验。
-- 发布测试只运行本次实际改动所覆盖的业务测试和对应门禁，禁止在发布流程中运行与本次改动无关的全量测试。
-- 生产服务器不用于日常开发。发布时由 AWS、腾讯云或其他实际生产服务器从 GitHub 拉取指定的 `master` 提交，并在服务器本机完成本次改动相关测试、前端构建和后端打包。
+- 所有业务测试、契约测试和 UI 门禁只允许在本地工作区运行；只运行本次实际改动覆盖的测试和对应门禁，禁止运行无关的全量测试。
+- 生产服务器禁止运行任何测试。发布时生产服务器只从 GitHub 拉取指定的 `master` 提交，并完成前端构建、后端打包、运行文件切换和发布后健康检查。
 - 服务器构建和发布必须基于明确的 Git 提交哈希，发布结果必须能够追溯到该提交。
 
 生产发布配置：
@@ -27,7 +27,7 @@ UI 门禁：
 - 开始发布前先读取 `server-configs/production.aws.json`，禁止重新搜索或猜测服务器地址、源码目录、服务名和运行目录。
 - 当前 AWS 生产源码仓库固定为 `/opt/aiprovider/AIProvider`，Git 远端为 `origin`，发布分支固定为 `master`。
 - 服务器临时构建根目录为 `/opt/aiprovider/builds`，每次使用明确提交哈希建立独立构建目录，例如 `/opt/aiprovider/builds/<commit-sha>`。
-- 成功发布备份根目录为 `/opt/aiprovider/releases`，每个成功版本按提交哈希保存，例如 `/opt/aiprovider/releases/<commit-sha>`。
+- 生产发布不创建构建产物备份，`/opt/aiprovider/releases` 不得保留历史发布包。
 - 后端模块为 `AIProvider-back`，服务器构建产物为 `AIProvider-back/target/ai-provider-0.0.1-SNAPSHOT.jar`，生产运行文件为 `/opt/aiprovider/backend/app.jar`，systemd 服务为 `aiprovider-backend.service`。
 - 前端模块为 `AIProvider-front`，服务器构建目录为 `AIProvider-front/dist`，生产运行目录为 `/opt/aiprovider/frontend`。
 - 生产环境变量文件为 `/etc/aimaid/aimaid.env`；只允许读取所需变量，禁止在日志、回复或提交中输出其中的密钥和密码。
@@ -35,9 +35,10 @@ UI 门禁：
 - 当前服务器连接信息和 SSH 私钥路径统一从 `server-configs/production.aws.json` 读取；禁止把私钥内容写进代码、文档、日志或 Git。
 - 将来迁移到腾讯云或其他服务器时，新增对应的 `server-configs/production.<provider>.json`，字段结构与 AWS 配置保持一致，并在本节更新当前生效的生产配置文件名。
 
-构建备份与清理：
+构建产物清理：
 
-- 生产服务器保留最近 3 个成功发布的构建备份，用于快速回滚；新发布成功并完成校验后，只删除超过 3 个的更旧备份。
-- 发布失败时保留本次服务器构建目录和产物用于排障，不得占用最近 3 个成功备份的名额；问题处理完成后再明确清理。
+- 生产发布成功并完成健康检查后，必须立即删除本次 `/opt/aiprovider/builds/<commit-sha>` 临时构建目录及其中全部前后端构建产物。
+- 生产服务器不得保留任何成功发布备份；每次发布结束时必须确认 `/opt/aiprovider/releases` 为空，并清理此前遗留的发布包。
+- 发布失败时只允许在本次排障期间临时保留对应的明确构建目录；问题处理结束后必须删除，禁止积累历史构建包。
 - 本地不生成生产发布包。若历史流程或异常操作在本地产生 `.jar`、`.7z`、`.tar.gz` 或校验文件，确认不再用于排障后必须清理，禁止长期堆积。
 - 删除前必须逐一核对目标是明确的构建目录或发布文件，禁止使用宽泛目录、未解析变量或递归通配删除。

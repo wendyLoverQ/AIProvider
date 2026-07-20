@@ -7,7 +7,7 @@
   "sourcePath": "/opt/aiprovider/AIProvider",
   "buildRoot": "/opt/aiprovider/builds",
   "releaseBackupRoot": "/opt/aiprovider/releases",
-  "releaseBackupCount": 3,
+  "releaseBackupCount": 0,
   "backendModule": "AIProvider-back",
   "backendArtifact": "AIProvider-back/target/ai-provider-0.0.1-SNAPSHOT.jar",
   "backendService": "aiprovider-backend.service",
