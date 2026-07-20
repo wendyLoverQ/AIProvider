@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import FavoriteMediaLibrary from "./FavoriteMediaLibrary";
 
 const item = { id: 7, title: "星夜海岸", originalFileName: "coast.png", mediaType: "image", contentType: "image/png", fileSize: 4096, width: 1920, height: 1080, contentUrl: "/api/favorites/7/content", thumbnailUrl: "/api/favorites/7/thumbnail", createdAt: "2026-07-20T01:00:00" };
@@ -16,6 +16,46 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("FavoriteMediaLibrary", () => {
+  it("uploads image files dropped anywhere on the page", async () => {
+    const uploaded = { ...item, id: 8, title: "拖入图片" };
+    vi.spyOn(globalThis, "fetch").mockImplementation((url) => {
+      if (url === "/api/favorites?page=1&pageSize=100") return jsonResponse({ code: 200, data: { items: [], total: 0 } });
+      throw new Error(`unexpected request: ${url}`);
+    });
+    const sendUpload = vi.fn(); let finishUpload;
+    vi.stubGlobal("XMLHttpRequest", class {
+      constructor() {
+        this.listeners = {}; this.uploadListeners = {};
+        this.upload = { addEventListener: (type, listener) => { this.uploadListeners[type] = listener; } };
+      }
+      open(method, url) { this.method = method; this.url = url; }
+      addEventListener(type, listener) { this.listeners[type] = listener; }
+      send(form) {
+        sendUpload(form);
+        const file = form.get("file");
+        this.uploadListeners.progress?.({ lengthComputable: true, loaded: Math.ceil(file.size / 2), total: file.size });
+        finishUpload = () => { this.status = 200; this.response = { code: 200, data: uploaded }; this.listeners.load?.(); };
+      }
+    });
+    render(<FavoriteMediaLibrary />);
+    await screen.findByText("这里还没有喜欢的画面");
+    const file = new File(["image"], "拖入图片.png", { type: "image/png" });
+    const dataTransfer = { types: ["Files"], files: [file], dropEffect: "none" };
+    fireEvent.dragEnter(window, { dataTransfer });
+    expect(screen.getByRole("status", { name: "拖放上传区域" })).toBeTruthy();
+    fireEvent.dragOver(window, { dataTransfer });
+    expect(dataTransfer.dropEffect).toBe("copy");
+    fireEvent.drop(window, { dataTransfer });
+    expect(screen.getByRole("dialog", { name: "确认拖放上传" })).toBeTruthy();
+    expect(sendUpload).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "确认上传" }));
+    await waitFor(() => expect(sendUpload).toHaveBeenCalledOnce());
+    expect(screen.getByRole("progressbar").getAttribute("value")).toBe("3");
+    await act(async () => { finishUpload(); });
+    expect(await screen.findByText("已保存 1 个媒体到服务器")).toBeTruthy();
+    expect(screen.queryByRole("status", { name: "拖放上传区域" })).toBeNull();
+  });
+
   it("loads the server gallery and filters it through the shared search field", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((url) => {
       if (url === "/api/favorites?page=1&pageSize=100") return jsonResponse({ code: 200, data: { items: [item], total: 1 } });

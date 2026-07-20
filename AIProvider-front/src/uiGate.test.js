@@ -57,6 +57,12 @@ describe("UI release gate", () => {
     expect(page).toContain('fetch("/api/favorites"');
     expect(page).toContain('/api/wallpaper/monitors');
     expect(page).toContain('renderWallpaper');
+    expect(page).toContain('window.addEventListener("dragenter"');
+    expect(page).toContain('window.addEventListener("drop"');
+    expect(page).toContain('aria-label="拖放上传区域"');
+    expect(page).toContain('aria-label="确认拖放上传"');
+    expect(page).toContain('new XMLHttpRequest()');
+    expect(page).toContain('<progress max=');
     expect(page).not.toMatch(/<div[^>]+onClick=/);
     expect(css).toContain("var(--bg-surface)");
     expect(css).toContain("var(--text-primary)");

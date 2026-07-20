@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowClockwise, ArrowsLeftRight, ArrowCounterClockwise, CaretLeft, CaretRight, CheckCircle, Desktop, DotsThree, ImageSquare, MagnifyingGlassMinus, MagnifyingGlassPlus, Play, Star, Trash, UploadSimple, X } from "@phosphor-icons/react";
 import { TransformComponent, TransformWrapper } from "react-zoom-pan-pinch";
 import UiSearchField from "./UiSearchField";
@@ -13,6 +13,23 @@ const ACCEPTED_TYPES = [...IMAGE_TYPES, ...VIDEO_TYPES];
 const ACCEPT_ATTR = [...IMAGE_TYPES, ...VIDEO_TYPES].join(",");
 const isVideoItem = (item) => item?.mediaType === "video" || String(item?.contentType || "").startsWith("video/");
 const isVideoFile = (file) => file && (file.type ? String(file.type).startsWith("video/") : /\.(mp4|webm|mov)$/i.test(file.name));
+const isAcceptedFile = (file) => file && (ACCEPTED_TYPES.includes(file.type) || /\.(png|jpe?g|webp|gif|mp4|webm|mov)$/i.test(file.name));
+const uploadFavorite = (form, onProgress) => new Promise((resolve, reject) => {
+  const request = new XMLHttpRequest();
+  request.open("POST", "/api/favorites"); request.responseType = "json";
+  request.upload.addEventListener("progress", (event) => {
+    if (event.lengthComputable) onProgress(event.loaded, event.total);
+  });
+  request.addEventListener("load", () => {
+    const result = request.response;
+    if (!result) { reject(new Error("我的最爱上传接口响应异常")); return; }
+    if (request.status < 200 || request.status >= 300 || result?.code !== 200) reject(new Error(result?.message || "上传失败"));
+    else resolve(result.data);
+  });
+  request.addEventListener("error", () => reject(new Error("上传请求失败")));
+  request.addEventListener("abort", () => reject(new Error("上传已取消")));
+  request.send(form);
+});
 
 const BRIDGE = "http://127.0.0.1:32145";
 const formatSize = (value) => {
@@ -56,6 +73,8 @@ const renderWallpaper = async (blob, monitor, mode) => {
 
 export default function FavoriteMediaLibrary() {
   const inputRef = useRef(null);
+  const dragDepth = useRef(0);
+  const uploadingRef = useRef(false);
   const [items, setItems] = useState([]);
   const [state, setState] = useState("loading");
   const [error, setError] = useState("");
@@ -63,7 +82,9 @@ export default function FavoriteMediaLibrary() {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(() => new Set());
   const [selectionMode, setSelectionMode] = useState(false);
-  const [uploading, setUploading] = useState({ active: false, done: 0, total: 0 });
+  const [uploading, setUploading] = useState({ active: false, done: 0, total: 0, uploadedBytes: 0, totalBytes: 0, currentName: "" });
+  const [draggingFiles, setDraggingFiles] = useState(false);
+  const [pendingDropFiles, setPendingDropFiles] = useState([]);
   const [previewIndex, setPreviewIndex] = useState(null);
   const [viewerOrientation, setViewerOrientation] = useState({ rotation: 0, mirrored: false });
   const viewerTransform = useRef(null);
@@ -122,30 +143,78 @@ export default function FavoriteMediaLibrary() {
   });
   const toggleAll = () => { setSelected(allSelected ? new Set() : new Set(filtered.map((item) => item.id))); setSelectionMode(!allSelected); };
 
-  const uploadFiles = async (fileList) => {
+  const uploadFiles = useCallback(async (fileList) => {
     const files = [...(fileList || [])];
-    if (!files.length) return;
-    setUploading({ active: true, done: 0, total: files.length }); setError(""); setNotice("");
+    if (!files.length || uploadingRef.current) return;
+    const unsupported = files.filter((file) => !isAcceptedFile(file));
+    if (unsupported.length) { setError(`不支持这些文件：${unsupported.map((file) => file.name).join("、")}`); return; }
+    uploadingRef.current = true;
+    const totalBytes = files.reduce((sum, file) => sum + Number(file.size || 0), 0);
+    let completedBytes = 0;
+    setUploading({ active: true, done: 0, total: files.length, uploadedBytes: 0, totalBytes, currentName: files[0].name }); setError(""); setNotice("");
     try {
       const uploaded = [];
       for (let index = 0; index < files.length; index++) {
         const file = files[index];
+        setUploading((current) => ({ ...current, done: index, uploadedBytes: completedBytes, currentName: file.name }));
         const form = new FormData(); form.append("file", file, file.name);
         form.append("title", file.name.replace(/\.[^.]+$/, ""));
         if (!isVideoFile(file)) {
           const dimensions = await createImageBitmap(file);
           form.append("width", String(dimensions.width)); form.append("height", String(dimensions.height)); dimensions.close();
         }
-        const response = await fetch("/api/favorites", { method: "POST", body: form });
-        const result = await readJsonResponse(response, "我的最爱上传接口响应异常");
-        if (!response.ok || result.code !== 200) throw new Error(`${file.name}：${result.message || "上传失败"}`);
-        uploaded.push(result.data); setUploading({ active: true, done: index + 1, total: files.length });
+        let uploadedItem;
+        try {
+          uploadedItem = await uploadFavorite(form, (loaded, requestTotal) => {
+            const fileBytes = Number(file.size || 0);
+            const currentBytes = requestTotal > 0 ? Math.round((loaded / requestTotal) * fileBytes) : 0;
+            setUploading((current) => ({ ...current, uploadedBytes: completedBytes + currentBytes }));
+          });
+        } catch (exception) { throw new Error(`${file.name}：${exception.message}`); }
+        uploaded.push(uploadedItem); completedBytes += Number(file.size || 0);
+        setUploading((current) => ({ ...current, done: index + 1, uploadedBytes: completedBytes }));
       }
       setItems((current) => [...new Map([...uploaded, ...current].map((item) => [item.id, item])).values()]);
       setNotice(`已保存 ${uploaded.length} 个媒体到服务器`);
     } catch (exception) { setError(`上传失败：${exception.message}`); }
-    finally { setUploading({ active: false, done: 0, total: 0 }); if (inputRef.current) inputRef.current.value = ""; }
-  };
+    finally { uploadingRef.current = false; setUploading({ active: false, done: 0, total: 0, uploadedBytes: 0, totalBytes: 0, currentName: "" }); if (inputRef.current) inputRef.current.value = ""; }
+  }, []);
+  useEffect(() => {
+    const hasFiles = (event) => Boolean(event.dataTransfer?.files?.length) || Array.from(event.dataTransfer?.types || []).includes("Files");
+    const onDragEnter = (event) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault(); dragDepth.current += 1; setDraggingFiles(true);
+    };
+    const onDragOver = (event) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault(); event.dataTransfer.dropEffect = "copy";
+    };
+    const onDragLeave = () => {
+      if (!dragDepth.current) return;
+      dragDepth.current = Math.max(0, dragDepth.current - 1);
+      if (!dragDepth.current) setDraggingFiles(false);
+    };
+    const resetDrag = () => { dragDepth.current = 0; setDraggingFiles(false); };
+    const onDrop = (event) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault(); const files = [...(event.dataTransfer?.files || [])]; resetDrag();
+      const unsupported = files.filter((file) => !isAcceptedFile(file));
+      if (unsupported.length) setError(`不支持这些文件：${unsupported.map((file) => file.name).join("、")}`);
+      else if (files.length && !uploadingRef.current) setPendingDropFiles(files);
+    };
+    window.addEventListener("dragenter", onDragEnter);
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("drop", onDrop);
+    window.addEventListener("dragend", resetDrag);
+    return () => {
+      window.removeEventListener("dragenter", onDragEnter);
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("dragleave", onDragLeave);
+      window.removeEventListener("drop", onDrop);
+      window.removeEventListener("dragend", resetDrag);
+    };
+  }, []);
   const remove = async () => {
     if (!deleteIds.length) return;
     try {
@@ -193,6 +262,7 @@ export default function FavoriteMediaLibrary() {
   };
 
   return <section className="favorite-library">
+    {draggingFiles && <div className="favorite-drop-overlay" role="status" aria-label="拖放上传区域"><UploadSimple /><strong>松开即可上传</strong><span>支持图片与视频，可同时拖入多个文件</span></div>}
     <div className="favorite-hero">
       <div className="favorite-hero-text">
         <div className="favorite-hero-badge"><Star weight="fill" /></div>
@@ -218,6 +288,11 @@ export default function FavoriteMediaLibrary() {
     </div>
 
     <UiToast message={error || notice} tone={error ? "error" : "success"} onDismiss={() => { setError(""); setNotice(""); }} />
+    {uploading.active && <div className="favorite-upload-progress" role="status" aria-label="上传进度">
+      <header><strong>正在上传 {uploading.currentName}</strong><span>{uploading.done}/{uploading.total}</span></header>
+      <progress max={Math.max(1, uploading.totalBytes)} value={uploading.uploadedBytes} />
+      <small>{Math.round((uploading.uploadedBytes / Math.max(1, uploading.totalBytes)) * 100)}%</small>
+    </div>}
     {state === "loading" && !items.length ? <div className="favorite-empty"><Star /><strong>正在打开你的私人画廊…</strong></div>
       : !filtered.length ? <div className="favorite-empty"><ImageSquare /><strong>{query ? "没有找到匹配的媒体" : "这里还没有喜欢的画面"}</strong><span>{query ? "换一个关键词试试" : "可以直接上传，或从图像工坊的“我的资产”批量转入"}</span>{!query && <button type="button" className="primary" onClick={() => inputRef.current?.click()}><UploadSimple />上传第一个媒体</button>}</div>
         : <div className="favorite-grid">{filtered.map((item, index) => <article className="favorite-card" key={item.id} data-selected={selected.has(item.id)}>
@@ -310,6 +385,7 @@ export default function FavoriteMediaLibrary() {
         </footer>
       </div>
     </div>}
+    {!!pendingDropFiles.length && <div className="favorite-confirm" role="dialog" aria-modal="true" aria-label="确认拖放上传"><div><UploadSimple /><h3>上传这些媒体？</h3><p>即将把 {pendingDropFiles.length} 个图片或视频复制到服务器“我的最爱”。</p><span className="favorite-drop-files">{pendingDropFiles.slice(0, 4).map((file) => file.name).join("、")}{pendingDropFiles.length > 4 ? ` 等 ${pendingDropFiles.length} 个文件` : ""}</span><footer><button type="button" onClick={() => setPendingDropFiles([])}>取消</button><button type="button" className="primary" onClick={() => { const files = pendingDropFiles; setPendingDropFiles([]); uploadFiles(files); }}>确认上传</button></footer></div></div>}
     {!!deleteIds.length && <div className="favorite-confirm" role="dialog" aria-modal="true" aria-label="确认移除"><div><Star weight="fill" /><h3>从我的最爱移除？</h3><p>将同时删除服务器上的 {deleteIds.length} 个原图文件，此操作不可恢复。</p><footer><button type="button" onClick={() => setDeleteIds([])}>取消</button><button type="button" className="danger" onClick={remove}>确认移除</button></footer></div></div>}
     {wallpaper.open && <div className="favorite-confirm wallpaper-dialog" role="dialog" aria-modal="true" aria-label="选择壁纸显示器"><div>
       <Desktop /><h3>应用到哪一台显示器？</h3><p>默认会判断图片与屏幕方向，只替换所选屏幕。</p>
