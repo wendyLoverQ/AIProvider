@@ -306,7 +306,7 @@ export default function FavoriteMediaLibrary() {
       const item = filtered[previewIndex];
       return <MediaViewer
         title={item.title}
-        subtitle={`${item.originalFileName || mediaFileName(item)} · ${formatSize(item.fileSize)} · ${formatDate(item.createdAt)}`}
+        subtitle={`${item.width || "?"} × ${item.height || "?"} · ${item.originalFileName || mediaFileName(item)} · ${formatSize(item.fileSize)} · ${formatDate(item.createdAt)}`}
         index={previewIndex}
         total={filtered.length}
         src={item.contentUrl}
@@ -317,7 +317,6 @@ export default function FavoriteMediaLibrary() {
         onNavigate={navigatePreview}
         onContextMenu={(event) => { event.preventDefault(); setMenu({ item, x: Math.min(event.clientX, window.innerWidth - 210), y: Math.min(event.clientY, window.innerHeight - 150) }); }}
         actions={<button type="button" aria-label="应用为壁纸" title="应用为壁纸" onClick={() => openWallpaper(item)}><Desktop /></button>}
-        footer={<><span className="favorite-viewer-stat"><strong>{item.width || "?"} × {item.height || "?"}</strong><small>原始分辨率</small></span><span className="favorite-viewer-stat"><strong>{item.sourcePlatform || "本地上传"}</strong><small>来源</small></span><span className="favorite-viewer-stat"><strong>{item.prompt ? "已记录" : "无"}</strong><small>Prompt</small></span><div className="favorite-preview-footer-actions"><button type="button" onClick={() => openWallpaper(item)}><Desktop />选择显示器并应用为壁纸</button></div></>}
       />;
     })()}
     {!!pendingDropFiles.length && <div className="favorite-confirm" role="dialog" aria-modal="true" aria-label="确认拖放上传"><div><UploadSimple /><h3>上传这些媒体？</h3><p>即将把 {pendingDropFiles.length} 个图片或视频复制到服务器“我的最爱”。</p><span className="favorite-drop-files">{pendingDropFiles.slice(0, 4).map((file) => file.name).join("、")}{pendingDropFiles.length > 4 ? ` 等 ${pendingDropFiles.length} 个文件` : ""}</span><footer><button type="button" onClick={() => setPendingDropFiles([])}>取消</button><button type="button" className="primary" onClick={() => { const files = pendingDropFiles; setPendingDropFiles([]); uploadFiles(files); }}>确认上传</button></footer></div></div>}
