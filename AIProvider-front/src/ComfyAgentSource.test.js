@@ -101,6 +101,8 @@ describe("ComfyUIAgent durable generation ownership", () => {
   it("persists one asynchronous cancellation request for every active Bridge task", () => {
     const source = readFileSync(sourcePath, "utf8");
     expect(source).toContain('app.MapPost("/api/tasks/cancel-all"');
+    expect(source).toContain('app.MapGet("/api/tasks/states"');
+    expect(source).toContain("SnapshotBridgeGenerations");
     expect(source).toContain("CancelAllBridgeGenerations");
     expect(source).toContain('item.State = "CANCEL_REQUESTED"');
   });

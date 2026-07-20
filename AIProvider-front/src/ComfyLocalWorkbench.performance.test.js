@@ -11,6 +11,20 @@ describe("ComfyLocalWorkbench active-task rendering", () => {
     expect(source).not.toContain("setTaskClock");
     expect(source).toContain("startTransition(() => setTasks");
     expect(source).toContain("sameTaskRuntime(existing, updated) ? existing : updated");
+    expect(source).toContain("const GalleryImageWall = memo(");
+    expect(source).toContain("const history = useMemo(");
+    expect(source).toContain("const galleryImages = useMemo(");
+    expect(source).toContain('call("/api/tasks/states"');
+    expect(source).not.toMatch(/nextTasks\.forEach\(\(task\) => poll\(/);
+    expect(source).not.toContain('call("/comfy/history?max_items=20"');
+  });
+
+  it("loads each gallery queue once and keeps database-id item identity", () => {
+    const source = readFileSync(sourcePath, "utf8");
+    expect(source).toContain('if (source.status === "idle") await loadGalleryPage');
+    expect(source).toContain("galleryStableKey(mode, item, image)");
+    expect(source).toContain('`asset:${item.assetId}`');
+    expect(source).toContain('`local:${recordId}`');
   });
 
   it("uses one request for duplicate checks, Bridge submission and task persistence", () => {

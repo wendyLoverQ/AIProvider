@@ -6,6 +6,8 @@ import com.aiprovider.model.dto.LocalGeneratedImageItemDTO;
 import com.aiprovider.model.vo.GalleryRecordPageVO;
 import com.aiprovider.model.vo.LocalGeneratedImageBatchResultVO;
 import com.aiprovider.repository.LocalGeneratedImageRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
@@ -15,6 +17,7 @@ import java.util.*;
 
 @Service
 public class LocalGeneratedImageService {
+    private static final Logger log = LoggerFactory.getLogger(LocalGeneratedImageService.class);
     private final LocalGeneratedImageRepository repository;
     public LocalGeneratedImageService(LocalGeneratedImageRepository repository) { this.repository = repository; }
 
@@ -45,7 +48,13 @@ public class LocalGeneratedImageService {
             rows.add(Map.of("pathHash", pathHash, "item", item));
         }
         repository.upsertBatch(platform, rows);
-        return new LocalGeneratedImageBatchResultVO(rows.size(), repository.findByPathHashes(platform, pathHashes));
+        List<Map<String,Object>> persisted = repository.findByPathHashes(platform, pathHashes);
+        if (persisted.size() != rows.size()) {
+            log.warn("local_image_batch_save_mismatch platform={} requested={} persisted={} ids={}", platform, rows.size(), persisted.size(), recordIds(persisted));
+            throw new IllegalStateException("本机图片批量保存后未返回全部数据库 ID");
+        }
+        log.info("local_image_batch_saved platform={} requested={} saved={} ids={}", platform, items.size(), rows.size(), recordIds(persisted));
+        return new LocalGeneratedImageBatchResultVO(rows.size(), persisted);
     }
 
     public GalleryRecordPageVO page(String platformValue, int page, int pageSize, String statusValue) {
@@ -61,17 +70,29 @@ public class LocalGeneratedImageService {
 
     @Transactional
     public int trash(LocalGeneratedImageIdsDTO dto) {
-        return repository.trash(platform(dto == null ? null : dto.getPlatform()), validIds(dto));
+        String platform = platform(dto == null ? null : dto.getPlatform());
+        List<Long> ids = validIds(dto);
+        int affected = repository.trash(platform, ids);
+        logMutation("trash", platform, ids, affected);
+        return affected;
     }
 
     @Transactional
     public int restore(LocalGeneratedImageIdsDTO dto) {
-        return repository.restore(platform(dto == null ? null : dto.getPlatform()), validIds(dto));
+        String platform = platform(dto == null ? null : dto.getPlatform());
+        List<Long> ids = validIds(dto);
+        int affected = repository.restore(platform, ids);
+        logMutation("restore", platform, ids, affected);
+        return affected;
     }
 
     @Transactional
     public int delete(LocalGeneratedImageIdsDTO dto) {
-        return repository.delete(platform(dto == null ? null : dto.getPlatform()), validIds(dto));
+        String platform = platform(dto == null ? null : dto.getPlatform());
+        List<Long> ids = validIds(dto);
+        int affected = repository.delete(platform, ids);
+        logMutation("delete", platform, ids, affected);
+        return affected;
     }
 
     private static void validate(LocalGeneratedImageItemDTO item) {
@@ -98,6 +119,21 @@ public class LocalGeneratedImageService {
         ids.removeIf(id -> id == null || id <= 0);
         if (ids.isEmpty() || ids.size() > 100) throw new IllegalArgumentException("本机图片 ID 数量必须在 1 到 100 之间");
         return ids;
+    }
+    private static List<Long> recordIds(List<Map<String,Object>> rows) {
+        List<Long> ids = new ArrayList<>();
+        for (Map<String,Object> row : rows) {
+            Object value = row.get("id");
+            if (value instanceof Number) ids.add(((Number) value).longValue());
+        }
+        return ids;
+    }
+    private static void logMutation(String operation, String platform, List<Long> ids, int affected) {
+        if (affected == ids.size()) log.info("local_image_mutation operation={} platform={} ids={} affected={}", operation, platform, ids, affected);
+        else {
+            log.warn("local_image_mutation_mismatch operation={} platform={} ids={} requested={} affected={}", operation, platform, ids, ids.size(), affected);
+            throw new IllegalStateException("本机图片批量" + operation + "影响行数不一致：请求 " + ids.size() + "，实际 " + affected);
+        }
     }
     private static String clean(String value, int max) {
         if (value == null || value.trim().isEmpty()) return null;

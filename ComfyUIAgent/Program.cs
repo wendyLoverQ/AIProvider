@@ -296,6 +296,19 @@ app.MapPost("/api/tasks/cancel-all", async () => {
     }, statusCode: StatusCodes.Status202Accepted);
 }).DisableAntiforgery();
 
+app.MapGet("/api/tasks/states", async () => Results.Ok(new {
+    success = true,
+    tasks = (await SnapshotBridgeGenerations()).Select(item => new {
+        promptId = item.PromptId,
+        state = item.State,
+        createdAt = item.CreatedAt,
+        submittedAt = item.SubmittedAt,
+        completedAt = item.CompletedAt,
+        message = item.Error,
+        queueOwner = "BRIDGE"
+    })
+}));
+
 app.MapGet("/api/tasks/{promptId}/state", async (string promptId, IHttpClientFactory factory) => {
     promptId = (promptId ?? "").Trim();
     if (promptId.Length == 0 || promptId.Length > 200)
@@ -1047,6 +1060,20 @@ async Task<bool> CancelPendingBridgeGeneration(string promptId) {
         item.Error = null;
         await WriteBridgeGenerationQueue();
         return true;
+    } finally { generationQueueLock.Release(); }
+}
+
+async Task<BridgeQueuedGeneration[]> SnapshotBridgeGenerations() {
+    await generationQueueLock.WaitAsync();
+    try {
+        return generationQueue.Select(item => new BridgeQueuedGeneration {
+            PromptId = item.PromptId,
+            CreatedAt = item.CreatedAt,
+            SubmittedAt = item.SubmittedAt,
+            CompletedAt = item.CompletedAt,
+            State = item.State,
+            Error = item.Error
+        }).ToArray();
     } finally { generationQueueLock.Release(); }
 }
 

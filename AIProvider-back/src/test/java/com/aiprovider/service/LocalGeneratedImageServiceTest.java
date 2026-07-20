@@ -53,4 +53,15 @@ class LocalGeneratedImageServiceTest {
 
         verify(repository).trash("Windows", Collections.singletonList(42L));
     }
+
+    @Test void rejectsAQueueMutationWhenAnyRequestedIdWasNotChanged() {
+        LocalGeneratedImageRepository repository = mock(LocalGeneratedImageRepository.class);
+        when(repository.trash(eq("Windows"), anyList())).thenReturn(1);
+        LocalGeneratedImageIdsDTO dto = new LocalGeneratedImageIdsDTO();
+        dto.setPlatform("Windows"); dto.setIds(Arrays.asList(42L, 43L));
+
+        assertThatThrownBy(() -> new LocalGeneratedImageService(repository).trash(dto))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("请求 2，实际 1");
+    }
 }

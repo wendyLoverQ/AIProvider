@@ -174,6 +174,10 @@ describe("Comfy image generation flow", () => {
         maidAiCopyPaths = JSON.parse(options.body).paths;
         return json({ success: true, copied: maidAiCopyPaths.length, existing: 0 });
       }
+      if (url.endsWith("/api/tasks/states")) return json({
+        success: true,
+        tasks: submitted ? [{ promptId: PROMPT_ID, state: "SUCCEEDED" }] : [],
+      });
       if (url.includes("/api/tasks/") && url.endsWith("/state")) {
         const promptId = decodeURIComponent(url.split("/api/tasks/")[1].replace("/state", ""));
         if (promptId === PROMPT_ID) return json({ success: true, state: submitted ? "SUCCEEDED" : "QUEUED", tracked: true });
@@ -435,7 +439,7 @@ describe("Comfy image generation flow", () => {
     expect(galleryRequests).toBe(requestsBeforeSwitch);
   });
 
-  it("refreshes a gallery queue when revisiting it and reuses existing image addresses", async () => {
+  it("reuses a loaded gallery queue when revisiting it", async () => {
     submitted = true;
     render(<ComfyLocalWorkbench />);
     await screen.findByAltText("历史生成结果");
@@ -450,10 +454,9 @@ describe("Comfy image generation flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "我的资产" }));
     await waitFor(() => expect(screen.getByAltText("历史生成结果")).toBeTruthy());
 
-    expect(galleryRequests).toBe(2);
-    expect(assetRequests).toBe(2);
+    expect(galleryRequests).toBe(1);
+    expect(assetRequests).toBe(1);
     expect(galleryRequestUrls).toEqual([
-      "/api/local-generated-images?platform=Windows&page=1&pageSize=100&status=ACTIVE",
       "/api/local-generated-images?platform=Windows&page=1&pageSize=100&status=ACTIVE",
     ]);
     expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
@@ -585,70 +588,6 @@ describe("Comfy image generation flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "本机图片" }));
 
     expect(await screen.findByAltText("历史生成结果")).toBeTruthy();
-  }, 15000);
-
-  it("inserts only the new bridge history result without reloading the gallery", async () => {
-    submitted = true;
-    incrementalHistoryRun = true;
-    render(<ComfyLocalWorkbench />);
-
-    expect(await screen.findByText("1 张")).toBeTruthy();
-    await waitFor(() => expect(screen.getAllByAltText("历史生成结果")).toHaveLength(2), { timeout: 12000 });
-
-    const recentHistoryRequests = bridgeRequests.filter((url) => url.includes("/comfy/history?max_items=20"));
-    const incrementalImageRequests = bridgeRequests.filter((url) => url.includes("/comfy/view?") && url.includes("incremental.png"));
-    expect(recentHistoryRequests.length).toBeGreaterThanOrEqual(2);
-    expect(incrementalImageRequests).toHaveLength(1);
-    expect(galleryRequests).toBe(1);
-    expect(galleryRequestUrls).toEqual(["/api/local-generated-images?platform=Windows&page=1&pageSize=100&status=ACTIVE"]);
-    expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
-    expect(screen.getByText("2 张")).toBeTruthy();
-    const tiles = Array.from(document.querySelectorAll(".local-image-tile"));
-    expect(tiles).toHaveLength(2);
-    expect(tiles[0].dataset.galleryEntryId).toBe("incremental-prompt");
-    expect(tiles[0].dataset.imagePath).toBe("aimaid/incremental.png");
-    expect(tiles[1].dataset.galleryEntryId).toBe(PROMPT_ID);
-    expect(tiles[1].dataset.imagePath).toBe("aimaid/done.png");
-  }, 15000);
-
-  it("reconciles a completed bridge result already present on the first history poll", async () => {
-    submitted = true;
-    incrementalHistoryAlreadyPresent = true;
-    render(<ComfyLocalWorkbench />);
-
-    await waitFor(() => {
-      const incrementalTile = document.querySelector('[data-gallery-entry-id="incremental-prompt"]');
-      expect(incrementalTile).not.toBeNull();
-      expect(incrementalTile.dataset.imagePath).toBe("aimaid/incremental.png");
-    }, { timeout: 12000 });
-
-    const tiles = Array.from(document.querySelectorAll(".local-image-tile"));
-    expect(tiles).toHaveLength(2);
-    expect(tiles[0].dataset.galleryEntryId).toBe("incremental-prompt");
-    expect(tiles[1].dataset.galleryEntryId).toBe(PROMPT_ID);
-    expect(galleryRequests).toBe(1);
-    expect(bridgeRequests.filter((url) => url.includes("/comfy/view?") && url.includes("incremental.png"))).toHaveLength(1);
-    expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
-    expect(screen.getByText("2 张")).toBeTruthy();
-  }, 15000);
-
-  it("does not duplicate a first-poll bridge result whose image address is already loaded", async () => {
-    submitted = true;
-    existingHistoryAlreadyPresent = true;
-    render(<ComfyLocalWorkbench />);
-
-    await waitFor(() => expect(
-      bridgeRequests.filter((url) => url.includes("/comfy/history?max_items=20")).length,
-    ).toBeGreaterThanOrEqual(2), { timeout: 12000 });
-
-    const tiles = Array.from(document.querySelectorAll(".local-image-tile"));
-    expect(tiles).toHaveLength(1);
-    expect(tiles[0].dataset.galleryEntryId).toBe(PROMPT_ID);
-    expect(tiles[0].dataset.imagePath).toBe("aimaid/done.png");
-    expect(bridgeRequests.filter((url) => url.includes("/comfy/view?"))).toHaveLength(0);
-    expect(galleryRequests).toBe(1);
-    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("1 张")).toBeTruthy();
   }, 15000);
 
   it("shows every active task in ComfyUI execution order even when progress lookup fails", async () => {
