@@ -89,7 +89,8 @@ describe("UI release gate", () => {
     expect(workshop).toContain("<MediaViewer");
     expect(favorites).toContain("<MediaViewer");
     expect(viewer).toContain("<TransformWrapper");
-    expect(viewerCss).toMatch(/\.media-viewer-panel\{[^}]*grid-template-rows:24px minmax\(0,1fr\) auto/);
+    expect(viewerCss).toMatch(/\.media-viewer-panel\{[^}]*grid-template-rows:44px minmax\(0,1fr\) auto/);
+    expect(viewerCss).toMatch(/\.media-viewer-tools button,\.media-viewer-actions button\{[^}]*width:30px;height:30px/);
     expect(viewerCss).toContain("var(--bg-surface)");
     expect(viewerCss).toContain("var(--text-primary)");
   });
