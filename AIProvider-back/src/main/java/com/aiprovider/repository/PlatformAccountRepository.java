@@ -31,6 +31,11 @@ public class PlatformAccountRepository {
     public List<Map<String,Object>> findUsages(long id){return mapper.findUsages(id);}
     public void archiveAccount(long id){if(!findUsages(id).isEmpty())throw new IllegalStateException("ACCOUNT_IN_USE");if(mapper.archiveAccount(id)!=1)throw new IllegalStateException("账号归档影响行数不一致");}
     public Map<String,Object> findByLegacy(String type,long id){return mapper.findByLegacy(type,id);}
+    public List<Map<String,Object>> findLegacyTwitterAccounts(){return mapper.findLegacyTwitterAccounts();}
+    public List<Map<String,Object>> findLegacyCollectionAccounts(){return mapper.findLegacyCollectionAccounts();}
+    public List<Map<String,Object>> findLegacyContentAccounts(){return mapper.findLegacyContentAccounts();}
+    public List<Map<String,Object>> findLegacyGeminiConfigs(){return mapper.findLegacyGeminiConfigs();}
+    public void linkLegacyConsumer(String type,long legacyId,long accountId){if(mapper.linkLegacyConsumer(type,legacyId,accountId)!=1)throw new IllegalStateException("旧账号引用迁移影响行数不一致");}
     private long number(Object v){return v instanceof Number?((Number)v).longValue():Long.parseLong(String.valueOf(v));}
     private int integer(Object v){return v instanceof Number?((Number)v).intValue():Integer.parseInt(String.valueOf(v));}
 }

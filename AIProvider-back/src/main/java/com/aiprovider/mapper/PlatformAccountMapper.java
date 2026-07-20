@@ -47,6 +47,21 @@ public interface PlatformAccountMapper {
     @Select("SELECT Id id,Platform platform,AccountKind accountKind,DisplayName displayName,AccountHandle accountHandle,AdapterType adapterType,CAST(PublicConfigJson AS CHAR) publicConfigJson,Enabled enabled,ConnectionStatus connectionStatus,CredentialHint credentialHint,LegacySourceType legacySourceType,LegacySourceId legacySourceId FROM c_PlatformAccounts WHERE LegacySourceType=#{legacySourceType} AND LegacySourceId=#{legacySourceId} AND ArchivedAt IS NULL")
     Map<String,Object> findByLegacy(@Param("legacySourceType") String legacySourceType,@Param("legacySourceId") long legacySourceId);
 
+    @Select("SELECT Id id,Username username,EncryptedStorageState encryptedStorageState,SessionStatus sessionStatus FROM c_TwitterAccounts")
+    List<Map<String,Object>> findLegacyTwitterAccounts();
+
+    @Select("SELECT Id id,DisplayName displayName,AdapterType adapterType,CredentialEncrypted credentialEncrypted,CredentialHint credentialHint,Enabled enabled FROM c_ContentCollectionAccounts WHERE ArchivedAt IS NULL")
+    List<Map<String,Object>> findLegacyCollectionAccounts();
+
+    @Select("SELECT Id id,DisplayName displayName,AccountHandle accountHandle,AdapterType adapterType,SessionEncrypted sessionEncrypted,SessionHint sessionHint,Enabled enabled,ConnectionStatus connectionStatus FROM c_ContentAccounts WHERE ArchivedAt IS NULL")
+    List<Map<String,Object>> findLegacyContentAccounts();
+
+    @Select("SELECT Id id,GeminiApiBaseUrl apiBaseUrl,GeminiApiKeyEncrypted apiKeyEncrypted,GeminiApiKeyHint apiKeyHint,AiGenerationEnabled enabled FROM c_ContentOperationSettings WHERE Id=1")
+    List<Map<String,Object>> findLegacyGeminiConfigs();
+
+    @Update("<script><choose><when test=\"legacySourceType == 'TWITTER_ACCOUNT'\">UPDATE c_TwitterAccounts SET PlatformAccountId=#{platformAccountId} WHERE Id=#{legacySourceId}</when><when test=\"legacySourceType == 'CONTENT_COLLECTION_ACCOUNT'\">UPDATE c_ContentCollectionAccounts SET PlatformAccountId=#{platformAccountId} WHERE Id=#{legacySourceId}</when><when test=\"legacySourceType == 'CONTENT_ACCOUNT'\">UPDATE c_ContentAccounts SET PlatformAccountId=#{platformAccountId} WHERE Id=#{legacySourceId}</when><when test=\"legacySourceType == 'CONTENT_GEMINI'\">UPDATE c_ContentOperationSettings SET PlatformAccountId=#{platformAccountId} WHERE Id=#{legacySourceId}</when><otherwise>SELECT 0</otherwise></choose></script>")
+    int linkLegacyConsumer(@Param("legacySourceType") String legacySourceType,@Param("legacySourceId") long legacySourceId,@Param("platformAccountId") long platformAccountId);
+
     class AccountRecord {
         private Long id; private String platform; private String accountKind; private String displayName; private String accountHandle; private String adapterType; private String publicConfigJson; private boolean enabled=true; private String connectionStatus="NOT_CONFIGURED"; private String credentialHint; private String legacySourceType; private Long legacySourceId;
         public Long getId(){return id;} public void setId(Long v){id=v;} public String getPlatform(){return platform;} public void setPlatform(String v){platform=v;} public String getAccountKind(){return accountKind;} public void setAccountKind(String v){accountKind=v;} public String getDisplayName(){return displayName;} public void setDisplayName(String v){displayName=v;} public String getAccountHandle(){return accountHandle;} public void setAccountHandle(String v){accountHandle=v;} public String getAdapterType(){return adapterType;} public void setAdapterType(String v){adapterType=v;} public String getPublicConfigJson(){return publicConfigJson;} public void setPublicConfigJson(String v){publicConfigJson=v;} public boolean isEnabled(){return enabled;} public void setEnabled(boolean v){enabled=v;} public String getConnectionStatus(){return connectionStatus;} public void setConnectionStatus(String v){connectionStatus=v;} public String getCredentialHint(){return credentialHint;} public void setCredentialHint(String v){credentialHint=v;} public String getLegacySourceType(){return legacySourceType;} public void setLegacySourceType(String v){legacySourceType=v;} public Long getLegacySourceId(){return legacySourceId;} public void setLegacySourceId(Long v){legacySourceId=v;}
