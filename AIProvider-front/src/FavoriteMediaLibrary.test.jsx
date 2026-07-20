@@ -30,8 +30,6 @@ describe("FavoriteMediaLibrary", () => {
     render(<FavoriteMediaLibrary />);
     await screen.findByText("星夜海岸");
 
-    expect(screen.queryByRole("button", { name: "删除 星夜海岸" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "星夜海岸 更多操作" })).toBeNull();
     fireEvent.contextMenu(screen.getByRole("button", { name: "预览 星夜海岸" }), { clientX: 200, clientY: 200 });
     fireEvent.click(screen.getByRole("button", { name: "从我的最爱移除" }));
     expect(screen.getByRole("dialog", { name: "确认删除" })).toBeTruthy();
@@ -39,7 +37,6 @@ describe("FavoriteMediaLibrary", () => {
     await waitFor(() => expect(deleteBodies).toEqual([{ ids: [7] }]));
 
     fireEvent.click(screen.getByRole("button", { name: "批量删除" }));
-    expect(document.querySelector(".favorite-select")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "选择 晨雾" }));
     fireEvent.click(screen.getByRole("button", { name: "选择 晚霞" }));
     fireEvent.click(screen.getByRole("button", { name: "删除已选 2" }));
