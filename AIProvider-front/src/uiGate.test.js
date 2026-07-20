@@ -33,13 +33,25 @@ describe("UI release gate", () => {
   it("keeps every primary workspace on semantic theme tokens", () => {
     const theme = read("SemanticTheme.css");
     const tokens = read("uiTheme.js");
-    ["favorite-library", "video-editor-shell", "foundry-workbench", "system-settings-shell", "file-transfer-page", "twitter-publisher", "content-operations-center", "prompt-scheme-list", "maid-panel", "universe-toolbar"].forEach((root) => {
+    ["favorite-library", "video-editor-shell", "foundry-workbench", "system-settings-shell", "file-transfer-page", "twitter-publisher", "content-operations-center", "platform-account-center", "prompt-scheme-list", "maid-panel", "universe-toolbar"].forEach((root) => {
       expect(theme, `${root} 未接入全局语义主题`).toContain(root);
     });
     const copy = read("UiControl.jsx");
     ["视频编辑", "我的女仆", "链上工具", "Twitter", "系统设置"].forEach((label) => expect(copy).toContain(label));
     expect(tokens).toContain('"--text-muted-readable"');
     expect(tokens).toContain('"--border-interactive"');
+  });
+
+  it("keeps Account Center reachable, searchable, semantic, and native",()=>{
+    const app=read("App.jsx"),page=read("PlatformAccountCenter.jsx"),css=read("PlatformAccountCenter.css");
+    expect(app).toContain('{ key: "accounts"');
+    expect(app).toContain('accounts: "/accounts"');
+    expect(app).toContain("<PlatformAccountCenter />");
+    expect(page).toContain('import UiSearchField from "./UiSearchField"');
+    expect(page).toContain('aria-label="搜索账号"');
+    expect(page).not.toMatch(/<div[^>]+onClick=/);
+    expect(css).toContain("var(--bg-surface)");
+    expect(css).toContain(":focus-visible");
   });
 
   it("keeps My Maid aligned with the current role-card and LLM business schema", () => {
