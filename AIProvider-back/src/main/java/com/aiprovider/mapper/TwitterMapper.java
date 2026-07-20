@@ -9,7 +9,7 @@ public interface TwitterMapper {
     @Select("SELECT Id id, Username username, SessionStatus sessionStatus, LastLoginAt lastLoginAt, LastError lastError FROM c_TwitterAccounts ORDER BY UpdatedAt DESC")
     List<Map<String, Object>> findAccounts();
 
-    @Select("SELECT Id id, Username username, EncryptedStorageState encryptedStorageState, SessionStatus sessionStatus, LastLoginAt lastLoginAt, LastError lastError FROM c_TwitterAccounts WHERE Id=#{id}")
+    @Select("SELECT Id id, PlatformAccountId platformAccountId, Username username, SessionStatus sessionStatus, LastLoginAt lastLoginAt, LastError lastError FROM c_TwitterAccounts WHERE Id=#{id}")
     Map<String, Object> findAccount(@Param("id") long id);
 
     @Insert("INSERT INTO c_TwitterAccounts(Username, EncryptedStorageState, SessionStatus, LastLoginAt, LastError) " +

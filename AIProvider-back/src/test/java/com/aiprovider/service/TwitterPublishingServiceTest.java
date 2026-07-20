@@ -30,7 +30,7 @@ class TwitterPublishingServiceTest {
         when(repository.insertPost(any(TwitterMapper.PostInsert.class))).thenReturn(41L);
         when(assets.findExistingIds(Collections.singletonList(12L))).thenReturn(Collections.singletonList(12L));
         TwitterPublishingService service = new TwitterPublishingService(
-                repository, assets, mock(TwitterWebPublisher.class), mock(TwitterSessionCipher.class),
+                repository, assets, mock(TwitterWebPublisher.class), mock(TwitterSessionCipher.class), mock(PlatformAccountCredentialService.class),
                 new SyncTaskExecutor(), storage.toString(), "client");
 
         byte[] png = new byte[] {(byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a};
@@ -58,7 +58,7 @@ class TwitterPublishingServiceTest {
         when(repository.findPost(9L)).thenReturn(Collections.singletonMap("id", 9L));
         when(repository.cancelPost(9L)).thenReturn(true);
         TwitterPublishingService service = new TwitterPublishingService(
-                repository, mock(AssetRepository.class), mock(TwitterWebPublisher.class), mock(TwitterSessionCipher.class),
+                repository, mock(AssetRepository.class), mock(TwitterWebPublisher.class), mock(TwitterSessionCipher.class), mock(PlatformAccountCredentialService.class),
                 new SyncTaskExecutor(), storage.toString(), "client");
 
         service.cancel(9L);

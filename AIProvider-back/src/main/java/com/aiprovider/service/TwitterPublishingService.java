@@ -39,13 +39,14 @@ public class TwitterPublishingService {
     private final AssetRepository assetRepository;
     private final TwitterWebPublisher publisher;
     private final TwitterSessionCipher cipher;
+    private final PlatformAccountCredentialService accountCredentials;
     private final TaskExecutor executor;
     private final Path storageRoot;
     private final boolean serverPublishing;
     private final Map<Long, Object> accountLocks = new ConcurrentHashMap<>();
 
     public TwitterPublishingService(TwitterRepository repository, AssetRepository assetRepository, TwitterWebPublisher publisher,
-                                    TwitterSessionCipher cipher,
+                                    TwitterSessionCipher cipher, PlatformAccountCredentialService accountCredentials,
                                     @Qualifier("twitterTaskExecutor") TaskExecutor executor,
                                     @Value("${twitter.storage-directory:/opt/aimaid/twitter-media}") String storageDirectory,
                                     @Value("${twitter.publish-mode:client}") String publishMode) {
@@ -53,6 +54,7 @@ public class TwitterPublishingService {
         this.assetRepository = assetRepository;
         this.publisher = publisher;
         this.cipher = cipher;
+        this.accountCredentials = accountCredentials;
         this.executor = executor;
         this.storageRoot = Paths.get(storageDirectory).toAbsolutePath().normalize();
         this.serverPublishing = "server".equalsIgnoreCase(publishMode);
@@ -230,10 +232,10 @@ public class TwitterPublishingService {
             if (!repository.claimPost(postId)) return;
             try {
                 Map<String, Object> account = repository.findAccount(accountId);
-                if (account == null || blank(text(account.get("encryptedStorageState")))) {
+                if (account == null || account.get("platformAccountId") == null) {
                     throw new TwitterAutomationException("Twitter 账号没有可用的登录会话", true);
                 }
-                String state = cipher.decrypt(text(account.get("encryptedStorageState")));
+                String state = accountCredentials.requireSecret(number(account.get("platformAccountId")), "X", "STORAGE_STATE");
                 List<Path> paths = new ArrayList<>();
                 for (Map<String, Object> media : repository.findMedia(postId)) {
                     Path path = resolveStoredPath(text(media.get("storagePath")));

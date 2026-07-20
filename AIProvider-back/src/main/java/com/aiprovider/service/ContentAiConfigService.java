@@ -15,27 +15,26 @@ import java.util.regex.Pattern;
 @Service
 public class ContentAiConfigService {
     private static final Pattern MODEL=Pattern.compile("^[A-Za-z0-9._-]{1,100}$");
-    private final ContentAiRepository repository; private final ContentAiSecretCipher cipher;
-    public ContentAiConfigService(ContentAiRepository repository,ContentAiSecretCipher cipher){this.repository=repository;this.cipher=cipher;}
+    private final ContentAiRepository repository; private final PlatformAccountCredentialService accountCredentials;
+    public ContentAiConfigService(ContentAiRepository repository,PlatformAccountCredentialService accountCredentials){this.repository=repository;this.accountCredentials=accountCredentials;}
     public ContentAiConfigVO get(){return toVO(requiredConfig());}
 
     @Transactional
     public ContentAiConfigVO save(ContentAiConfigDTO dto){
         if(dto==null||dto.getEnabled()==null)throw new IllegalArgumentException("Gemini 启用状态不能为空");
-        Map<String,Object> current=requiredConfig();String newKey=trim(dto.getApiKey());String encrypted=text(current.get("apiKeyEncrypted"));String hint=text(current.get("apiKeyHint"));
-        if(newKey!=null){if(newKey.length()<20||newKey.length()>500)throw new IllegalArgumentException("Gemini API Key 格式不正确");encrypted=cipher.encrypt(newKey);hint=keyHint(newKey);}
-        if(dto.getEnabled()&&empty(encrypted))throw new IllegalArgumentException("启用 Gemini 前必须配置 API Key");
+        Map<String,Object> current=requiredConfig();if(trim(dto.getApiKey())!=null)throw new IllegalArgumentException("Gemini API Key 请在账号中心维护");
+        if(dto.getEnabled()&&current.get("platformAccountId")==null)throw new IllegalArgumentException("启用 Gemini 前必须绑定账号中心账号");
         ContentAiMapper.ConfigRecord record=new ContentAiMapper.ConfigRecord();record.setEnabled(dto.getEnabled());record.setApiBaseUrl(apiBaseUrl(dto.getApiBaseUrl()));
-        record.setModel(model(dto.getModel()));record.setApiKeyEncrypted(encrypted);record.setApiKeyHint(hint);
+        record.setModel(model(dto.getModel()));
         record.setRelevancePrompt(prompt(dto.getRelevancePrompt(),"内容相关性判断提示词"));record.setContentRewritePrompt(prompt(dto.getContentRewritePrompt(),"内容改写提示词"));record.setCommentReplyPrompt(prompt(dto.getCommentReplyPrompt(),"评论回复提示词"));
         BigDecimal temperature=dto.getTemperature()==null?new BigDecimal("0.700"):dto.getTemperature();if(temperature.compareTo(BigDecimal.ZERO)<0||temperature.compareTo(new BigDecimal("2"))>0)throw new IllegalArgumentException("生成温度必须在 0 到 2 之间");record.setTemperature(temperature);
         int maxTokens=dto.getMaxOutputTokens()==null?2048:dto.getMaxOutputTokens();if(maxTokens<128||maxTokens>65536)throw new IllegalArgumentException("最大输出 Token 必须在 128 到 65536 之间");record.setMaxOutputTokens(maxTokens);
         repository.updateConfig(record);return get();
     }
 
-    GeminiRuntimeConfig runtime(){Map<String,Object> row=requiredConfig();if(!truth(row.get("enabled")))throw new ContentAiException("AI_DISABLED","Gemini 内容生成尚未启用");String encrypted=text(row.get("apiKeyEncrypted"));if(empty(encrypted))throw new ContentAiException("API_KEY_MISSING","Gemini API Key 尚未配置");return new GeminiRuntimeConfig(true,text(row.get("apiBaseUrl")),text(row.get("model")),cipher.decrypt(encrypted),text(row.get("relevancePrompt")),text(row.get("contentRewritePrompt")),text(row.get("commentReplyPrompt")),decimal(row.get("temperature")),integer(row.get("maxOutputTokens")));}
+    GeminiRuntimeConfig runtime(){Map<String,Object> row=requiredConfig();if(!truth(row.get("enabled")))throw new ContentAiException("AI_DISABLED","Gemini 内容生成尚未启用");if(row.get("platformAccountId")==null)throw new ContentAiException("API_KEY_MISSING","Gemini 尚未绑定账号中心账号");String key=accountCredentials.requireSecret(((Number)row.get("platformAccountId")).longValue(),"GEMINI","API_KEY");return new GeminiRuntimeConfig(true,text(row.get("apiBaseUrl")),text(row.get("model")),key,text(row.get("relevancePrompt")),text(row.get("contentRewritePrompt")),text(row.get("commentReplyPrompt")),decimal(row.get("temperature")),integer(row.get("maxOutputTokens")));}
     private Map<String,Object> requiredConfig(){Map<String,Object> row=repository.findConfig();if(row==null)throw new IllegalStateException("Gemini 内容生成配置不存在");return row;}
-    private ContentAiConfigVO toVO(Map<String,Object> r){String encrypted=text(r.get("apiKeyEncrypted"));return new ContentAiConfigVO("GEMINI",truth(r.get("enabled")),!empty(encrypted),text(r.get("apiKeyHint")),text(r.get("apiBaseUrl")),text(r.get("model")),text(r.get("relevancePrompt")),text(r.get("contentRewritePrompt")),text(r.get("commentReplyPrompt")),decimal(r.get("temperature")),integer(r.get("maxOutputTokens")),time(r.get("updatedAt")));}
+    private ContentAiConfigVO toVO(Map<String,Object> r){boolean linked=r.get("platformAccountId")!=null;return new ContentAiConfigVO("GEMINI",truth(r.get("enabled")),linked,linked?"账号中心":"尚未绑定",text(r.get("apiBaseUrl")),text(r.get("model")),text(r.get("relevancePrompt")),text(r.get("contentRewritePrompt")),text(r.get("commentReplyPrompt")),decimal(r.get("temperature")),integer(r.get("maxOutputTokens")),time(r.get("updatedAt")));}
     private String apiBaseUrl(String value){String v=required(value,"Gemini API 地址",255).replaceAll("/+$","");URI uri;try{uri=URI.create(v);}catch(IllegalArgumentException e){throw new IllegalArgumentException("Gemini API 地址格式不正确");}if(!"https".equalsIgnoreCase(uri.getScheme())||!"generativelanguage.googleapis.com".equalsIgnoreCase(uri.getHost())||uri.getUserInfo()!=null||uri.getQuery()!=null||uri.getFragment()!=null||(uri.getPath()!=null&&!uri.getPath().isEmpty()))throw new IllegalArgumentException("Gemini API 地址必须是 https://generativelanguage.googleapis.com");return v;}
     private String model(String value){String v=required(value,"Gemini 模型",100);if(!MODEL.matcher(v).matches())throw new IllegalArgumentException("Gemini 模型名称格式不正确");return v;}
     private String prompt(String value,String label){String v=required(value,label,12000);if(v.length()<20)throw new IllegalArgumentException(label+"至少需要 20 个字符");return v;}
