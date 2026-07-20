@@ -20,4 +20,11 @@ class PlatformAccountValidationServiceTest {
         PlatformAccountValidationService service=new PlatformAccountValidationService(repository,credentials,mock(TwitterWebPublisher.class),mock(TwitterPublicWebClient.class),mock(TwitterTimelineClient.class),mock(XiaohongshuWebAdapter.class),mock(DouyinWebAdapter.class),mock(GeminiContentClient.class),new com.fasterxml.jackson.databind.ObjectMapper());
         assertEquals("CREDENTIAL_MISSING",assertThrows(IllegalStateException.class,()->service.validate(6L)).getMessage());verify(credentials,never()).requireSecret(6L,"X","COOKIE");
     }
+    @Test void rejectsDisabledAccountsWithoutOverwritingTheirDisabledState(){
+        PlatformAccountRepository repository=mock(PlatformAccountRepository.class);PlatformAccountCredentialService credentials=mock(PlatformAccountCredentialService.class);
+        when(repository.findAccount(4L)).thenReturn(Map.of("id",4L,"platform","XIAOHONGSHU","adapterType","XIAOHONGSHU_WEB","enabled",false));
+        PlatformAccountValidationService service=new PlatformAccountValidationService(repository,credentials,mock(TwitterWebPublisher.class),mock(TwitterPublicWebClient.class),mock(TwitterTimelineClient.class),mock(XiaohongshuWebAdapter.class),mock(DouyinWebAdapter.class),mock(GeminiContentClient.class),new com.fasterxml.jackson.databind.ObjectMapper());
+        assertEquals("ACCOUNT_DISABLED",assertThrows(IllegalStateException.class,()->service.validate(4L)).getMessage());
+        verify(repository,never()).updateStatus(anyLong(),anyString(),any(),anyBoolean(),any(),any());verifyNoInteractions(credentials);
+    }
 }

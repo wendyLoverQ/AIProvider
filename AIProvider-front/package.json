@@ -20,6 +20,7 @@
     "react-dom": "^19.2.7",
     "react-zoom-pan-pinch": "^4.0.3",
     "recharts": "^3.9.2",
+    "simple-icons": "^16.21.0",
     "three": "0.153.0",
     "uuid": "^11.1.1"
   },

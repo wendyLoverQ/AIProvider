@@ -10,7 +10,7 @@ public interface PlatformAccountMapper {
     @Options(useGeneratedKeys=true,keyProperty="id")
     int insertAccount(AccountRecord record);
 
-    @Update("UPDATE c_PlatformAccounts SET DisplayName=#{displayName},AccountHandle=#{accountHandle},AdapterType=#{adapterType},PublicConfigJson=#{publicConfigJson},Enabled=#{enabled},ConnectionStatus=CASE WHEN #{enabled}=FALSE THEN 'DISABLED' WHEN ConnectionStatus='DISABLED' THEN 'NOT_CONFIGURED' ELSE ConnectionStatus END WHERE Id=#{id} AND ArchivedAt IS NULL")
+    @Update("UPDATE c_PlatformAccounts SET DisplayName=#{displayName},AccountHandle=#{accountHandle},AdapterType=#{adapterType},PublicConfigJson=#{publicConfigJson},ConnectionStatus=CASE WHEN #{enabled}=FALSE THEN 'DISABLED' WHEN Enabled=FALSE THEN 'NOT_CONFIGURED' ELSE ConnectionStatus END,Enabled=#{enabled} WHERE Id=#{id} AND ArchivedAt IS NULL")
     int updateAccount(AccountRecord record);
 
     @Select("SELECT Id id,Platform platform,AccountKind accountKind,DisplayName displayName,AccountHandle accountHandle,AdapterType adapterType,CAST(PublicConfigJson AS CHAR) publicConfigJson,Enabled enabled,ConnectionStatus connectionStatus,CredentialHint credentialHint,LastValidatedAt lastValidatedAt,LastConnectedAt lastConnectedAt,LastErrorCode lastErrorCode,LastErrorMessage lastErrorMessage,LegacySourceType legacySourceType,LegacySourceId legacySourceId,CreatedAt createdAt,UpdatedAt updatedAt FROM c_PlatformAccounts WHERE Id=#{id} AND ArchivedAt IS NULL")

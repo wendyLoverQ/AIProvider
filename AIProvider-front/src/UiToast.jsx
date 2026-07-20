@@ -7,7 +7,7 @@ const ICONS = { success: CheckCircle, error: WarningCircle, warning: Warning, in
 export default function UiToast({ message, tone = "info", onDismiss }) {
   useEffect(() => {
     if (!message || !onDismiss) return undefined;
-    const timer = window.setTimeout(onDismiss, tone === "error" ? 6000 : 4500);
+    const timer = window.setTimeout(onDismiss, tone === "error" ? 4000 : 2500);
     return () => window.clearTimeout(timer);
   }, [message, onDismiss, tone]);
 
