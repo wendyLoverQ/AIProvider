@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowClockwise, ArrowsLeftRight, ArrowCounterClockwise, CaretLeft, CaretRight, CheckCircle, Desktop, DotsThree, ImageSquare, MagnifyingGlassMinus, MagnifyingGlassPlus, Play, Star, Trash, UploadSimple, X } from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowsLeftRight, ArrowCounterClockwise, CaretLeft, CaretRight, CheckCircle, Desktop, ImageSquare, MagnifyingGlassMinus, MagnifyingGlassPlus, Play, Star, Trash, UploadSimple, X } from "@phosphor-icons/react";
 import { TransformComponent, TransformWrapper } from "react-zoom-pan-pinch";
 import UiSearchField from "./UiSearchField";
 import UiToast from "./UiToast";
@@ -296,10 +296,7 @@ export default function FavoriteMediaLibrary() {
     {state === "loading" && !items.length ? <div className="favorite-empty"><Star /><strong>正在打开你的私人画廊…</strong></div>
       : !filtered.length ? <div className="favorite-empty"><ImageSquare /><strong>{query ? "没有找到匹配的媒体" : "这里还没有喜欢的画面"}</strong><span>{query ? "换一个关键词试试" : "可以直接上传，或从图像工坊的“我的资产”批量转入"}</span>{!query && <button type="button" className="primary" onClick={() => inputRef.current?.click()}><UploadSimple />上传第一个媒体</button>}</div>
         : <div className="favorite-grid">{filtered.map((item, index) => <article className="favorite-card" key={item.id} data-selected={selected.has(item.id)}>
-          <button type="button" className="favorite-image" aria-label={`预览 ${item.title}`} onClick={() => selectionMode ? toggle(item.id) : openPreview(index)} onContextMenu={(event) => { event.preventDefault(); setMenu({ item, x: Math.min(event.clientX, window.innerWidth - 210), y: Math.min(event.clientY, window.innerHeight - 150) }); }}>{isVideoItem(item) ? <><img src={item.thumbnailUrl || item.contentUrl} alt="" loading="lazy" /><span className="favorite-video-badge"><Play weight="fill" /></span></> : <img src={item.thumbnailUrl || item.contentUrl} alt="" loading="lazy" />}</button>
-          <button type="button" className="favorite-select" aria-label={`${selected.has(item.id) ? "取消选择" : "选择"} ${item.title}`} onClick={() => { setSelectionMode(true); toggle(item.id); }}><i>{selected.has(item.id) ? "✓" : ""}</i></button>
-          <button type="button" className="favorite-delete" aria-label={`删除 ${item.title}`} onClick={() => setDeleteIds([item.id])}><Trash /></button>
-          <button type="button" className="favorite-more" aria-label={`${item.title} 更多操作`} onClick={(event) => { event.stopPropagation(); const box = event.currentTarget.getBoundingClientRect(); setMenu({ item, x: Math.min(box.right - 190, window.innerWidth - 210), y: Math.min(box.bottom + 6, window.innerHeight - 150) }); }}><DotsThree weight="bold" /></button>
+          <button type="button" className="favorite-image" aria-label={selectionMode ? `${selected.has(item.id) ? "取消选择" : "选择"} ${item.title}` : `预览 ${item.title}`} onClick={() => selectionMode ? toggle(item.id) : openPreview(index)} onContextMenu={(event) => { event.preventDefault(); setMenu({ item, x: Math.min(event.clientX, window.innerWidth - 210), y: Math.min(event.clientY, window.innerHeight - 150) }); }}>{isVideoItem(item) ? <><img src={item.thumbnailUrl || item.contentUrl} alt="" loading="lazy" /><span className="favorite-video-badge"><Play weight="fill" /></span></> : <img src={item.thumbnailUrl || item.contentUrl} alt="" loading="lazy" />}</button>
           <div className="favorite-card-meta"><strong>{item.title}</strong><span>{formatDate(item.createdAt)} · {formatSize(item.fileSize)}</span></div>
         </article>)}</div>}
 

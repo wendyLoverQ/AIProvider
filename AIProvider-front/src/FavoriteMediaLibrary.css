@@ -31,11 +31,6 @@
 .favorite-card[data-selected="true"]{border-color:var(--accent-primary);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent-primary) 22%,transparent),0 12px var(--card-shadow-size) color-mix(in srgb,var(--bg-sidebar) 58%,transparent)}
 .favorite-image{position:relative;display:block;width:100%;padding:0;border:0;background:var(--bg-page);cursor:zoom-in}
 .favorite-image img{display:block;width:100%;aspect-ratio:9/16;object-fit:cover}
-.favorite-select,.favorite-delete,.favorite-more{position:absolute;top:7px;z-index:2;display:grid;place-items:center;width:24px;height:24px;padding:0;border:1px solid color-mix(in srgb,var(--text-primary) 20%,transparent);border-radius:7px;background:color-mix(in srgb,var(--bg-page) 72%,transparent);color:var(--text-primary);backdrop-filter:blur(12px);cursor:pointer}.favorite-select,.favorite-more{opacity:0;transition:opacity .16s}.favorite-delete:focus-visible{outline:2px solid var(--border-focus);outline-offset:2px}
-.favorite-select{left:7px}.favorite-delete{right:38px;color:var(--accent-red)}.favorite-more{right:7px}
-.favorite-card:hover .favorite-select,.favorite-card:hover .favorite-more,.favorite-card[data-selected="true"] .favorite-select{opacity:1}
-.favorite-select i{display:grid;place-items:center;width:12px;height:12px;border:1px solid currentColor;border-radius:50%;font-size:7px;font-style:normal}
-.favorite-card[data-selected="true"] .favorite-select{background:var(--accent-primary);color:var(--bg-sidebar)}
 .favorite-card-meta{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:4px 7px 5px;min-width:0}
 .favorite-card-meta strong{overflow:hidden;font-size:8px;font-weight:600;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;color:var(--text-primary)}
 .favorite-card-meta span{flex:none;color:var(--text-muted-readable);font-size:7px;white-space:nowrap}

@@ -64,8 +64,10 @@ describe("UI release gate", () => {
     expect(page).toContain('new XMLHttpRequest()');
     expect(page).toContain('<progress max=');
     expect(page).toContain('body: JSON.stringify({ ids: deleteIds })');
-    expect(page).toContain('aria-label={`删除 ${item.title}`}');
     expect(page).toContain('<Trash />批量删除');
+    expect(page).not.toContain('className="favorite-delete"');
+    expect(page).not.toContain('className="favorite-more"');
+    expect(page).not.toContain('className="favorite-select"');
     expect(page).not.toMatch(/<div[^>]+onClick=/);
     expect(css).toContain("var(--bg-surface)");
     expect(css).toContain("var(--text-primary)");
