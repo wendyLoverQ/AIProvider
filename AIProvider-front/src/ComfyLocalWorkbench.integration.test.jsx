@@ -622,6 +622,25 @@ describe("Comfy image generation flow", () => {
     expect(screen.getByText("已一次提交 3 个任务到 Bridge 队列")).toBeTruthy();
   });
 
+  it("stays responsive after Bridge accepts 100 tasks", async () => {
+    render(<ComfyLocalWorkbench />);
+    const quantity = await screen.findByRole("spinbutton", { name: "生成数量" });
+    fireEvent.change(quantity, { target: { value: "100" } });
+    fireEvent.click(screen.getByRole("button", { name: "开始生成" }));
+
+    await waitFor(() => expect(taskRecordBatchBody).toHaveLength(100));
+    await screen.findByText("当前 100 个任务");
+    const persisted = JSON.parse(localStorage.getItem("comfy_active_tasks"));
+    expect(persisted).toHaveLength(100);
+    expect(persisted.every((task) => task.form == null && task.inputImages == null && task.progressPlan == null)).toBe(true);
+
+    const switchStartedAt = performance.now();
+    fireEvent.click(screen.getByRole("button", { name: "我的资产" }));
+    const switchDispatchMs = performance.now() - switchStartedAt;
+    expect(switchDispatchMs).toBeLessThan(500);
+    await waitFor(() => expect(assetRequests).toBe(1));
+  });
+
   it("moves selected local images with one backend ID batch", async () => {
     multiImageGallery = true;
     render(<ComfyLocalWorkbench />);

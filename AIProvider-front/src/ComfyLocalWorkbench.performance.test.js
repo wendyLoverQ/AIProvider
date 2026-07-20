@@ -19,6 +19,8 @@ describe("ComfyLocalWorkbench active-task rendering", () => {
     expect(source).not.toContain('call("/comfy/history?max_items=20"');
     expect(source).not.toContain("loadWorkflowsRef.current?.(token)");
     expect(source).not.toContain("setInterval(() => setNow(Date.now()), 1000)");
+    expect(source).toContain("const persistActiveTasks = (items) =>");
+    expect(source).not.toContain('JSON.stringify(next.filter((item) => !["SUCCEEDED", "FAILED"].includes(item.state)))');
   });
 
   it("loads each gallery queue once and keeps database-id item identity", () => {

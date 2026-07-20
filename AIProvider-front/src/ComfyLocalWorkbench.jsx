@@ -81,6 +81,25 @@ const sameTaskRuntime = (left, right) => left === right || Boolean(left && right
   left.progress === right.progress && left.reconciling === right.reconciling &&
   left.queueOrder === right.queueOrder && left.queueNumber === right.queueNumber &&
   JSON.stringify(left.progressDetail) === JSON.stringify(right.progressDetail));
+const persistActiveTasks = (items) => {
+  const persisted = items
+    .filter((task) => !task.external && !["SUCCEEDED", "FAILED", "CANCELLED"].includes(task.state))
+    .map((task) => ({
+      id: task.id,
+      sourceType: task.sourceType,
+      state: task.state,
+      bridgeState: task.bridgeState,
+      workflowId: task.workflowId,
+      workflowName: task.workflowName,
+      promptSchemeName: task.promptSchemeName,
+      finalOutputNodeId: task.finalOutputNodeId,
+      batchRunId: task.batchRunId,
+      folder: task.folder,
+      createdAt: task.createdAt,
+      actualSeed: task.actualSeed,
+    }));
+  localStorage.setItem("comfy_active_tasks", JSON.stringify(persisted));
+};
 const createGallerySource = () => ({
   serverEntries: [],
   recentEntries: [],
@@ -495,7 +514,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   const removeActiveTask = (promptId) => {
     setTasks((current) => {
       const next = current.filter((task) => task.id !== promptId);
-      localStorage.setItem("comfy_active_tasks", JSON.stringify(next));
+      persistActiveTasks(next);
       return next;
     });
   };
@@ -510,7 +529,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       if (data.state === "CANCEL_REQUESTED") {
         setTasks((current) => {
           const next = current.map((item) => String(item.id) === promptId ? { ...item, state: "CANCEL_REQUESTED", bridgeState: "CANCEL_REQUESTED", reconciling: true } : item);
-          localStorage.setItem("comfy_active_tasks", JSON.stringify(next.filter((item) => !item.external && item.state !== "SUCCEEDED")));
+          persistActiveTasks(next);
           return next;
         });
         setNotice("Bridge 已接收取消请求");
@@ -538,7 +557,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         const next = current.map((item) => accepted.has(String(item.id)) && ["QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(item.state)
           ? { ...item, state: "CANCEL_REQUESTED", bridgeState: "CANCEL_REQUESTED", reconciling: true }
           : item);
-        localStorage.setItem("comfy_active_tasks", JSON.stringify(next.filter((item) => !item.external && item.state !== "SUCCEEDED")));
+        persistActiveTasks(next);
         return next;
       });
       setNotice(data.total ? `Bridge 已接收全部 ${data.total} 个任务的取消请求` : "当前没有可取消的 Bridge 任务");
@@ -1516,7 +1535,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       });
       const next = sortActiveTasks([...activeTasks, ...retainedLocalTasks]);
       if (next.length === current.length && next.every((task, index) => task === current[index])) return current;
-      localStorage.setItem("comfy_active_tasks", JSON.stringify(next.filter((task) => !task.external && task.state !== "SUCCEEDED")));
+      persistActiveTasks(next);
       return next;
     }));
     if (completedExternalTasks.length)
@@ -1615,14 +1634,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       };
       setTasks((current) => {
         const next = [nextTask, ...current].slice(0, 2000);
-        localStorage.setItem(
-          "comfy_active_tasks",
-          JSON.stringify(
-            next.filter(
-              (item) => !["SUCCEEDED", "FAILED"].includes(item.state),
-            ),
-          ),
-        );
+        persistActiveTasks(next);
         return next;
       });
       fetch("/api/comfy-tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ promptId: nextTask.id, workflowId: nextTask.workflowId, workflowName: nextTask.workflowName, promptSchemeName: nextTask.promptSchemeName, positivePrompt: submissionForm.positivePrompt || "", negativePrompt: submissionForm.negativePrompt || "", mainModel: submissionForm.checkpoint || "", parametersJson: JSON.stringify(submissionForm), inputFile: nextTask.inputImages?.[0]?.name || null, inputFileName: nextTask.inputImages?.[0]?.name || null, inputSha256, status: "QUEUED" }) }).catch((exception) => reportLocalError("comfy-task-record", exception, { promptId: nextTask.id }));
@@ -1712,7 +1724,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       }
       setTasks((current) => {
         const next = [...nextTasks, ...current].slice(0, 2000);
-        localStorage.setItem("comfy_active_tasks", JSON.stringify(next.filter((item) => !["SUCCEEDED", "FAILED"].includes(item.state))));
+        persistActiveTasks(next);
         return next;
       });
       const recordResponse = await fetch("/api/comfy-tasks/batch", {
@@ -2024,7 +2036,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       }));
       setTasks((current) => {
         const next = [...nextTasks, ...current].slice(0, 2000);
-        localStorage.setItem("comfy_active_tasks", JSON.stringify(next.filter((item) => !["SUCCEEDED", "FAILED"].includes(item.state))));
+        persistActiveTasks(next);
         return next;
       });
       const recordResponse = await fetch("/api/comfy-tasks/batch", {
