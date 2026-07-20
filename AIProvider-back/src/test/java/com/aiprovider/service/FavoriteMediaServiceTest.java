@@ -11,6 +11,9 @@ import org.springframework.mock.web.MockMultipartFile;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.io.ByteArrayOutputStream;
+import java.awt.image.BufferedImage;
+import javax.imageio.ImageIO;
 import java.time.LocalDateTime;
 import java.util.*;
 
@@ -59,6 +62,34 @@ class FavoriteMediaServiceTest {
         FavoriteMediaService service = new FavoriteMediaService(repository, mock(AssetRepository.class), directory.toString(), "ffmpeg");
         assertThat(service.delete(Collections.singletonList(31L))).isEqualTo(1);
         assertThat(stored).doesNotExist();
+    }
+
+    @Test void storesMultipleFavoritesWithOneBatchLookupAndOneBatchInsert() throws Exception {
+        FavoriteMediaRepository repository = mock(FavoriteMediaRepository.class);
+        when(repository.findExistingSha256s(anyList())).thenReturn(Collections.emptyList());
+        when(repository.insertBatch(anyList())).thenReturn(2);
+        FavoriteMediaService service = new FavoriteMediaService(repository, mock(AssetRepository.class), directory.toString(), "ffmpeg");
+        List<MockMultipartFile> files = Arrays.asList(
+                new MockMultipartFile("files", "one.png", "image/png", png(0xff0000)),
+                new MockMultipartFile("files", "two.png", "image/png", png(0x00ff00)));
+        String metadata = "[{\"title\":\"one\",\"sourcePlatform\":\"Windows\"},{\"title\":\"two\",\"sourcePlatform\":\"Windows\"}]";
+
+        assertThat(service.uploadBatch(new ArrayList<>(files), metadata)).isEqualTo(2);
+
+        verify(repository, times(1)).findExistingSha256s(anyList());
+        ArgumentCaptor<List<FavoriteMediaMapper.Row>> rows = ArgumentCaptor.forClass(List.class);
+        verify(repository, times(1)).insertBatch(rows.capture());
+        assertThat(rows.getValue()).hasSize(2);
+        verify(repository, never()).insert(any());
+        verify(repository, never()).findBySha256(anyString());
+    }
+
+    private static byte[] png(int rgb) throws Exception {
+        BufferedImage image = new BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB);
+        image.setRGB(0, 0, rgb); image.setRGB(1, 0, rgb); image.setRGB(0, 1, rgb); image.setRGB(1, 1, rgb);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", output);
+        return output.toByteArray();
     }
 
     private static Map<String,Object> row(long id, String storagePath) {

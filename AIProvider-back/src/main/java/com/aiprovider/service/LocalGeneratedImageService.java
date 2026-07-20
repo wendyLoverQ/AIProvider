@@ -23,7 +23,7 @@ public class LocalGeneratedImageService {
         List<LocalGeneratedImageItemDTO> items = dto == null || dto.getItems() == null ? Collections.emptyList() : dto.getItems();
         if (items.isEmpty() || items.size() > 100) throw new IllegalArgumentException("本机生成图片记录数量必须在 1 到 100 之间");
         Set<String> paths = new HashSet<>();
-        int saved = 0;
+        List<Map<String,Object>> rows = new ArrayList<>();
         for (LocalGeneratedImageItemDTO item : items) {
             validate(item);
             String path = item.getImagePath().trim().replace('\\', '/');
@@ -38,9 +38,10 @@ public class LocalGeneratedImageService {
             item.setLorasJson(clean(item.getLorasJson(), 16000));
             if (item.getGenerationDurationMs() != null && item.getGenerationDurationMs() < 0)
                 throw new IllegalArgumentException("生成耗时不能为负数");
-            saved += repository.upsert(platform, sha256(pathKey), item) > 0 ? 1 : 0;
+            rows.add(Map.of("pathHash", sha256(pathKey), "item", item));
         }
-        return saved;
+        repository.upsertBatch(platform, rows);
+        return rows.size();
     }
 
     public GalleryRecordPageVO page(String platformValue, int page, int pageSize, String statusValue) {

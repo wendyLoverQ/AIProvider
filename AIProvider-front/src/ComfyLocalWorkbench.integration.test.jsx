@@ -91,6 +91,11 @@ describe("Comfy image generation flow", () => {
   let favoriteUpload;
   let maidAiCopyPaths;
   let maidAiSavedDirectory;
+  let duplicateBatchBody;
+  let bridgeBatchBody;
+  let configBatchBody;
+  let configBatchRequests;
+  let taskRecordBatchBody;
 
   beforeEach(() => {
     submitted = false;
@@ -125,6 +130,11 @@ describe("Comfy image generation flow", () => {
     favoriteUpload = null;
     maidAiCopyPaths = null;
     maidAiSavedDirectory = null;
+    duplicateBatchBody = null;
+    bridgeBatchBody = null;
+    configBatchBody = null;
+    configBatchRequests = 0;
+    taskRecordBatchBody = null;
     vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
     vi.stubGlobal("confirm", vi.fn(() => true));
     vi.stubGlobal("ClipboardItem", class { constructor(items) { this.items = items; } });
@@ -170,9 +180,9 @@ describe("Comfy image generation flow", () => {
         transferredFileName = options.body.get("file").name;
         return json({ code: 200, data: { fileName: transferredFileName } });
       }
-      if (url === "/api/favorites" && options.method === "POST") {
+      if (url === "/api/favorites/batch" && options.method === "POST") {
         favoriteUpload = options.body;
-        return json({ code: 200, data: { id: 91, title: "saved", contentUrl: "/api/favorites/91/content" } });
+        return json({ code: 200, data: { saved: favoriteUpload.getAll("files").length } });
       }
       if (url.includes("/api/tasks/") && url.endsWith("/cancel") && options.method === "POST") {
         cancelledTask = decodeURIComponent(url.split("/api/tasks/")[1].replace("/cancel", ""));
@@ -181,6 +191,14 @@ describe("Comfy image generation flow", () => {
       if (url.endsWith("/api/tasks/cancel-all") && options.method === "POST") {
         cancelAllRequests += 1;
         return json({ success: true, total: 1, cancelled: 0, cancellationRequested: 1, promptIds: [PROMPT_ID] }, 202);
+      }
+      if (url.endsWith("/api/comfy-tasks/duplicates") && options.method === "POST") {
+        duplicateBatchBody = JSON.parse(options.body);
+        return json({ code: 200, data: [] });
+      }
+      if (url.endsWith("/api/comfy-tasks/batch") && options.method === "POST") {
+        taskRecordBatchBody = JSON.parse(options.body);
+        return json({ code: 200, data: null });
       }
       if (url.endsWith("/api/gallery/delete") && options.method === "POST") {
         deletedPaths.push(...JSON.parse(options.body).paths);
@@ -272,6 +290,21 @@ describe("Comfy image generation flow", () => {
         expect(options.body.get("workflowDefinition")).toContain("SaveImage");
         expect(options.body.get("workflowBinding")).toContain("outputNode");
         return json({ promptId: PROMPT_ID, finalOutputNodeId: "7", actualSeed: 42 });
+      }
+      if (url.endsWith("/api/generate/batch") && options.method === "POST") {
+        bridgeBatchBody = options.body;
+        return json({ success: true, tasks: [
+          { promptId: "batch-prompt-1", state: "PENDING", finalOutputNodeId: "8", actualSeed: 41 },
+          { promptId: "batch-prompt-2", state: "PENDING", finalOutputNodeId: "8", actualSeed: 42 },
+        ] }, 202);
+      }
+      if (url.endsWith("/api/generate/batch-configs") && options.method === "POST") {
+        configBatchRequests += 1;
+        configBatchBody = options.body;
+        const items = JSON.parse(options.body.get("itemsJson"));
+        return json({ success: true, tasks: items.map((_, index) => ({
+          promptId: `config-batch-${index + 1}`, state: "PENDING", finalOutputNodeId: "7", actualSeed: 50 + index,
+        })) }, 202);
       }
       throw new Error(`Unexpected request: ${url}`);
     }));
@@ -462,9 +495,12 @@ describe("Comfy image generation flow", () => {
     const workflowSelect = await screen.findByRole("combobox", { name: "当前生成工作流" });
     fireEvent.change(workflowSelect, { target: { value: "futa02" } });
     fireEvent.click(screen.getByRole("button", { name: "开始生成" }));
-    await waitFor(() => expect(submittedWorkflow?.id).toBe("futa02"));
-    expect(submittedWorkflow.name).toBe("Futa 02 · 透明双输出");
-    expect(submittedWorkflow.definition).toContain("WorkflowTwoMarker");
+    await waitFor(() => expect(configBatchRequests).toBe(1));
+    expect(configBatchBody.get("workflowName")).toBe("Futa 02 · 透明双输出");
+    expect(configBatchBody.get("workflowDefinition")).toContain("WorkflowTwoMarker");
+    expect(JSON.parse(configBatchBody.get("itemsJson"))).toEqual(expect.arrayContaining([
+      expect.objectContaining({ workflowId: "futa02", batchSize: 1 }),
+    ]));
   });
 
   it("loads Prompt schemes by stable backend id", async () => {
@@ -626,13 +662,16 @@ describe("Comfy image generation flow", () => {
     expect(screen.queryByText(/查询当前任务失败/)).toBeNull();
   });
 
-  it("splits a large requested quantity into single-image queue submissions", async () => {
+  it("submits a requested quantity to Bridge and the backend as one batch", async () => {
     render(<ComfyLocalWorkbench />);
     const quantity = await screen.findByRole("spinbutton", { name: "生成数量" });
     fireEvent.change(quantity, { target: { value: "3" } });
     fireEvent.click(screen.getByRole("button", { name: "开始生成" }));
-    await waitFor(() => expect(generateRequests).toBe(3));
-    expect(submittedBatchSizes).toEqual(["1", "1", "1"]);
+    await waitFor(() => expect(configBatchRequests).toBe(1));
+    expect(generateRequests).toBe(0);
+    expect(JSON.parse(configBatchBody.get("itemsJson"))).toHaveLength(3);
+    await waitFor(() => expect(taskRecordBatchBody).toHaveLength(3));
+    expect(screen.getByText("已一次提交 3 个任务到 Bridge 队列")).toBeTruthy();
   });
 
   it("builds a weighted prompt from image assets before lucky generation", async () => {
@@ -705,6 +744,25 @@ describe("Comfy image generation flow", () => {
     await waitFor(() => expect(deletedPaths).toEqual(["aimaid/done.png"]));
   });
 
+  it("submits selected image operations with one duplicate request, one Bridge batch and one task-record batch", async () => {
+    multiImageGallery = true;
+    render(<ComfyLocalWorkbench />);
+    const images = await screen.findAllByAltText("历史生成结果");
+    fireEvent.click(screen.getByRole("button", { name: "选择" }));
+    images.forEach((image) => fireEvent.click(image.closest("button")));
+    fireEvent.click(screen.getByRole("button", { name: /批量操作 2/ }));
+    fireEvent.click(screen.getByRole("button", { name: "开始批量操作" }));
+
+    await waitFor(() => expect(bridgeBatchBody).toBeInstanceOf(FormData));
+    expect(duplicateBatchBody.workflowId).toBe(cutoutWorkflow.id);
+    expect(duplicateBatchBody.inputSha256List).toHaveLength(2);
+    expect(bridgeBatchBody.getAll("sourceImages")).toHaveLength(2);
+    expect(JSON.parse(bridgeBatchBody.get("inputSha256List"))).toHaveLength(2);
+    await waitFor(() => expect(taskRecordBatchBody).toHaveLength(2));
+    expect(taskRecordBatchBody.map((item) => item.promptId)).toEqual(["batch-prompt-1", "batch-prompt-2"]);
+    expect(screen.getByText("批量操作已一次提交 2 个任务")).toBeTruthy();
+  });
+
   it("transfers an image to the server folder from its right-click menu", async () => {
     render(<ComfyLocalWorkbench />);
     fireEvent.click(await screen.findByRole("button", { name: "我的资产" }));
@@ -715,7 +773,7 @@ describe("Comfy image generation flow", () => {
     expect(screen.getByText("已转到文件中转站：saved.png")).toBeTruthy();
   }, 15000);
 
-  it("uploads selected registered assets to the server-backed My Favorites library", async () => {
+  it("uploads selected registered assets to My Favorites with one batch request", async () => {
     render(<ComfyLocalWorkbench />);
     fireEvent.click(await screen.findByRole("button", { name: "我的资产" }));
     const image = await screen.findByAltText("历史生成结果");
@@ -723,8 +781,9 @@ describe("Comfy image generation flow", () => {
     fireEvent.click(image.closest("button"));
     fireEvent.click(screen.getByRole("button", { name: /转到我的最爱 1/ }));
     await waitFor(() => expect(favoriteUpload).toBeInstanceOf(FormData));
-    expect(favoriteUpload.get("assetId")).toBe("12");
-    expect(favoriteUpload.get("file").name).toBe("saved.png");
+    expect(favoriteUpload.getAll("files")).toHaveLength(1);
+    expect(favoriteUpload.get("files").name).toBe("saved.png");
+    expect(JSON.parse(favoriteUpload.get("metadata"))[0].assetId).toBe(12);
     expect(screen.getByText("已将 1 张资产原图上传到服务器“我的最爱”")).toBeTruthy();
   }, 15000);
 
@@ -762,7 +821,7 @@ describe("Comfy image generation flow", () => {
     const generate = await screen.findByRole("button", { name: "开始生成" });
     await waitFor(() => expect(generate.disabled).toBe(false));
     fireEvent.click(generate);
-    const cancelAll = await screen.findByRole("button", { name: "取消全部 1" });
+    const cancelAll = await screen.findByRole("button", { name: "取消全部生成任务（1）" });
     fireEvent.click(cancelAll);
     await waitFor(() => expect(cancelAllRequests).toBe(1));
     expect(screen.getByText("Bridge 已接收全部 1 个任务的取消请求")).toBeTruthy();

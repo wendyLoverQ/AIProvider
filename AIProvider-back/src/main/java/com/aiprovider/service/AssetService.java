@@ -25,9 +25,9 @@ public class AssetService {
         String platform = platform(dto == null ? null : dto.getPlatform());
         List<AssetItemDTO> items = dto == null || dto.getItems() == null ? Collections.emptyList() : dto.getItems();
         if (items.isEmpty() || items.size() > 500) throw new IllegalArgumentException("资产数量必须在 1 到 500 之间");
-        int saved = 0;
         Set<String> paths = new HashSet<>();
         List<String> pathHashes = new ArrayList<>();
+        List<Map<String,Object>> rows = new ArrayList<>();
         for (AssetItemDTO item : items) {
             validate(item);
             String normalizedPath = item.getLocalPath().trim();
@@ -54,12 +54,13 @@ public class AssetService {
             item.setLorasJson(clean(item.getLorasJson(), 16000));
             item.setMainModel(clean(item.getMainModel(), 1000));
             String pathHash = sha256(pathKey);
-            saved += repository.upsert(platform, pathHash, item) > 0 ? 1 : 0;
             pathHashes.add(pathHash);
+            rows.add(Map.of("pathHash", pathHash, "item", item));
         }
+        repository.upsertBatch(platform, rows);
         List<AssetVO> persisted = new ArrayList<>();
         for (Map<String,Object> row : repository.findByPathHashes(platform, pathHashes)) persisted.add(toVO(row));
-        return new AssetBatchResultVO(saved, persisted);
+        return new AssetBatchResultVO(rows.size(), persisted);
     }
 
     public AssetPageVO page(String platform, int page, int pageSize, String status) {

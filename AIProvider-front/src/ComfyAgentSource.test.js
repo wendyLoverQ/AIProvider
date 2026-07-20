@@ -131,13 +131,26 @@ describe("ComfyUIAgent local file bridge", () => {
     expect(source).toContain("MaidAiDirectory");
   });
 
-  it("enumerates monitors and applies an uploaded wallpaper to one selected Windows display", () => {
+  it("uses Wallpaper Engine control for a selected display and only uses Windows wallpaper when it is not running", () => {
     const source = readFileSync(sourcePath, "utf8");
     const wallpaper = readFileSync(fileURLToPath(new URL("../../ComfyUIAgent/WallpaperService.cs", import.meta.url)), "utf8");
     expect(source).toContain('app.MapGet("/api/wallpaper/monitors"');
     expect(source).toContain('app.MapPost("/api/wallpaper/apply"');
     expect(source).toContain('StartsWithSegments("/api/wallpaper")');
     expect(wallpaper).toContain("GetMonitorDevicePathCount");
+    expect(wallpaper).toContain('Process.GetProcessesByName(processName)');
+    expect(wallpaper).toContain('"-control", "openWallpaper", "-file", wallpaper, "-monitor"');
+    expect(wallpaper.indexOf("RunningWallpaperEngine()"))
+      .toBeLessThan(wallpaper.indexOf("desktop.SetWallpaper(monitorId, destination)"));
     expect(wallpaper).toContain("desktop.SetWallpaper(monitorId, destination)");
+  });
+
+  it("accepts one image batch and persists the whole Bridge queue once", () => {
+    const source = readFileSync(sourcePath, "utf8");
+    expect(source).toContain('app.MapPost("/api/generate/batch"');
+    expect(source).toContain('app.MapPost("/api/generate/batch-configs"');
+    expect(source).toContain("generationQueue.AddRange(batch)");
+    expect(source).toContain("await EnqueueBridgeGenerations(completedItems.Select(item => item.QueueItem))");
+    expect(source).not.toContain("for (const input of prepared)");
   });
 });

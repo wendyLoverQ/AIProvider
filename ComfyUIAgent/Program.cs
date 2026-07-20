@@ -112,8 +112,8 @@ app.MapPost("/api/wallpaper/apply", async (HttpRequest request, WallpaperService
     var file = form.Files.GetFile("file");
     var monitorId = form["monitorId"].ToString();
     if (file == null) return Results.BadRequest(new { success = false, message = "缺少壁纸文件" });
-    await wallpaper.ApplyAsync(file, monitorId);
-    return Results.Ok(new { success = true, monitorId });
+    var applied = await wallpaper.ApplyAsync(file, monitorId);
+    return Results.Ok(new { success = true, monitorId, provider = applied.Provider, path = applied.Path });
 }).DisableAntiforgery();
 app.MapPost("/api/logs/client", async (ClientLogRequest request) => {
     await AppendAgentLog("error", $"frontend.{request.Scope}", request.Message, new { request.PromptId, request.Path, request.Details });
@@ -395,6 +395,116 @@ app.MapGet("/api/workflows", async () => {
 app.MapPost("/api/generate", async (HttpRequest request, IHttpClientFactory factory) => {
     if (!request.HasFormContentType) return Results.BadRequest(new { success = false, message = "生成请求必须使用 multipart/form-data" });
     var form = await request.ReadFormAsync(request.HttpContext.RequestAborted);
+    var prepared = await PrepareGeneration(form, factory);
+    if (prepared.Error != null) return prepared.Error;
+    await EnqueueBridgeGenerations(new[] { prepared.Value!.QueueItem });
+    return GenerationAccepted(prepared.Value);
+}).DisableAntiforgery();
+
+app.MapPost("/api/generate/batch", async (HttpRequest request, IHttpClientFactory factory) => {
+    if (!request.HasFormContentType) return Results.BadRequest(new { success = false, message = "批量生成请求必须使用 multipart/form-data" });
+    var form = await request.ReadFormAsync(request.HttpContext.RequestAborted);
+    var sourceFiles = form.Files.GetFiles("sourceImages");
+    var hashes = JsonSerializer.Deserialize<string[]>(form["inputSha256List"].ToString(), GalleryJsonOptions()) ?? Array.Empty<string>();
+    if (sourceFiles.Count == 0 || sourceFiles.Count > 1000 || hashes.Length != sourceFiles.Count)
+        return Results.BadRequest(new { success = false, message = "批量图片和 SHA-256 列表数量不一致，或超出 1000 张限制" });
+    if (hashes.Any(hash => hash == null || !System.Text.RegularExpressions.Regex.IsMatch(hash, "^[0-9a-fA-F]{64}$")))
+        return Results.BadRequest(new { success = false, message = "批量图片 SHA-256 无效" });
+
+    var commonFields = form.ToDictionary(entry => entry.Key, entry => entry.Value);
+    var preparedItems = new PreparedGeneration?[sourceFiles.Count];
+    var preparationErrors = new IResult?[sourceFiles.Count];
+    await Parallel.ForEachAsync(Enumerable.Range(0, sourceFiles.Count), new ParallelOptions {
+        MaxDegreeOfParallelism = Math.Min(4, sourceFiles.Count),
+        CancellationToken = request.HttpContext.RequestAborted
+    }, async (index, _) => {
+        var source = sourceFiles[index];
+        var hash = hashes[index].ToLowerInvariant();
+        var extension = Path.GetExtension(source.FileName);
+        var uniqueName = $"{Path.GetFileNameWithoutExtension(source.FileName)}_{hash[..12]}{extension}";
+        await using var sourceStream = source.OpenReadStream();
+        var childFile = new FormFile(sourceStream, 0, source.Length, "sourceImage", uniqueName) {
+            Headers = source.Headers,
+            ContentType = source.ContentType
+        };
+        var childFiles = new FormFileCollection { childFile };
+        var childFields = new Dictionary<string, Microsoft.Extensions.Primitives.StringValues>(commonFields) {
+            ["clientId"] = Guid.NewGuid().ToString("N")
+        };
+        var prepared = await PrepareGeneration(new FormCollection(childFields, childFiles), factory);
+        preparationErrors[index] = prepared.Error;
+        if (prepared.Value != null) preparedItems[index] = prepared.Value with { InputSha256 = hash, InputFileName = source.FileName };
+    });
+    var preparationError = preparationErrors.FirstOrDefault(error => error != null);
+    if (preparationError != null) return preparationError;
+    var completedItems = preparedItems.Select(item => item!).ToArray();
+    await EnqueueBridgeGenerations(completedItems.Select(item => item.QueueItem));
+    return Results.Json(new { success = true, tasks = completedItems.Select(item => new {
+        item.PromptId, state = "PENDING", item.FinalOutputNodeId, queueOwner = "BRIDGE",
+        item.ActualSeed, item.Width, item.Height, item.InputSha256, item.InputFileName
+    }) }, statusCode: StatusCodes.Status202Accepted);
+}).DisableAntiforgery();
+
+app.MapPost("/api/generate/batch-configs", async (HttpRequest request, IHttpClientFactory factory) => {
+    if (!request.HasFormContentType) return Results.BadRequest(new { success = false, message = "批量生成请求必须使用 multipart/form-data" });
+    var form = await request.ReadFormAsync(request.HttpContext.RequestAborted);
+    JsonArray items;
+    try {
+        items = JsonNode.Parse(form["itemsJson"].ToString())?.AsArray()
+            ?? throw new InvalidDataException("itemsJson 不是 JSON 数组");
+    } catch (Exception exception) {
+        return Results.BadRequest(new { success = false, message = $"批量生成参数无效：{exception.Message}" });
+    }
+    if (items.Count == 0 || items.Count > 1000 || items.Any(item => item is not JsonObject))
+        return Results.BadRequest(new { success = false, message = "批量生成数量必须在 1 到 1000 之间，且每项必须是参数对象" });
+
+    var commonFields = form.ToDictionary(entry => entry.Key, entry => entry.Value);
+    commonFields.Remove("itemsJson");
+    var preparedItems = new PreparedGeneration?[items.Count];
+    var preparationErrors = new IResult?[items.Count];
+    await Parallel.ForEachAsync(Enumerable.Range(0, items.Count), new ParallelOptions {
+        MaxDegreeOfParallelism = Math.Min(4, items.Count),
+        CancellationToken = request.HttpContext.RequestAborted
+    }, async (index, _) => {
+        var childFields = new Dictionary<string, Microsoft.Extensions.Primitives.StringValues>(commonFields) {
+            ["clientId"] = Guid.NewGuid().ToString("N")
+        };
+        foreach (var entry in items[index]!.AsObject()) {
+            childFields[entry.Key] = entry.Value is JsonValue scalar && scalar.TryGetValue<string>(out var text)
+                ? text
+                : entry.Value?.ToJsonString() ?? "";
+        }
+        var openedStreams = new List<Stream>();
+        try {
+            var childFiles = new FormFileCollection();
+            foreach (var file in form.Files) {
+                var stream = file.OpenReadStream();
+                openedStreams.Add(stream);
+                var extension = Path.GetExtension(file.FileName);
+                var uniqueName = $"{Path.GetFileNameWithoutExtension(file.FileName)}_batch{index + 1:D4}_{Guid.NewGuid():N}{extension}";
+                childFiles.Add(new FormFile(stream, 0, file.Length, file.Name, uniqueName) {
+                    Headers = file.Headers,
+                    ContentType = file.ContentType
+                });
+            }
+            var prepared = await PrepareGeneration(new FormCollection(childFields, childFiles), factory);
+            preparationErrors[index] = prepared.Error;
+            preparedItems[index] = prepared.Value;
+        } finally {
+            foreach (var stream in openedStreams) await stream.DisposeAsync();
+        }
+    });
+    var preparationError = preparationErrors.FirstOrDefault(error => error != null);
+    if (preparationError != null) return preparationError;
+    var completedItems = preparedItems.Select(item => item!).ToArray();
+    await EnqueueBridgeGenerations(completedItems.Select(item => item.QueueItem));
+    return Results.Json(new { success = true, tasks = completedItems.Select(item => new {
+        item.PromptId, state = "PENDING", item.FinalOutputNodeId, queueOwner = "BRIDGE",
+        item.ActualSeed, item.Width, item.Height, item.InputSha256, item.InputFileName
+    }) }, statusCode: StatusCodes.Status202Accepted);
+}).DisableAntiforgery();
+
+async Task<GenerationPreparation> PrepareGeneration(IFormCollection form, IHttpClientFactory factory) {
     var directory = Path.Combine(AppContext.BaseDirectory, "Resources", "ComfyUI");
     var postedWorkflow = form["workflowDefinition"].ToString();
     var postedBinding = form["workflowBinding"].ToString();
@@ -420,7 +530,7 @@ app.MapPost("/api/generate", async (HttpRequest request, IHttpClientFactory fact
             ?? throw new InvalidOperationException("workflow_binding.json 不是有效对象");
     }
     if (prompt.ContainsKey("nodes") || prompt.ContainsKey("links"))
-        return Results.BadRequest(new { success = false, message = "workflow_api.json 必须是 API Format" });
+        return new(null, Results.BadRequest(new { success = false, message = "workflow_api.json 必须是 API Format" }));
 
     var fields = bindings["fields"] as JsonObject ?? throw new InvalidOperationException("工作流绑定缺少 fields");
     bool Has(string key) => fields.ContainsKey(key);
@@ -471,8 +581,8 @@ app.MapPost("/api/generate", async (HttpRequest request, IHttpClientFactory fact
         using var uploadResponse = await factory.CreateClient("comfy").PostAsync("upload/image", content);
         var uploadText = await uploadResponse.Content.ReadAsStringAsync();
         if (!uploadResponse.IsSuccessStatusCode)
-            return Results.Content(uploadText, uploadResponse.Content.Headers.ContentType?.ToString() ?? "application/json",
-                statusCode: (int)uploadResponse.StatusCode);
+            return new(null, Results.Content(uploadText, uploadResponse.Content.Headers.ContentType?.ToString() ?? "application/json",
+                statusCode: (int)uploadResponse.StatusCode));
         JsonNode? uploadJson;
         try { uploadJson = JsonNode.Parse(uploadText); }
         catch (Exception ex) { throw new InvalidOperationException($"上传参考图 {key} 失败（HTTP {(int)uploadResponse.StatusCode}）：{uploadText[..Math.Min(uploadText.Length, 300)]}", ex); }
@@ -556,7 +666,7 @@ app.MapPost("/api/generate", async (HttpRequest request, IHttpClientFactory fact
         node["class_type"]?.GetValue<string>() == "CLIPLoader" &&
         node["inputs"]?["type"]?.GetValue<string>()?.Equals("krea2", StringComparison.OrdinalIgnoreCase) == true);
     if (selectedKrea2Model && !usesKrea2TextEncoder)
-        return Results.UnprocessableEntity(new { success = false, message = "当前工作流使用的不是 Krea2 文本编码器，不能加载 Krea2 主模型；请选择 Krea2 工作流" });
+        return new(null, Results.UnprocessableEntity(new { success = false, message = "当前工作流使用的不是 Krea2 文本编码器，不能加载 Krea2 主模型；请选择 Krea2 工作流" }));
     var requestedPrefix = form["filenamePrefix"].ToString().Trim();
     var safePrefix = Path.GetFileName(requestedPrefix.Replace('\\', '/'));
     if (string.IsNullOrWhiteSpace(safePrefix)) safePrefix = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
@@ -575,17 +685,21 @@ app.MapPost("/api/generate", async (HttpRequest request, IHttpClientFactory fact
     var finalId = finalEntry.Key;
     var promptId = Guid.NewGuid().ToString("D");
     var returnedSeed = actualSeed is JsonValue returnedSeedValue && returnedSeedValue.TryGetValue<long>(out var parsedSeed) ? parsedSeed : (long?)null;
-    await EnqueueBridgeGeneration(new BridgeQueuedGeneration {
+    var queueItem = new BridgeQueuedGeneration {
         PromptId = promptId,
         Prompt = prompt,
         ClientId = form["clientId"].ToString(),
         CreatedAt = DateTimeOffset.Now,
         State = "PENDING"
-    });
-    return Results.Json(new { success = true, promptId, state = "PENDING", finalOutputNodeId = finalId, queueOwner = "BRIDGE",
-        actualSeed = returnedSeed,
-        width = Has("width") ? PostedInt("width") : null, height = Has("height") ? PostedInt("height") : null }, statusCode: StatusCodes.Status202Accepted);
-}).DisableAntiforgery();
+    };
+    return new(new PreparedGeneration(queueItem, promptId, finalId, returnedSeed,
+        Has("width") ? PostedInt("width") : null, Has("height") ? PostedInt("height") : null, null, null), null);
+}
+
+IResult GenerationAccepted(PreparedGeneration item) => Results.Json(new {
+    success = true, promptId = item.PromptId, state = "PENDING", finalOutputNodeId = item.FinalOutputNodeId, queueOwner = "BRIDGE",
+    actualSeed = item.ActualSeed, width = item.Width, height = item.Height
+}, statusCode: StatusCodes.Status202Accepted);
 
 app.MapGet("/api/gallery/file", (string path) => {
     var file = ResolveGalleryPath(path, mustExist: true);
@@ -891,15 +1005,22 @@ async Task WriteBridgeGenerationQueue() {
 }
 
 async Task EnqueueBridgeGeneration(BridgeQueuedGeneration item) {
+    await EnqueueBridgeGenerations(new[] { item });
+}
+
+async Task EnqueueBridgeGenerations(IEnumerable<BridgeQueuedGeneration> items) {
+    var batch = items.ToArray();
+    if (batch.Length == 0 || batch.Length > 1000) throw new InvalidOperationException("Bridge 批量生成数量必须在 1 到 1000 之间");
     await generationQueueLock.WaitAsync();
     try {
         generationQueue.RemoveAll(entry => entry.State is "FAILED" or "SUCCEEDED" or "CANCELLED" &&
             DateTimeOffset.Now - (entry.CompletedAt ?? entry.CreatedAt) > TimeSpan.FromDays(7));
-        if (generationQueue.Count(entry => entry.State == "PENDING") >= 2000)
+        if (generationQueue.Count(entry => entry.State == "PENDING") + batch.Length > 2000)
             throw new InvalidOperationException("Bridge 待生成队列已达到 2000 个任务，请先处理现有队列");
-        if (generationQueue.Any(entry => string.Equals(entry.PromptId, item.PromptId, StringComparison.OrdinalIgnoreCase)))
-            throw new InvalidOperationException($"Bridge 队列中已存在任务 {item.PromptId}");
-        generationQueue.Add(item);
+        var promptIds = batch.Select(item => item.PromptId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (promptIds.Count != batch.Length || generationQueue.Any(entry => promptIds.Contains(entry.PromptId)))
+            throw new InvalidOperationException("Bridge 批量队列中存在重复任务 ID");
+        generationQueue.AddRange(batch);
         await WriteBridgeGenerationQueue();
     } finally { generationQueueLock.Release(); }
     generationQueueSignal.Release();
@@ -1840,6 +1961,8 @@ sealed class BridgeSettings {
 sealed class FolderRequest { public string? Name { get; set; } }
 sealed record ImageMigrationFile(string Source, string Target, string Sha256);
 sealed record ImageMigrationPlan(List<ImageMigrationFile> Files, string? Error);
+sealed record PreparedGeneration(BridgeQueuedGeneration QueueItem, string PromptId, string FinalOutputNodeId, long? ActualSeed, int? Width, int? Height, string? InputSha256, string? InputFileName);
+sealed record GenerationPreparation(PreparedGeneration? Value, IResult? Error);
 sealed class AssetPathRequest { public string? Path { get; set; } }
 sealed class HistoryMoveRequest { public string[] PromptIds { get; set; } = Array.Empty<string>(); public string? Folder { get; set; } }
 class GalleryPathsRequest { public string[] Paths { get; set; } = Array.Empty<string>(); }

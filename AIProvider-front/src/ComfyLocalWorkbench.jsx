@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle,
   Copy,
@@ -75,6 +75,11 @@ const limitGalleryImages = (entries, limit = 100) => {
     return images.length ? [{ ...entry, images, count: images.length, imageUrl: images[0]?.url || null }] : [];
   });
 };
+const sameTaskRuntime = (left, right) => left === right || Boolean(left && right &&
+  left.id === right.id && left.state === right.state && left.bridgeState === right.bridgeState &&
+  left.progress === right.progress && left.reconciling === right.reconciling &&
+  left.queueOrder === right.queueOrder && left.queueNumber === right.queueNumber &&
+  JSON.stringify(left.progressDetail) === JSON.stringify(right.progressDetail));
 const createGallerySource = () => ({
   serverEntries: [],
   recentEntries: [],
@@ -231,6 +236,14 @@ const formatTaskElapsed = (task, now = Date.now()) => {
   if (!started) return "未记录";
   return formatGenerationDuration(Math.max(0, now - started));
 };
+function TaskElapsed({ task }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return formatTaskElapsed(task, now);
+}
 const sha256Blob = async (blob) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer()))).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 const deadline = (ms = 8000) => AbortSignal.timeout(ms);
 async function readJson(response, label) {
@@ -310,7 +323,6 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     [results, setResults] = useState([]),
     [cancelingTask, setCancelingTask] = useState(""),
     [cancelAllBusy, setCancelAllBusy] = useState(false);
-  const [taskClock, setTaskClock] = useState(() => Date.now());
   const [taskDetail, setTaskDetail] = useState(null);
   const [batchOperation, setBatchOperation] = useState({ open: false, workflowId: "", busy: false });
   const [batchScheduling, setBatchScheduling] = useState(false);
@@ -393,7 +405,6 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     bridgeInstanceIdRef = useRef(""),
     bridgeExitIntent = useRef(""),
     defaultPresetApplied = useRef(""),
-    batchStopRequested = useRef(false),
     cancelAllRequested = useRef(false),
     viewerTransform = useRef(null),
     viewerActionsRef = useRef({ requestDelete: null, route: null });
@@ -401,15 +412,6 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   const activeGallerySource = gallerySources[galleryMode];
   const history = visibleGalleryEntries(galleryMode, activeGallerySource);
   useEffect(() => { tasksRef.current = tasks; }, [tasks]);
-  useEffect(() => {
-    if (!tasks.length) return undefined;
-    const timer = window.setInterval(() => setTaskClock(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [tasks.length]);
-  useEffect(() => () => { batchStopRequested.current = true; }, []);
-  useEffect(() => {
-    if (!active) batchStopRequested.current = true;
-  }, [active]);
   useEffect(() => {
     if (!notice) return undefined;
     const timer = setTimeout(() => setNotice(""), 3000);
@@ -493,6 +495,18 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     });
     setError(`任务失败：${message}`);
   };
+  const updateTaskRuntime = (promptId, changes) => startTransition(() => setTasks((current) => {
+    const id = String(promptId);
+    let changed = false;
+    const next = current.map((task) => {
+      if (String(task.id) !== id) return task;
+      const updated = { ...task, ...(typeof changes === "function" ? changes(task) : changes) };
+      if (sameTaskRuntime(task, updated)) return task;
+      changed = true;
+      return updated;
+    });
+    return changed ? next : current;
+  }));
   const cancelTask = async (task) => {
     const promptId = String(task.id);
     setCancelingTask(promptId);
@@ -521,7 +535,6 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
   };
   const cancelAllTasks = async () => {
     cancelAllRequested.current = true;
-    batchStopRequested.current = true;
     setCancelAllBusy(true);
     setError("");
     try {
@@ -1492,7 +1505,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       .map((id) => previousTasks.get(id))
       .filter((task) => task?.external);
     externalTaskIds.current = nextExternalIds;
-    setTasks((current) => {
+    startTransition(() => setTasks((current) => {
       const existingTasks = new Map(current.map((task) => [String(task.id), task]));
       const activeTasks = rows
         .filter(({ row }) => Array.isArray(row) && row[1])
@@ -1508,7 +1521,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
             ? describeComfyProgress(liveProgress, promptId, progressPlan)
             : null;
           const previousProgress = Number.isFinite(existing?.progress) ? existing.progress : null;
-          return {
+          const updated = {
             ...existing,
             id: promptId,
             state,
@@ -1523,13 +1536,15 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
             queueNumber: row[0],
             createdAt: existing?.createdAt || new Date().toISOString(),
           };
+          return sameTaskRuntime(existing, updated) ? existing : updated;
         });
       const activeIds = new Set(activeTasks.map((task) => String(task.id)));
       const retainedLocalTasks = current.filter((task) => !task.external && !activeIds.has(String(task.id)) && task.state !== "SUCCEEDED");
       const next = sortActiveTasks([...activeTasks, ...retainedLocalTasks]);
+      if (next.length === current.length && next.every((task, index) => task === current[index])) return current;
       localStorage.setItem("comfy_active_tasks", JSON.stringify(next.filter((task) => !task.external && task.state !== "SUCCEEDED")));
       return next;
-    });
+    }));
     if (completedExternalTasks.length)
       await Promise.allSettled(completedExternalTasks.map((task) => appendCompletedExternalTask(task, authToken)));
     } finally {
@@ -1647,24 +1662,109 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       return nextTask;
   };
   const scheduleGenerations = async (total, buildSubmissionForm, completionLabel = "任务") => {
-    if (total < 1 || total > 10000) { setError("生成数量必须在 1 到 10000 之间"); return; }
+    if (total < 1 || total > 1000) { setError("生成数量必须在 1 到 1000 之间"); return; }
+    if (total === 1) {
+      try {
+        setError("");
+        results.forEach((result) => URL.revokeObjectURL(result.url));
+        setResults([]);
+        await submitGeneration({ ...buildSubmissionForm(0), batchSize: 1 });
+        setNotice(`已将 1 个${completionLabel}交给 Bridge 队列`);
+      } catch (e) {
+        reportLocalError("generate", e, { path: "/api/generate" });
+        setError(e.message);
+      }
+      return;
+    }
     const batchRunId = generateId();
-    batchStopRequested.current = false;
     setBatchScheduling(true);
     setBatchProgress({ total, submitted: 0 });
     setError("");
     results.forEach((result) => URL.revokeObjectURL(result.url));
     setResults([]);
     try {
-      let submitted = 0;
-      while (submitted < total && !batchStopRequested.current) {
-        await submitGeneration({ ...buildSubmissionForm(submitted), batchSize: 1 }, batchRunId);
-        submitted += 1;
-        setBatchProgress({ total, submitted });
+      const submissions = Array.from({ length: total }, (_, index) => ({ ...buildSubmissionForm(index), batchSize: 1 }));
+      const selectedWorkflowId = submissions[0].workflowId || selectedWorkflowIdRef.current;
+      if (submissions.some((item) => (item.workflowId || selectedWorkflowId) !== selectedWorkflowId))
+        throw new Error("一次批量提交只能使用同一个工作流");
+      const active = workflows.find((item) => item.id === selectedWorkflowId);
+      if (!active) throw new Error("工作流尚未从后端加载完成");
+      const referenceKeys = [];
+      if (active?.capabilities?.inputImage) referenceKeys.push("sourceImage");
+      if (active?.capabilities?.styleReference) referenceKeys.push("styleReference1", "styleReference2", "styleReference3", "styleReference4");
+      if (active?.capabilities?.poseReference) referenceKeys.push("poseReference");
+      const missing = referenceKeys.find((key) => !referenceFiles[key]);
+      if (missing) throw new Error(missing === "sourceImage" ? "当前工作流需要先选择待处理原图" : "当前工作流需要先选择全部参考图片");
+      const interactiveEditor = activeWorkflowFields.find((fieldKey) =>
+        active?.binding?.fields?.[fieldKey]?.nodeType === "MaskEditMEC" && active?.binding?.fields?.[fieldKey]?.input === "editor_data");
+      if (interactiveEditor) {
+        const invalid = submissions.some((submission) => {
+          try {
+            const editorData = JSON.parse(submission[interactiveEditor] || "{}");
+            return !(editorData.points?.length || editorData.bboxes?.length);
+          } catch { return true; }
+        });
+        if (invalid) throw new Error("请先在原图上涂抹需要删除的区域");
       }
-      setNotice(batchStopRequested.current ? `已停止加入 Bridge 队列，共提交 ${submitted} / ${total} 个任务` : `已将 ${submitted} 个${completionLabel}交给 Bridge 队列`);
+
+      const body = new FormData();
+      body.append("itemsJson", JSON.stringify(submissions));
+      body.append("workflowDefinition", JSON.stringify(active.definition));
+      body.append("workflowBinding", JSON.stringify(active.binding));
+      body.append("workflowName", active.name || active.id);
+      body.append("promptSchemeName", appliedPresetTitle || "");
+      body.append("folder", folder);
+      referenceKeys.forEach((key) => body.append(key, referenceFiles[key]));
+      const response = await call("/api/generate/batch-configs", { method: "POST", body }, 120000);
+      const data = await readJson(response, "本机参数批量生成接口");
+      if (!response.ok || !data.success || !Array.isArray(data.tasks) || data.tasks.length !== total)
+        throw new Error(data.message || `批量生成提交失败（HTTP ${response.status}）`);
+      if (cancelAllRequested.current) {
+        const cancellation = await call("/api/tasks/cancel-all", { method: "POST" }, 10000);
+        const cancellationData = await readJson(cancellation, "取消刚提交的批量任务接口");
+        if (!cancellation.ok || !cancellationData.success)
+          throw new Error(cancellationData.message || `取消批量任务失败（HTTP ${cancellation.status}）`);
+      }
+      const createdAt = new Date().toISOString();
+      const inputImages = Object.entries(referenceFiles).filter(([, file]) => file instanceof File)
+        .map(([key, file]) => ({ key, name: file.name, url: URL.createObjectURL(file) }));
+      const nextTasks = data.tasks.map((task, index) => {
+        const submission = submissions[index];
+        const progressPlan = createComfyProgressPlan(active.definition, [task.finalOutputNodeId]);
+        return {
+          id: task.promptId, sourceType: "AIPROVIDER", external: false, state: cancelAllRequested.current ? "CANCEL_REQUESTED" : "QUEUED",
+          bridgeState: cancelAllRequested.current ? "CANCEL_REQUESTED" : (task.state || "PENDING"), progress: 0,
+          form: { ...submission, workflowId: active.id }, workflowId: active.id, workflowName: active.name || active.id,
+          promptSchemeName: appliedPresetTitle || "", inputSha256: null, inputImages, finalOutputNodeId: task.finalOutputNodeId,
+          progressPlan, progressDetail: null, actualSeed: task.actualSeed, batchRunId, folder, createdAt,
+        };
+      });
+      if (pendingSourceImageRef.current) {
+        nextTasks.forEach((task) => pendingGenerationSourceIds.current.add(String(task.id)));
+        pendingSourceImageRef.current = false;
+      }
+      setTasks((current) => {
+        const next = [...nextTasks, ...current].slice(0, 2000);
+        localStorage.setItem("comfy_active_tasks", JSON.stringify(next.filter((item) => !["SUCCEEDED", "FAILED"].includes(item.state))));
+        return next;
+      });
+      const recordResponse = await fetch("/api/comfy-tasks/batch", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nextTasks.map((task, index) => ({
+          promptId: task.id, workflowId: task.workflowId, workflowName: task.workflowName,
+          promptSchemeName: task.promptSchemeName, positivePrompt: submissions[index].positivePrompt || "",
+          negativePrompt: submissions[index].negativePrompt || "", mainModel: submissions[index].checkpoint || "",
+          parametersJson: JSON.stringify(submissions[index]), inputFile: inputImages[0]?.name || null,
+          inputFileName: inputImages[0]?.name || null, inputSha256: null, status: task.state,
+        }))),
+      });
+      const recordData = await readJson(recordResponse, "批量任务记录接口");
+      if (!recordResponse.ok || recordData.code !== 200) throw new Error(recordData.message || "批量任务记录失败");
+      nextTasks.forEach((task) => poll(task.id, token, task.finalOutputNodeId, task.progressPlan, task));
+      setBatchProgress({ total, submitted: total });
+      setNotice(`已一次提交 ${total} 个${completionLabel}到 Bridge 队列`);
     } catch (e) {
-      reportLocalError("generate", e, { path: "/api/generate" });
+      reportLocalError("generate", e, { path: "/api/generate/batch-configs" });
       setError(e.message);
     } finally {
       setBatchScheduling(false);
@@ -1721,13 +1821,12 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         }
         if (["PENDING", "SUBMITTED", "QUEUED", "TRACKED", "CANCEL_REQUESTED"].includes(authoritativeState.state)) {
           taskMissingChecks.current.delete(String(promptId));
-          setTasks((current) => current.map((task) => String(task.id) === String(promptId) ? {
-            ...task,
+          updateTaskRuntime(promptId, {
             state: authoritativeState.state === "CANCEL_REQUESTED" ? "CANCEL_REQUESTED" : "QUEUED",
             bridgeState: authoritativeState.state,
             progress: 0,
             reconciling: authoritativeState.state === "SUBMITTED",
-          } : task));
+          });
           return;
         }
         const historyResponse = await call(
@@ -1758,12 +1857,12 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
             }
             if (bridgeState.state === "QUEUED") {
               taskMissingChecks.current.delete(String(promptId));
-              setTasks((current) => current.map((task) => String(task.id) === String(promptId) ? { ...task, state: "QUEUED", progress: 0, reconciling: false } : task));
+              updateTaskRuntime(promptId, { state: "QUEUED", progress: 0, reconciling: false });
               return;
             }
             if (["TRACKED", "COMPLETED"].includes(bridgeState.state)) {
               taskMissingChecks.current.delete(String(promptId));
-              setTasks((current) => current.map((task) => String(task.id) === String(promptId) ? { ...task, reconciling: true } : task));
+              updateTaskRuntime(promptId, { reconciling: true });
               return;
             }
             const missingChecks = (taskMissingChecks.current.get(String(promptId)) || 0) + 1;
@@ -1783,19 +1882,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
             progress = progressDetail?.totalPercent ?? null;
             if (progress === null) throw new Error(`实时进度未包含当前任务 ${promptId}`);
           }
-          setTasks((current) =>
-            current.map((task) =>
-              task.id === promptId
-                ? {
-                    ...task,
-                    state: executing ? "RUNNING" : "QUEUED",
-                    progress,
-                    progressDetail,
-                    reconciling: false,
-                  }
-                : task,
-            ),
-          );
+          updateTaskRuntime(promptId, { state: executing ? "RUNNING" : "QUEUED", progress, progressDetail, reconciling: false });
           return;
         }
         const explicitFailure = readTaskFailure(item);
@@ -1819,7 +1906,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         removeActiveTask(promptId);
       } catch (e) {
         reportLocalError("task-poll", e, { promptId, path: `/comfy/history/${promptId}` }, authToken);
-        setTasks((current) => current.map((task) => String(task.id) === String(promptId) ? { ...task, reconciling: true } : task));
+        updateTaskRuntime(promptId, { reconciling: true });
       }
     }, 2000);
     polling.current.set(promptId, timer);
@@ -2020,25 +2107,83 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     if (!workflow || !entries.length) return;
     setBatchOperation((current) => ({ ...current, busy: true }));
     try {
-      const prepared = [];
-      for (const { image } of entries) {
+      const prepared = await Promise.all(entries.map(async ({ image }) => {
         const blob = image.blob || await (await fetch(image.url)).blob();
         const file = new File([blob], image.filename || image.path?.split(/[\\/]/).pop() || "input.png", { type: blob.type || "image/png" });
         const hash = await sha256Blob(blob);
-        const response = await fetch(`/api/comfy-tasks/duplicate?workflowId=${encodeURIComponent(workflow.id)}&inputSha256=${hash}`);
-        const result = await readJson(response, "重复任务检查接口");
-        if (!response.ok || result.code !== 200) throw new Error(result.message || "重复任务检查失败");
-        prepared.push({ file, hash, duplicate: result.data && Object.keys(result.data).length > 0 });
-      }
-      const duplicateCount = prepared.filter((item) => item.duplicate).length;
+        return { file, hash, image };
+      }));
+      const duplicateResponse = await fetch("/api/comfy-tasks/duplicates", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workflowId: workflow.id, inputSha256List: prepared.map((item) => item.hash) }),
+      });
+      const duplicateResult = await readJson(duplicateResponse, "批量重复任务检查接口");
+      if (!duplicateResponse.ok || duplicateResult.code !== 200) throw new Error(duplicateResult.message || "批量重复任务检查失败");
+      const duplicateHashes = new Set(duplicateResult.data || []);
+      const duplicateCount = prepared.filter((item) => duplicateHashes.has(item.hash)).length;
       if (duplicateCount && !window.confirm(`其中 ${duplicateCount} 张图片之前已经使用同一工作流生成过，是否仍然继续？`)) return;
-      let submitted = 0;
-      for (const input of prepared) {
-        const batchForm = { ...initial, ...(workflow.defaults || {}), workflowId: workflow.id, batchSize: 1 };
-        await submitGeneration(batchForm, generateId(), { sourceImage: input.file }, input.hash);
-        submitted += 1;
-      }
-      setNotice(`批量操作已向 Bridge 队列提交 ${submitted} 个任务`);
+      const batchForm = { ...initial, ...(workflow.defaults || {}), workflowId: workflow.id, batchSize: 1 };
+      const interactiveEditor = getWorkflowFieldKeys(workflow).find((fieldKey) =>
+        workflow?.binding?.fields?.[fieldKey]?.nodeType === "MaskEditMEC" && workflow?.binding?.fields?.[fieldKey]?.input === "editor_data");
+      if (interactiveEditor) throw new Error("区域涂抹工作流不能直接批量运行，请先逐张设置区域");
+      const body = new FormData();
+      Object.entries(batchForm).forEach(([key, value]) => body.append(key, key === "loras" ? JSON.stringify(Array.isArray(value) ? value : []) : String(value)));
+      body.set("workflowId", workflow.id);
+      body.set("workflowName", workflow.name || workflow.id);
+      body.set("promptSchemeName", appliedPresetTitle || "");
+      body.append("workflowDefinition", JSON.stringify(workflow.definition));
+      body.append("workflowBinding", JSON.stringify(workflow.binding));
+      body.append("folder", folder);
+      body.append("clientId", generateId());
+      body.append("inputSha256List", JSON.stringify(prepared.map((item) => item.hash)));
+      prepared.forEach((item) => body.append("sourceImages", item.file, item.file.name));
+      const response = await call("/api/generate/batch", { method: "POST", body }, 120000);
+      const data = await readJson(response, "本机批量生成接口");
+      if (!response.ok || !data.success || !Array.isArray(data.tasks) || data.tasks.length !== prepared.length)
+        throw new Error(data.message || `批量生成提交失败（HTTP ${response.status}）`);
+
+      const batchRunId = generateId();
+      const createdAt = new Date().toISOString();
+      const nextTasks = data.tasks.map((task, index) => ({
+        id: task.promptId,
+        sourceType: "AIPROVIDER",
+        external: false,
+        state: "QUEUED",
+        bridgeState: task.state || "PENDING",
+        progress: 0,
+        form: batchForm,
+        workflowId: workflow.id,
+        workflowName: workflow.name || workflow.id,
+        promptSchemeName: appliedPresetTitle || "",
+        inputSha256: prepared[index].hash,
+        inputImages: [{ key: "sourceImage", name: prepared[index].file.name, url: prepared[index].image.url }],
+        finalOutputNodeId: task.finalOutputNodeId,
+        progressPlan: createComfyProgressPlan(workflow.definition, [task.finalOutputNodeId]),
+        progressDetail: null,
+        actualSeed: task.actualSeed,
+        batchRunId,
+        folder,
+        createdAt,
+      }));
+      setTasks((current) => {
+        const next = [...nextTasks, ...current].slice(0, 2000);
+        localStorage.setItem("comfy_active_tasks", JSON.stringify(next.filter((item) => !["SUCCEEDED", "FAILED"].includes(item.state))));
+        return next;
+      });
+      const recordResponse = await fetch("/api/comfy-tasks/batch", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nextTasks.map((task) => ({
+          promptId: task.id, workflowId: task.workflowId, workflowName: task.workflowName,
+          promptSchemeName: task.promptSchemeName, positivePrompt: batchForm.positivePrompt || "",
+          negativePrompt: batchForm.negativePrompt || "", mainModel: batchForm.checkpoint || "",
+          parametersJson: JSON.stringify(batchForm), inputFile: task.inputImages[0].name,
+          inputFileName: task.inputImages[0].name, inputSha256: task.inputSha256, status: "QUEUED",
+        }))),
+      });
+      const recordData = await readJson(recordResponse, "批量任务记录接口");
+      if (!recordResponse.ok || recordData.code !== 200) throw new Error(recordData.message || "批量任务记录失败");
+      nextTasks.forEach((task) => poll(task.id, token, task.finalOutputNodeId, task.progressPlan, task));
+      setNotice(`批量操作已一次提交 ${nextTasks.length} 个任务`);
       setBatchOperation({ open: false, workflowId: "", busy: false });
       setSelectionMode(false); setSelectedImages(new Set());
     } catch (exception) {
@@ -2092,12 +2237,15 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       body.append("accountId", String(Number(twitterTask.accountId)));
       body.append("content", twitterTask.content.trim());
       body.append("delayMinutes", String(Number(twitterTask.delayMinutes)));
-      for (const image of images) {
+      const preparedImages = await Promise.all(images.map(async (image) => {
         const imageResponse = await fetch(image.url);
         if (!imageResponse.ok) throw new Error(`读取待保存图片失败：${image.fileName}`);
-        body.append("images", await imageResponse.blob(), image.fileName);
+        return { ...image, blob: await imageResponse.blob() };
+      }));
+      preparedImages.forEach((image) => {
+        body.append("images", image.blob, image.fileName);
         body.append("assetIds", String(image.assetId || 0));
-      }
+      });
       const response = await fetch("/api/twitter/posts/local-scheduled", {
         method: "POST",
         body,
@@ -2168,12 +2316,12 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     setError("");
     try {
       const sourceByPath = new Map();
-      for (const path of paths) {
+      await Promise.all(paths.map(async (path) => {
         const source = history.find((item) => (item.images || []).some((image) => String(image.path).toLowerCase() === String(path).toLowerCase()));
-        if (!source) continue;
+        if (!source) return;
         const timing = await loadGenerationTiming(source);
         sourceByPath.set(String(path).toLowerCase(), { ...source, ...(timing || {}) });
-      }
+      }));
       const response = await call("/api/gallery/move", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2467,29 +2615,30 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     if (!entries.length) return;
     setBusy(true); setError(""); setNotice("");
     try {
-      let uploaded = 0;
-      for (const entry of entries) {
+      const prepared = await Promise.all(entries.map(async (entry) => {
         if (!entry.item.assetId) throw new Error(`${entry.image.filename || "所选图片"}缺少资产 ID`);
         const fileName = entry.image.filename || entry.image.fileName || entry.image.path?.split(/[\\/]/).pop();
         const imageSource = entry.image.url || entry.image.localUrl;
         if (!fileName || !imageSource) throw new Error("资产图片缺少可读取的文件地址");
         const imageResponse = await fetch(imageSource);
         if (!imageResponse.ok) throw new Error(`读取 ${fileName} 失败 · HTTP ${imageResponse.status}`);
-        const form = new FormData();
-        form.append("file", await imageResponse.blob(), fileName);
-        form.append("assetId", String(entry.item.assetId));
-        form.append("title", fileName.replace(/\.[^.]+$/, ""));
-        if (entry.image.width || entry.item.width) form.append("width", String(entry.image.width || entry.item.width));
-        if (entry.image.height || entry.item.height) form.append("height", String(entry.image.height || entry.item.height));
-        if (entry.item.prompt) form.append("prompt", entry.item.prompt);
-        form.append("sourcePlatform", platform);
-        const response = await fetch("/api/favorites", { method: "POST", body: form });
-        const data = await readJson(response, "我的最爱上传接口");
-        if (!response.ok || data.code !== 200) throw new Error(`${fileName}：${data.message || "上传失败"}`);
-        uploaded += 1;
-      }
+        return { entry, fileName, blob: await imageResponse.blob() };
+      }));
+      const form = new FormData();
+      prepared.forEach((item) => form.append("files", item.blob, item.fileName));
+      form.append("metadata", JSON.stringify(prepared.map(({ entry, fileName }) => ({
+        assetId: entry.item.assetId,
+        title: fileName.replace(/\.[^.]+$/, ""),
+        width: entry.image.width || entry.item.width || null,
+        height: entry.image.height || entry.item.height || null,
+        prompt: entry.item.prompt || null,
+        sourcePlatform: platform,
+      }))));
+      const response = await fetch("/api/favorites/batch", { method: "POST", body: form });
+      const data = await readJson(response, "我的最爱批量上传接口");
+      if (!response.ok || data.code !== 200 || data.data?.saved !== prepared.length) throw new Error(data.message || "批量上传失败");
       setSelectedImages(new Set()); setSelectionMode(false);
-      setNotice(`已将 ${uploaded} 张资产原图上传到服务器“我的最爱”`);
+      setNotice(`已将 ${prepared.length} 张资产原图上传到服务器“我的最爱”`);
     } catch (exception) { setError(`转到我的最爱失败：${exception.message}`); }
     finally { setBusy(false); }
   };
@@ -3009,7 +3158,12 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
           </div>
           {tasks.length > 0 && (
             <div className="task-queue-area">
-              <div className="task-queue-overview"><strong>当前 {tasks.length} 个任务</strong><span>执行中 {runningTaskCount}</span><span>排队 {queuedTaskCount}</span>{failedTaskCount > 0 && <span>失败 {failedTaskCount}</span>}{batchProgress && <span>Bridge 已接收 {batchProgress.submitted} / {batchProgress.total}</span>}{batchScheduling && <button type="button" onClick={() => { batchStopRequested.current = true; }}>停止加入 Bridge</button>}{cancelableTaskCount > 0 && <button type="button" className="task-cancel-all" disabled={cancelAllBusy} onClick={cancelAllTasks}>{cancelAllBusy ? "取消中…" : `取消全部 ${cancelableTaskCount}`}</button>}</div>
+              <div className="task-queue-header">
+                <div className="task-queue-overview"><strong>当前 {tasks.length} 个任务</strong><span>执行中 {runningTaskCount}</span><span>排队 {queuedTaskCount}</span>{failedTaskCount > 0 && <span>失败 {failedTaskCount}</span>}{batchProgress && <span>Bridge 已接收 {batchProgress.submitted} / {batchProgress.total}</span>}</div>
+                <div className="task-queue-controls" aria-label="生成任务控制">
+                  {cancelableTaskCount > 0 && <button type="button" className="task-cancel-all" disabled={cancelAllBusy} onClick={cancelAllTasks}><Warning weight="fill" />{cancelAllBusy ? "正在取消全部生成任务…" : `取消全部生成任务（${cancelableTaskCount}）`}</button>}
+                </div>
+              </div>
               <div className="task-queue-strip">
               {sortedTasks.map((task) => (
                 <article
@@ -3030,7 +3184,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
                                     : task.state === "FAILED" ? "失败" : "完成"}
                       </span>
                       <small>{task.workflowName || workflows.find((workflow) => workflow.id === (task.workflowId || task.form?.workflowId))?.name || (task.external ? "外部 ComfyUI 工作流" : "当前工作流")}</small>
-                      <em>已运行 {formatTaskElapsed(task, taskClock)}</em>
+                      <em>已运行 <TaskElapsed task={task} /></em>
                     </span>
                     <strong>{task.progress === null ? "读取中" : `${task.progress}%`}</strong>
                   </button>
@@ -3164,7 +3318,7 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
           <div className="task-detail-summary">
             <span><small>状态</small>{taskDetail.state === "RUNNING" ? "生成中" : taskDetail.state === "QUEUED" ? "排队中" : taskDetail.state === "FAILED" ? "失败" : taskDetail.state}</span>
             <span><small>任务类型</small>{taskDetail.sourceType === "COMFYUI" || taskDetail.external ? "ComfyUI 外部任务" : "AIProvider 创建任务"}</span>
-            <span><small>已运行</small>{formatTaskElapsed(taskDetail, taskClock)}</span>
+            <span><small>已运行</small><TaskElapsed task={taskDetail} /></span>
             <span><small>进度</small>{taskDetail.progress == null ? "读取中" : `${Math.round(taskDetail.progress)}%`}</span>
             <span><small>Prompt 方案</small>{taskDetail.promptSchemeName || taskDetail.form?.promptSchemeName || "未使用方案"}</span>
             <span><small>主模型</small>{taskDetail.mainModel || taskDetail.form?.checkpoint || "未记录"}</span>

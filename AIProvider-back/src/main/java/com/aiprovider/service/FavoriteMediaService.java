@@ -1,6 +1,7 @@
 package com.aiprovider.service;
 
 import com.aiprovider.mapper.FavoriteMediaMapper;
+import com.aiprovider.model.dto.FavoriteMediaBatchItemDTO;
 import com.aiprovider.model.vo.FavoriteMediaContent;
 import com.aiprovider.model.vo.FavoriteMediaPageVO;
 import com.aiprovider.model.vo.FavoriteMediaVO;
@@ -11,6 +12,8 @@ import org.springframework.core.io.FileSystemResource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import javax.imageio.ImageIO;
 import javax.imageio.ImageWriteParam;
@@ -115,6 +118,88 @@ public class FavoriteMediaService {
             throw exception;
         } finally {
             Files.deleteIfExists(temporary);
+        }
+    }
+
+    @Transactional
+    public int uploadBatch(List<MultipartFile> files, String metadataJson) throws IOException {
+        if (files == null || files.isEmpty() || files.size() > 100) throw new IllegalArgumentException("批量文件数量必须在 1 到 100 之间");
+        final List<FavoriteMediaBatchItemDTO> metadata;
+        try {
+            metadata = new ObjectMapper().readValue(metadataJson, new TypeReference<List<FavoriteMediaBatchItemDTO>>() {});
+        } catch (Exception exception) {
+            throw new IllegalArgumentException("批量文件元数据不是有效 JSON", exception);
+        }
+        if (metadata.size() != files.size()) throw new IllegalArgumentException("批量文件与元数据数量不一致");
+        List<Long> assetIds = metadata.stream().map(FavoriteMediaBatchItemDTO::getAssetId).filter(id -> id != null && id > 0).distinct().toList();
+        if (!assetIds.isEmpty()) {
+            Set<Long> existingIds = new HashSet<>(assetRepository.findExistingIds(assetIds));
+            if (!existingIds.containsAll(assetIds)) throw new IllegalArgumentException("批量文件包含不存在的来源资产");
+        }
+
+        Files.createDirectories(storageRoot);
+        List<StagedFavorite> staged = new ArrayList<>();
+        List<Path> createdFiles = new ArrayList<>();
+        try {
+            for (int index = 0; index < files.size(); index++) {
+                MultipartFile file = files.get(index);
+                FavoriteMediaBatchItemDTO item = metadata.get(index);
+                if (file == null || file.isEmpty()) throw new IllegalArgumentException("批量文件不能为空");
+                if (file.getSize() > MAX_MEDIA_BYTES) throw new IllegalArgumentException("单个文件不能超过 500MB");
+                if (item.getWidth() != null && item.getWidth() < 0 || item.getHeight() != null && item.getHeight() < 0)
+                    throw new IllegalArgumentException("媒体尺寸不能为负数");
+                String platform = text(item.getSourcePlatform(), 20);
+                if (platform != null && !Arrays.asList("Windows", "macOS").contains(platform))
+                    throw new IllegalArgumentException("来源平台仅支持 Windows 或 macOS");
+                String[] detected = detectMediaType(file);
+                String originalName = safeFileName(file.getOriginalFilename());
+                Path temporary = storageRoot.resolve(TEMP_PREFIX + UUID.randomUUID() + ".tmp").normalize();
+                ensureWithinRoot(temporary);
+                file.transferTo(temporary);
+                String hash = sha256(temporary);
+                Path target = storageRoot.resolve(hash.substring(0, 2)).resolve(hash + extension(detected[1])).normalize();
+                ensureWithinRoot(target);
+                FavoriteMediaMapper.Row row = new FavoriteMediaMapper.Row();
+                row.setAssetId(item.getAssetId() != null && item.getAssetId() > 0 ? item.getAssetId() : null);
+                row.setStoragePath(storageRoot.relativize(target).toString().replace('\\', '/'));
+                row.setOriginalFileName(originalName);
+                String title = text(item.getTitle(), 255);
+                row.setTitle(title == null ? stripExtension(originalName) : title);
+                row.setMediaType(detected[0]); row.setContentType(detected[1]); row.setFileSize(Files.size(temporary)); row.setSha256(hash);
+                row.setWidth(item.getWidth()); row.setHeight(item.getHeight()); row.setPrompt(text(item.getPrompt(), 16000)); row.setSourcePlatform(platform);
+                staged.add(new StagedFavorite(temporary, target, thumbnailPath(hash), hash, row));
+            }
+
+            List<String> hashes = staged.stream().map(item -> item.sha256).distinct().toList();
+            Set<String> existingHashes = new HashSet<>(repository.findExistingSha256s(hashes));
+            Set<String> scheduledHashes = new HashSet<>();
+            List<StagedFavorite> inserts = staged.stream()
+                    .filter(item -> !existingHashes.contains(item.sha256) && scheduledHashes.add(item.sha256)).toList();
+            for (StagedFavorite item : inserts) {
+                boolean thumbnailExisted = Files.exists(item.thumbnail);
+                String relative;
+                try {
+                    relative = generateThumbnail(item.temporary, item.row.getContentType(), item.thumbnail, item.sha256, item.row);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("批量媒体缩略图生成被中断", exception);
+                }
+                if (relative == null) throw new IOException("批量媒体缩略图生成失败：" + item.row.getOriginalFileName());
+                item.row.setThumbnailPath(relative);
+                if (!thumbnailExisted && Files.exists(item.thumbnail)) createdFiles.add(item.thumbnail);
+            }
+            if (!inserts.isEmpty()) repository.insertBatch(inserts.stream().map(item -> item.row).toList());
+            for (StagedFavorite item : inserts) {
+                Files.createDirectories(item.target.getParent());
+                if (Files.exists(item.target)) Files.deleteIfExists(item.temporary);
+                else { moveAtomically(item.temporary, item.target); createdFiles.add(item.target); }
+            }
+            return files.size();
+        } catch (RuntimeException | IOException exception) {
+            for (Path path : createdFiles) Files.deleteIfExists(path);
+            throw exception;
+        } finally {
+            for (StagedFavorite item : staged) Files.deleteIfExists(item.temporary);
         }
     }
 
@@ -313,6 +398,14 @@ public class FavoriteMediaService {
                 text(row.get("title"),255), text(row.get("mediaType"),32), text(row.get("contentType"),100), number(row.get("fileSize")),
                 integer(row.get("width")), integer(row.get("height")), text(row.get("prompt"),16000), text(row.get("sourcePlatform"),20),
                 date(row.get("createdAt")), row.get("thumbnailPath") != null);
+    }
+    private static final class StagedFavorite {
+        private final Path temporary, target, thumbnail;
+        private final String sha256;
+        private final FavoriteMediaMapper.Row row;
+        private StagedFavorite(Path temporary, Path target, Path thumbnail, String sha256, FavoriteMediaMapper.Row row) {
+            this.temporary = temporary; this.target = target; this.thumbnail = thumbnail; this.sha256 = sha256; this.row = row;
+        }
     }
     private static long number(Object value) { return value instanceof Number ? ((Number)value).longValue() : 0; }
     private static Long nullableLong(Object value) { return value instanceof Number ? ((Number)value).longValue() : null; }

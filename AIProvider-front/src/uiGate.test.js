@@ -198,5 +198,7 @@ describe("UI release gate", () => {
     expect(workbench).not.toContain('className={`queue-pill ${task.state.toLowerCase()}`}\n                  role="button"');
     expect(workbenchCss).toMatch(/\.queue-pill__detail:focus-visible/);
     expect(workbench).toContain('<button type="button" className="task-cancel-all"');
+    expect(workbench).toContain('取消全部生成任务（${cancelableTaskCount}）');
+    expect(workbenchCss).toMatch(/\.task-queue-controls \.task-cancel-all/);
   });
 });

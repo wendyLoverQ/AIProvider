@@ -1,16 +1,17 @@
 package com.aiprovider.mapper;
 
-import com.aiprovider.model.dto.AssetItemDTO;
 import org.apache.ibatis.annotations.*;
 import java.util.List;
 import java.util.Map;
 
 @Mapper
 public interface AssetMapper {
-    @Insert("INSERT INTO c_GeneratedAssets(Platform,PathHash,LocalPath,LocalUrl,FileName,FileSize,Width,Height,AssetType,Status,MimeType,Prompt,NegativePrompt,MainModel,LorasJson,Seed,Steps,Cfg,Sampler,Scheduler,WorkflowId,GeneratedAt,GenerationCompletedAt,GenerationDurationMs) " +
-            "VALUES(#{platform},#{pathHash},#{item.localPath},#{item.localUrl},#{item.fileName},#{item.fileSize},#{item.width},#{item.height},#{item.assetType},#{item.status},#{item.mimeType},#{item.prompt},#{item.negativePrompt},#{item.mainModel},#{item.lorasJson},#{item.seed},#{item.steps},#{item.cfg},#{item.sampler},#{item.scheduler},#{item.workflowId},#{item.generatedAt},#{item.generationCompletedAt},#{item.generationDurationMs}) " +
-            "ON DUPLICATE KEY UPDATE LocalPath=VALUES(LocalPath),LocalUrl=VALUES(LocalUrl),FileName=VALUES(FileName),FileSize=VALUES(FileSize),Width=VALUES(Width),Height=VALUES(Height),AssetType=VALUES(AssetType),Status=VALUES(Status),TrashOriginalStatus=NULL,MimeType=VALUES(MimeType),Prompt=VALUES(Prompt),NegativePrompt=VALUES(NegativePrompt),MainModel=VALUES(MainModel),LorasJson=VALUES(LorasJson),Seed=VALUES(Seed),Steps=VALUES(Steps),Cfg=VALUES(Cfg),Sampler=VALUES(Sampler),Scheduler=VALUES(Scheduler),WorkflowId=VALUES(WorkflowId),GeneratedAt=VALUES(GeneratedAt),GenerationCompletedAt=VALUES(GenerationCompletedAt),GenerationDurationMs=VALUES(GenerationDurationMs),UpdatedAt=CURRENT_TIMESTAMP(3)")
-    int upsert(@Param("platform") String platform, @Param("pathHash") String pathHash, @Param("item") AssetItemDTO item);
+    @Insert({"<script>",
+            "INSERT INTO c_GeneratedAssets(Platform,PathHash,LocalPath,LocalUrl,FileName,FileSize,Width,Height,AssetType,Status,MimeType,Prompt,NegativePrompt,MainModel,LorasJson,Seed,Steps,Cfg,Sampler,Scheduler,WorkflowId,GeneratedAt,GenerationCompletedAt,GenerationDurationMs) VALUES",
+            "<foreach collection='rows' item='row' separator=','>(#{platform},#{row.pathHash},#{row.item.localPath},#{row.item.localUrl},#{row.item.fileName},#{row.item.fileSize},#{row.item.width},#{row.item.height},#{row.item.assetType},#{row.item.status},#{row.item.mimeType},#{row.item.prompt},#{row.item.negativePrompt},#{row.item.mainModel},#{row.item.lorasJson},#{row.item.seed},#{row.item.steps},#{row.item.cfg},#{row.item.sampler},#{row.item.scheduler},#{row.item.workflowId},#{row.item.generatedAt},#{row.item.generationCompletedAt},#{row.item.generationDurationMs})</foreach>",
+            "ON DUPLICATE KEY UPDATE LocalPath=VALUES(LocalPath),LocalUrl=VALUES(LocalUrl),FileName=VALUES(FileName),FileSize=VALUES(FileSize),Width=VALUES(Width),Height=VALUES(Height),AssetType=VALUES(AssetType),Status=VALUES(Status),TrashOriginalStatus=NULL,MimeType=VALUES(MimeType),Prompt=VALUES(Prompt),NegativePrompt=VALUES(NegativePrompt),MainModel=VALUES(MainModel),LorasJson=VALUES(LorasJson),Seed=VALUES(Seed),Steps=VALUES(Steps),Cfg=VALUES(Cfg),Sampler=VALUES(Sampler),Scheduler=VALUES(Scheduler),WorkflowId=VALUES(WorkflowId),GeneratedAt=VALUES(GeneratedAt),GenerationCompletedAt=VALUES(GenerationCompletedAt),GenerationDurationMs=VALUES(GenerationDurationMs),UpdatedAt=CURRENT_TIMESTAMP(3)",
+            "</script>"})
+    int upsertBatch(@Param("platform") String platform, @Param("rows") List<Map<String,Object>> rows);
 
     @Select("<script>SELECT Id id,Platform platform,LocalPath localPath,LocalUrl localUrl,FileName fileName,FileSize fileSize,Width width,Height height,AssetType assetType,Status status,TrashOriginalStatus trashOriginalStatus,MimeType mimeType,Prompt prompt,NegativePrompt negativePrompt,MainModel mainModel,LorasJson lorasJson,Seed seed,Steps steps,Cfg cfg,Sampler sampler,Scheduler scheduler,WorkflowId workflowId,GeneratedAt generatedAt,GenerationCompletedAt generationCompletedAt,GenerationDurationMs generationDurationMs,CreatedAt createdAt " +
             "FROM c_GeneratedAssets WHERE Platform=#{platform} " +
@@ -35,6 +36,9 @@ public interface AssetMapper {
 
     @Select("SELECT Id id,Platform platform,LocalPath localPath,FileName fileName,Status status FROM c_GeneratedAssets WHERE Id=#{id}")
     Map<String,Object> findById(@Param("id") long id);
+
+    @Select("<script>SELECT Id FROM c_GeneratedAssets WHERE Id IN <foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")
+    List<Long> findExistingIds(@Param("ids") List<Long> ids);
 
     @Delete("<script>DELETE FROM c_GeneratedAssets WHERE Platform=#{platform} AND Id IN " +
             "<foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")

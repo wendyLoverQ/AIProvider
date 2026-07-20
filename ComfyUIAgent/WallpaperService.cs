@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 
@@ -35,14 +36,15 @@ sealed class WallpaperService
         });
     }
 
-    public async Task<string> ApplyAsync(IFormFile file, string monitorId)
+    public async Task<WallpaperApplyResult> ApplyAsync(IFormFile file, string monitorId)
     {
         EnsureWindows();
         if (file == null || file.Length <= 0) throw new ArgumentException("壁纸文件不能为空");
         if (file.Length > MaxWallpaperBytes) throw new ArgumentException("壁纸文件不能超过 120MB");
         if (string.IsNullOrWhiteSpace(monitorId)) throw new ArgumentException("必须选择显示器");
-        if (!Monitors().Any(monitor => string.Equals(monitor.Id, monitorId, StringComparison.Ordinal)))
-            throw new ArgumentException("所选显示器已经不可用，请刷新后重试");
+        var monitors = Monitors();
+        var selectedMonitor = monitors.FirstOrDefault(monitor => string.Equals(monitor.Id, monitorId, StringComparison.Ordinal))
+            ?? throw new ArgumentException("所选显示器已经不可用，请刷新后重试");
 
         Directory.CreateDirectory(storageDirectory);
         var temporary = Path.Combine(storageDirectory, $".wallpaper-{Guid.NewGuid():N}.tmp");
@@ -55,16 +57,62 @@ sealed class WallpaperService
             var destination = Path.Combine(storageDirectory, $"{hash}.png");
             if (File.Exists(destination)) File.Delete(temporary);
             else File.Move(temporary, destination);
-            RunSta(() =>
+            var wallpaperEngine = RunningWallpaperEngine();
+            if (wallpaperEngine != null)
+                ApplyWithWallpaperEngine(wallpaperEngine.Value.Executable, wallpaperEngine.Value.ProcessName,
+                    destination, selectedMonitor.Number - 1);
+            else RunSta(() =>
             {
                 var desktop = CreateDesktopWallpaper();
                 try { desktop.SetWallpaper(monitorId, destination); }
                 finally { Marshal.FinalReleaseComObject(desktop); }
                 return true;
             });
-            return destination;
+            return new WallpaperApplyResult(destination, wallpaperEngine == null ? "windows" : "wallpaper-engine");
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
+    private static (string Executable, string ProcessName)? RunningWallpaperEngine()
+    {
+        foreach (var processName in new[] { "wallpaper64", "wallpaper32" })
+        {
+            foreach (var process in Process.GetProcessesByName(processName))
+            {
+                using (process)
+                {
+                    try
+                    {
+                        var executable = process.MainModule?.FileName;
+                        if (!string.IsNullOrWhiteSpace(executable) && File.Exists(executable))
+                            return (executable, processName);
+                    }
+                    catch (InvalidOperationException) { }
+                    catch (System.ComponentModel.Win32Exception) { }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static void ApplyWithWallpaperEngine(string executable, string processName, string wallpaper, int monitorIndex)
+    {
+        var start = new ProcessStartInfo(executable)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = Path.GetDirectoryName(executable) ?? Environment.CurrentDirectory,
+        };
+        foreach (var argument in new[] { "-control", "openWallpaper", "-file", wallpaper, "-monitor", monitorIndex.ToString() })
+            start.ArgumentList.Add(argument);
+        using var control = Process.Start(start) ?? throw new InvalidOperationException("无法启动 Wallpaper Engine 控制命令");
+        if (!control.WaitForExit(15_000))
+            throw new InvalidOperationException("Wallpaper Engine 控制命令超时，未应用壁纸");
+        if (control.ExitCode != 0)
+            throw new InvalidOperationException($"Wallpaper Engine 控制命令失败（退出码 {control.ExitCode}）");
+        Thread.Sleep(750);
+        if (Process.GetProcessesByName(processName).Length == 0)
+            throw new InvalidOperationException("Wallpaper Engine 在应用壁纸后退出，请检查其日志或显卡驱动");
     }
 
     private static void ValidatePng(string path)
@@ -102,6 +150,7 @@ sealed class WallpaperService
 }
 
 sealed record WallpaperMonitor(string Id, int Number, string Label, int Width, int Height, bool Primary);
+sealed record WallpaperApplyResult(string Path, string Provider);
 
 [StructLayout(LayoutKind.Sequential)]
 struct WallpaperRect { public int Left, Top, Right, Bottom; }

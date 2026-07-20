@@ -101,7 +101,9 @@ public class TwitterPublishingService {
             Files.createDirectories(postDirectory);
             List<MultipartFile> images = nonEmpty(dto.getImages());
             List<Long> assetIds = normalizedAssetIds(dto, images.size());
-            for (int i = 0; i < images.size(); i++) saveImage(postId, postDirectory, images.get(i), assetIds.get(i), i);
+            List<TwitterMapper.MediaInsert> media = new ArrayList<>();
+            for (int i = 0; i < images.size(); i++) media.add(prepareImage(postId, postDirectory, images.get(i), assetIds.get(i), i));
+            if (!media.isEmpty()) repository.insertMediaBatch(media);
             cleanupStorageOnRollback(postDirectory);
         } catch (RuntimeException e) {
             deleteQuietly(postDirectory);
@@ -260,8 +262,11 @@ public class TwitterPublishingService {
         if (images.size() > 4) throw new IllegalArgumentException("一次最多上传 4 张图片");
         if (dto.getDelayMinutes() != null && !Arrays.asList(1, 5, 10, 15, 30).contains(dto.getDelayMinutes()))
             throw new IllegalArgumentException("计划时间只能选择 1、5、10、15 或 30 分钟");
-        for (Long assetId : normalizedAssetIds(dto, images.size()))
-            if (assetId != null && assetRepository.findById(assetId) == null) throw new IllegalArgumentException("资产不存在：" + assetId);
+        List<Long> referencedAssetIds = normalizedAssetIds(dto, images.size()).stream().filter(Objects::nonNull).distinct().toList();
+        if (!referencedAssetIds.isEmpty()) {
+            Set<Long> existingIds = new HashSet<>(assetRepository.findExistingIds(referencedAssetIds));
+            if (!existingIds.containsAll(referencedAssetIds)) throw new IllegalArgumentException("批量图片包含不存在的来源资产");
+        }
         int gifs = 0;
         for (MultipartFile image : images) {
             if (image.getSize() <= 0 || image.getSize() > MAX_IMAGE_BYTES) throw new IllegalArgumentException("单张图片大小必须在 15MB 以内");
@@ -282,7 +287,7 @@ public class TwitterPublishingService {
         return result;
     }
 
-    private void saveImage(long postId, Path directory, MultipartFile image, Long assetId, int order) throws IOException {
+    private TwitterMapper.MediaInsert prepareImage(long postId, Path directory, MultipartFile image, Long assetId, int order) throws IOException {
         String type = detectImageType(image);
         String extension = extension(type);
         Path target = directory.resolve(UUID.randomUUID().toString() + extension).normalize();
@@ -297,7 +302,7 @@ public class TwitterPublishingService {
         media.setFileSize(Files.size(target));
         media.setSha256(sha256(target));
         media.setSortOrder(order);
-        repository.insertMedia(media);
+        return media;
     }
 
     private String detectImageType(MultipartFile image) {

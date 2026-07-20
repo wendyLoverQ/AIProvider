@@ -2,6 +2,7 @@ package com.aiprovider.controller;
 
 import com.aiprovider.common.Result;
 import com.aiprovider.model.dto.FavoriteMediaDeleteDTO;
+import com.aiprovider.model.dto.FavoriteMediaBatchItemDTO;
 import com.aiprovider.model.vo.FavoriteMediaContent;
 import com.aiprovider.model.vo.FavoriteMediaPageVO;
 import com.aiprovider.model.vo.FavoriteMediaVO;
@@ -13,6 +14,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -36,6 +38,12 @@ public class FavoriteMediaController {
                                          @RequestParam(required = false) String prompt,
                                          @RequestParam(required = false) String sourcePlatform) throws IOException {
         return Result.success(service.upload(file, assetId, title, width, height, prompt, sourcePlatform));
+    }
+
+    @PostMapping(value = "/batch", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Result<Map<String,Integer>> uploadBatch(@RequestParam("files") List<MultipartFile> files,
+                                                    @RequestParam("metadata") String metadata) throws IOException {
+        return Result.success(Collections.singletonMap("saved", service.uploadBatch(files, metadata)));
     }
 
     @GetMapping("/{id}/content")

@@ -11,6 +11,12 @@ public interface FavoriteMediaMapper {
     @Options(useGeneratedKeys = true, keyProperty = "row.id")
     int insert(@Param("row") Row row);
 
+    @Insert({"<script>",
+            "INSERT INTO c_FavoriteMedia(AssetId,StoragePath,ThumbnailPath,OriginalFileName,Title,MediaType,ContentType,FileSize,Sha256,Width,Height,Prompt,SourcePlatform) VALUES",
+            "<foreach collection='rows' item='row' separator=','>(#{row.assetId},#{row.storagePath},#{row.thumbnailPath},#{row.originalFileName},#{row.title},#{row.mediaType},#{row.contentType},#{row.fileSize},#{row.sha256},#{row.width},#{row.height},#{row.prompt},#{row.sourcePlatform})</foreach>",
+            "</script>"})
+    int insertBatch(@Param("rows") List<Row> rows);
+
     @Select("SELECT Id id,AssetId assetId,StoragePath storagePath,ThumbnailPath thumbnailPath,OriginalFileName originalFileName,Title title,MediaType mediaType,ContentType contentType,FileSize fileSize,Sha256 sha256,Width width,Height height,Prompt prompt,SourcePlatform sourcePlatform,CreatedAt createdAt FROM c_FavoriteMedia ORDER BY CreatedAt DESC,Id DESC LIMIT #{limit} OFFSET #{offset}")
     List<Map<String,Object>> findPage(@Param("limit") int limit, @Param("offset") int offset);
     @Select("SELECT COUNT(*) FROM c_FavoriteMedia") long count();
@@ -18,6 +24,8 @@ public interface FavoriteMediaMapper {
     Map<String,Object> findById(@Param("id") long id);
     @Select("SELECT Id id,AssetId assetId,StoragePath storagePath,ThumbnailPath thumbnailPath,OriginalFileName originalFileName,Title title,MediaType mediaType,ContentType contentType,FileSize fileSize,Sha256 sha256,Width width,Height height,Prompt prompt,SourcePlatform sourcePlatform,CreatedAt createdAt FROM c_FavoriteMedia WHERE Sha256=#{sha256}")
     Map<String,Object> findBySha256(@Param("sha256") String sha256);
+    @Select("<script>SELECT Sha256 FROM c_FavoriteMedia WHERE Sha256 IN <foreach collection='hashes' item='hash' open='(' separator=',' close=')'>#{hash}</foreach></script>")
+    List<String> findExistingSha256s(@Param("hashes") List<String> hashes);
     @Delete("<script>DELETE FROM c_FavoriteMedia WHERE Id IN <foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")
     int deleteByIds(@Param("ids") List<Long> ids);
 

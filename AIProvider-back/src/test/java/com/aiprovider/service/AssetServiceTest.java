@@ -14,18 +14,18 @@ import static org.mockito.Mockito.*;
 class AssetServiceTest {
     @Test void infersBroadAndSpecificMediaTypesForExistingImageAssets() {
         AssetRepository repository = mock(AssetRepository.class);
-        when(repository.upsert(anyString(), anyString(), any())).thenReturn(1);
         when(repository.findByPathHashes(anyString(), anyList())).thenReturn(Collections.emptyList());
         AssetItemDTO item = new AssetItemDTO(); item.setLocalPath("C:\\assets\\result.png"); item.setLocalUrl("http://127.0.0.1/result.png"); item.setFileName("result.png"); item.setMainModel("  flux\\dev.safetensors  ");
         AssetBatchDTO dto = new AssetBatchDTO(); dto.setPlatform("Windows"); dto.setItems(Collections.singletonList(item));
 
         new AssetService(repository).saveBatch(dto);
 
-        ArgumentCaptor<AssetItemDTO> captor = ArgumentCaptor.forClass(AssetItemDTO.class);
-        verify(repository).upsert(eq("Windows"), anyString(), captor.capture());
-        assertThat(captor.getValue().getAssetType()).isEqualTo("image");
-        assertThat(captor.getValue().getMimeType()).isEqualTo("image/png");
-        assertThat(captor.getValue().getMainModel()).isEqualTo("flux\\dev.safetensors");
+        ArgumentCaptor<List<Map<String,Object>>> captor = ArgumentCaptor.forClass(List.class);
+        verify(repository).upsertBatch(eq("Windows"), captor.capture());
+        AssetItemDTO saved = (AssetItemDTO) captor.getValue().get(0).get("item");
+        assertThat(saved.getAssetType()).isEqualTo("image");
+        assertThat(saved.getMimeType()).isEqualTo("image/png");
+        assertThat(saved.getMainModel()).isEqualTo("flux\\dev.safetensors");
     }
 
     @Test void returnsOnlyTheRepositoryImagePromptPoolWithWeights() {

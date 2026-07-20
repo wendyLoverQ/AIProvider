@@ -14,7 +14,6 @@ import static org.mockito.Mockito.*;
 class LocalGeneratedImageServiceTest {
     @Test void preservesMissingPromptsAsNullInsteadOfWritingDisplayPlaceholders() {
         LocalGeneratedImageRepository repository = mock(LocalGeneratedImageRepository.class);
-        when(repository.upsert(eq("Windows"), anyString(), any())).thenReturn(1);
         LocalGeneratedImageService service = new LocalGeneratedImageService(repository);
         LocalGeneratedImageItemDTO item = new LocalGeneratedImageItemDTO();
         item.setPromptId("prompt-without-text"); item.setImagePath("aimaid/no-prompt.png");
@@ -25,7 +24,7 @@ class LocalGeneratedImageServiceTest {
         assertThat(service.saveBatch(batch)).isEqualTo(1);
         assertThat(item.getPrompt()).isNull();
         assertThat(item.getNegativePrompt()).isNull();
-        verify(repository).upsert(eq("Windows"), anyString(), eq(item));
+        verify(repository).upsertBatch(eq("Windows"), argThat(rows -> rows.size() == 1 && rows.get(0).get("item") == item));
     }
 
     @Test void pagesTheBackendLocalImageQueueAndClampsADeletedLastPage() {

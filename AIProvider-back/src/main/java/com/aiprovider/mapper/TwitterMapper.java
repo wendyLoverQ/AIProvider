@@ -33,9 +33,11 @@ public interface TwitterMapper {
     @Options(useGeneratedKeys = true, keyProperty = "id")
     void insertPost(PostInsert post);
 
-    @Insert("INSERT INTO c_TwitterPostMedia(PostId, AssetId, StoragePath, LocalPath, LocalSource, OriginalFileName, ContentType, FileSize, Sha256, SortOrder) " +
-            "VALUES(#{postId}, #{assetId}, #{storagePath}, #{localPath}, #{localSource}, #{originalFileName}, #{contentType}, #{fileSize}, #{sha256}, #{sortOrder})")
-    void insertMedia(MediaInsert media);
+    @Insert({"<script>",
+            "INSERT INTO c_TwitterPostMedia(PostId, AssetId, StoragePath, LocalPath, LocalSource, OriginalFileName, ContentType, FileSize, Sha256, SortOrder) VALUES",
+            "<foreach collection='items' item='item' separator=','>(#{item.postId},#{item.assetId},#{item.storagePath},#{item.localPath},#{item.localSource},#{item.originalFileName},#{item.contentType},#{item.fileSize},#{item.sha256},#{item.sortOrder})</foreach>",
+            "</script>"})
+    void insertMediaBatch(@Param("items") List<MediaInsert> items);
 
     @Select("SELECT p.Id id, p.AccountId accountId, a.Username username, p.Content content, p.Status status, " +
             "p.TweetUrl tweetUrl, p.ErrorMessage errorMessage, p.AttemptCount attemptCount, p.ScheduledAt scheduledAt, p.Source source, p.SentAt sentAt, p.CreatedAt createdAt " +

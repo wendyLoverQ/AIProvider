@@ -28,7 +28,7 @@ class TwitterPublishingServiceTest {
         account.put("sessionStatus", "CONNECTED");
         when(repository.findAccount(2L)).thenReturn(account);
         when(repository.insertPost(any(TwitterMapper.PostInsert.class))).thenReturn(41L);
-        when(assets.findById(12L)).thenReturn(Collections.singletonMap("id", 12L));
+        when(assets.findExistingIds(Collections.singletonList(12L))).thenReturn(Collections.singletonList(12L));
         TwitterPublishingService service = new TwitterPublishingService(
                 repository, assets, mock(TwitterWebPublisher.class), mock(TwitterSessionCipher.class),
                 new SyncTaskExecutor(), storage.toString(), "client");
@@ -43,9 +43,9 @@ class TwitterPublishingServiceTest {
         dto.setAssetIds(Collections.singletonList(12L));
 
         assertEquals(41L, service.createPost(dto));
-        verify(repository).insertMedia(argThat(media ->
-                media.getAssetId() == 12L && media.getStoragePath() != null
-                        && media.getLocalPath() == null));
+        verify(repository).insertMediaBatch(argThat(media -> media.size() == 1
+                && media.get(0).getAssetId() == 12L && media.get(0).getStoragePath() != null
+                && media.get(0).getLocalPath() == null));
         verify(repository).insertPost(argThat(post ->
                 post.getContent().isEmpty() && "GALLERY".equals(post.getSource())
                         && post.getScheduledAt() != null));

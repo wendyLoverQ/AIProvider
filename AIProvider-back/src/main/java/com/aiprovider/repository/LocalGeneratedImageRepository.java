@@ -1,7 +1,6 @@
 package com.aiprovider.repository;
 
 import com.aiprovider.mapper.LocalGeneratedImageMapper;
-import com.aiprovider.model.dto.LocalGeneratedImageItemDTO;
 import org.springframework.stereotype.Repository;
 import java.util.List;
 import java.util.Map;
@@ -10,7 +9,7 @@ import java.util.Map;
 public class LocalGeneratedImageRepository {
     private final LocalGeneratedImageMapper mapper;
     public LocalGeneratedImageRepository(LocalGeneratedImageMapper mapper) { this.mapper = mapper; }
-    public int upsert(String platform, String pathHash, LocalGeneratedImageItemDTO item) { return mapper.upsert(platform, pathHash, item); }
+    public int upsertBatch(String platform, List<Map<String,Object>> rows) { return mapper.upsertBatch(platform, rows); }
     public List<Map<String,Object>> findPage(String platform, String status, int limit, int offset) { return mapper.findPage(platform, status, limit, offset); }
     public long count(String platform, String status) { return mapper.count(platform, status); }
     public int trash(String platform, List<String> hashes) { return mapper.trash(platform, hashes); }

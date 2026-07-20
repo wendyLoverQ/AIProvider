@@ -22,7 +22,7 @@ public class TwitterRepository {
     }
     public void updateAccountStatus(long id, String status, String error) { mapper.updateAccountStatus(id, status, error); }
     public long insertPost(TwitterMapper.PostInsert post) { mapper.insertPost(post); return post.getId(); }
-    public void insertMedia(TwitterMapper.MediaInsert media) { mapper.insertMedia(media); }
+    public void insertMediaBatch(List<TwitterMapper.MediaInsert> items) { mapper.insertMediaBatch(items); }
     public Map<String, Object> findPost(long id) { return mapper.findPost(id); }
     public List<Map<String, Object>> findMedia(long postId) { return mapper.findMedia(postId); }
     public Map<String, Object> findMediaItem(long postId, long id) { return mapper.findMediaItem(postId, id); }
