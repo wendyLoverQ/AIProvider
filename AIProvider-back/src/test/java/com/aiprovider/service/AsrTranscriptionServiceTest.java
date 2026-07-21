@@ -9,6 +9,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.mock.web.MockMultipartFile;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -37,6 +38,8 @@ class AsrTranscriptionServiceTest {
     }
 
     @Test void reportsProviderRequestSnapshotAndRecordedAudioUsage(){AsrRecordRepository repository=mock(AsrRecordRepository.class);AsrTranscriptionService service=service(repository,mock(AsrProviderClient.class));Map<String,Object> snapshot=new HashMap<>();snapshot.put("requestLimit",2000L);snapshot.put("requestsRemaining",1997L);snapshot.put("requestsResetAfter","3h");snapshot.put("capturedAt",LocalDateTime.of(2026,7,22,12,0));when(repository.findLatestQuotaSnapshot("groq","whisper-large-v3")).thenReturn(snapshot);when(repository.sumAudioDurationMs(eq("groq"),eq("whisper-large-v3"),any(),any())).thenReturn(4500L,12500L);AsrQuotaVO quota=service.quota();assertEquals(1997L,quota.getDailyRequestsRemaining());assertEquals(5L,quota.getHourlyAudioUsedSeconds());assertEquals(13L,quota.getDailyAudioUsedSeconds());assertEquals(7195L,quota.getHourlyAudioRemainingSeconds());assertEquals(28787L,quota.getDailyAudioRemainingSeconds());assertEquals("AIPROVIDER_RECORDED",quota.getAudioUsageScope());}
+
+    @Test void convertsShanghaiQuotaWindowsToUtcDatabaseTime(){LocalDateTime[] window=AsrTranscriptionService.quotaWindows(Instant.parse("2026-07-21T18:30:00Z"));assertEquals(LocalDateTime.of(2026,7,21,17,30),window[0]);assertEquals(LocalDateTime.of(2026,7,21,16,0),window[1]);assertEquals(LocalDateTime.of(2026,7,21,18,30),window[2]);}
 
     private AsrTranscriptionService service(AsrRecordRepository repository,AsrProviderClient client){return new AsrTranscriptionService(repository,client,temp.toString(),"groq","whisper-large-v3",26214400L,7200L,28800L);}
     private MockMultipartFile audio(){return new MockMultipartFile("audio","voice.webm","audio/webm",new byte[]{1,2,3});}
