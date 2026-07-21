@@ -13,16 +13,24 @@ import java.util.stream.Collectors;
 @Service
 public class PromptTranslationService {
     private final PromptCatalogRepository repository;
+    private final LibreTranslateService proseTranslation;
     private volatile TranslationCatalog catalog;
 
-    public PromptTranslationService(PromptCatalogRepository repository) { this.repository = repository; }
+    public PromptTranslationService(PromptCatalogRepository repository, LibreTranslateService proseTranslation) {
+        this.repository = repository;
+        this.proseTranslation = proseTranslation;
+    }
 
     public PromptTranslationVO translate(PromptTranslationDTO dto) {
         if (dto == null) throw new IllegalArgumentException("Prompt 不能为空");
         String positive = validate(dto.getPositivePrompt(), "正向 Prompt");
         String negative = validate(dto.getNegativePrompt(), "反向 Prompt");
         TranslationCatalog current = catalog();
-        return new PromptTranslationVO(translate(positive, current.positive), translate(negative, current.negative));
+        String cachedPositive = proseTranslation.findCached(positive);
+        String cachedNegative = proseTranslation.findCached(negative);
+        return new PromptTranslationVO(
+                cachedPositive == null ? translate(positive, current.positive) : cachedPositive,
+                cachedNegative == null ? translate(negative, current.negative) : cachedNegative);
     }
 
     public void invalidate() { catalog = null; }

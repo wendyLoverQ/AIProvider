@@ -27,10 +27,6 @@ public class PromptOptionService {
         this.repository = repository;
         this.translationService = translationService;
     }
-    PromptOptionService(PromptCatalogRepository repository) {
-        this(repository, new PromptTranslationService(repository));
-    }
-
     public PromptOptionPageVO page(String query, String category, String status, String type, int page, int pageSize) {
         if (page < 1) throw new IllegalArgumentException("page 必须大于等于 1");
         if (pageSize < 1 || pageSize > 100) throw new IllegalArgumentException("pageSize 必须在 1 到 100 之间");

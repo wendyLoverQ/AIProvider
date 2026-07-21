@@ -11,7 +11,7 @@ import static org.mockito.Mockito.*;
 
 class PromptOptionServiceTest {
     @Test void listsCreatesUpdatesAndDeletesValidatedOptions() {
-        PromptCatalogRepository repository = mock(PromptCatalogRepository.class); PromptOptionService service = new PromptOptionService(repository);
+        PromptCatalogRepository repository = mock(PromptCatalogRepository.class); PromptOptionService service = service(repository);
         Map<String,Object> row = new HashMap<>(); row.put("id","black_stockings"); row.put("category","Clothing"); row.put("name","黑丝袜"); row.put("prompt","black stockings"); row.put("type","positive"); row.put("reverseId",null); row.put("sortOrder",1); row.put("enabled",1); row.put("allowMultiple",true);
         when(repository.findOptionPage(null, null, null, null, 100, 0)).thenReturn(Collections.singletonList(row));
         when(repository.countOptions(null, null, null, null)).thenReturn(1L);
@@ -28,7 +28,7 @@ class PromptOptionServiceTest {
     }
 
     @Test void pagesAndFiltersOptionsOnTheServer() {
-        PromptCatalogRepository repository = mock(PromptCatalogRepository.class); PromptOptionService service = new PromptOptionService(repository);
+        PromptCatalogRepository repository = mock(PromptCatalogRepository.class); PromptOptionService service = service(repository);
         when(repository.findOptionPage("丝袜", "Clothing", true, "positive", 50, 50)).thenReturn(Collections.emptyList());
         when(repository.countOptions("丝袜", "Clothing", true, "positive")).thenReturn(123L);
         assertThat(service.page(" 丝袜 ", "Clothing", "enabled", "positive", 2, 50).getPages()).isEqualTo(3);
@@ -38,7 +38,7 @@ class PromptOptionServiceTest {
     }
 
     @Test void analyzesOnlySubmittedPromptTermsWithoutLoadingTheCatalog() {
-        PromptCatalogRepository repository = mock(PromptCatalogRepository.class); PromptOptionService service = new PromptOptionService(repository);
+        PromptCatalogRepository repository = mock(PromptCatalogRepository.class); PromptOptionService service = service(repository);
         Map<String,Object> row = new HashMap<>(); row.put("id","standing"); row.put("category","Pose"); row.put("name","站立"); row.put("prompt","standing"); row.put("type","positive"); row.put("sortOrder",1); row.put("enabled",1); row.put("allowMultiple",false);
         when(repository.findEnabledOptionsByTerms(Arrays.asList("standing", "very tall woman"), "positive")).thenReturn(Collections.singletonList(row));
         assertThat(service.analyze("standing, very tall woman", "")).extracting(PromptOptionVO::getId).containsExactly("standing");
@@ -47,7 +47,7 @@ class PromptOptionServiceTest {
     }
 
     @Test void rejectsDuplicatesInvalidDataReferencedAndMissingOptions() {
-        PromptCatalogRepository repository = mock(PromptCatalogRepository.class); PromptOptionService service = new PromptOptionService(repository); PromptOptionDTO dto = valid();
+        PromptCatalogRepository repository = mock(PromptCatalogRepository.class); PromptOptionService service = service(repository); PromptOptionDTO dto = valid();
         when(repository.existsOption(dto.getId())).thenReturn(true); assertThatThrownBy(() -> service.create(dto)).hasMessageContaining("已存在");
         assertThatThrownBy(() -> service.update("another", dto)).hasMessageContaining("不能修改");
         when(repository.updateOption(any())).thenReturn(false); assertThatThrownBy(() -> service.update(dto.getId(), dto)).hasMessageContaining("不存在");
@@ -57,6 +57,10 @@ class PromptOptionServiceTest {
         assertThatThrownBy(() -> service.resolve(Collections.singletonList("Bad-ID"))).hasMessageContaining("小写字母");
         assertThatThrownBy(() -> service.resolve(Collections.nCopies(501, "valid_id"))).hasMessageContaining("500");
         when(repository.findGeneralNegativePrompt()).thenReturn(" "); assertThatThrownBy(service::config).hasMessageContaining("未配置");
+    }
+
+    private PromptOptionService service(PromptCatalogRepository repository) {
+        return new PromptOptionService(repository, mock(PromptTranslationService.class));
     }
 
     private PromptOptionDTO valid() {

@@ -22,13 +22,30 @@ class PromptTranslationServiceTest {
         option.put("negativePrompt", "bare legs, white pantyhose");
         when(repository.findEnabledOptions()).thenReturn(Collections.singletonList(option));
         when(repository.findEnabledNegativeOptions()).thenReturn(Collections.emptyList());
+        LibreTranslateService proseTranslation = mock(LibreTranslateService.class);
         PromptTranslationDTO request = new PromptTranslationDTO();
         request.setPositivePrompt("black pantyhose, unmapped term");
         request.setNegativePrompt("bare legs");
 
-        PromptTranslationVO result = new PromptTranslationService(repository).translate(request);
+        PromptTranslationVO result = new PromptTranslationService(repository, proseTranslation).translate(request);
 
         assertThat(result.getPositivePrompt()).isEqualTo("黑色连裤袜（black pantyhose）, unmapped term");
         assertThat(result.getNegativePrompt()).isEqualTo("黑色连裤袜（bare legs）");
+    }
+
+    @Test void imageInfoTranslationUsesTheSamePersistentProseCache() {
+        PromptCatalogRepository repository = mock(PromptCatalogRepository.class);
+        when(repository.findEnabledOptions()).thenReturn(Collections.emptyList());
+        when(repository.findEnabledNegativeOptions()).thenReturn(Collections.emptyList());
+        LibreTranslateService proseTranslation = mock(LibreTranslateService.class);
+        when(proseTranslation.findCached("A long scene description.")).thenReturn("一段长场景描述。");
+        PromptTranslationDTO request = new PromptTranslationDTO();
+        request.setPositivePrompt("A long scene description.");
+        request.setNegativePrompt("");
+
+        PromptTranslationVO result = new PromptTranslationService(repository, proseTranslation).translate(request);
+
+        assertThat(result.getPositivePrompt()).isEqualTo("一段长场景描述。");
+        assertThat(result.getNegativePrompt()).isEmpty();
     }
 }
