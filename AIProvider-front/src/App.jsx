@@ -107,7 +107,7 @@ const NAV = [
   { key: "camera", label: "手机监控", icon: VideoCamera, closed: true, hidden: true, group: "operate" },
   { key: "twitter", label: "Twitter 发布", icon: XLogo, group: "publish", color: "#38bdf8" },
   { key: "contentOperations", label: "内容运营", icon: Broadcast, group: "publish", color: "#fb923c" },
-  { key: "accounts", label: "账号中心", icon: IdentificationCard, group: "system", color: "#34d399" },
+  { key: "accounts", label: "账号中心", icon: IdentificationCard, group: "publish", color: "#34d399" },
   { key: "appearance", label: "UI 控制", icon: Palette, group: "system", color: "#e879f9" },
   { key: "settings", label: "系统设置", icon: GearSix, group: "system", color: "#94a3b8" },
 ];
