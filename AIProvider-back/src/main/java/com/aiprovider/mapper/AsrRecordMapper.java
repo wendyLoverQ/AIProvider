@@ -46,7 +46,7 @@ public interface AsrRecordMapper {
     @Select("SELECT RateLimitRequestsLimit requestLimit,RateLimitRequestsRemaining requestsRemaining,RateLimitRequestsResetAfter requestsResetAfter,RateLimitCapturedAt capturedAt FROM c_AsrTranscriptionRecords WHERE Provider=#{provider} AND Model=#{model} AND RateLimitCapturedAt IS NOT NULL ORDER BY RateLimitCapturedAt DESC,Id DESC LIMIT 1")
     Map<String,Object> findLatestQuotaSnapshot(@Param("provider") String provider,@Param("model") String model);
 
-    @Select("SELECT COALESCE(SUM(AudioDurationMs),0) FROM c_AsrTranscriptionRecords WHERE Provider=#{provider} AND Model=#{model} AND Status='SUCCESS' AND CreatedAt &gt;= #{start} AND CreatedAt &lt; #{end}")
+    @Select("SELECT COALESCE(SUM(AudioDurationMs),0) FROM c_AsrTranscriptionRecords WHERE Provider=#{provider} AND Model=#{model} AND Status='SUCCESS' AND CreatedAt >= #{start} AND CreatedAt < #{end}")
     long sumAudioDurationMs(@Param("provider") String provider,@Param("model") String model,@Param("start") LocalDateTime start,@Param("end") LocalDateTime end);
 
     class Record {
