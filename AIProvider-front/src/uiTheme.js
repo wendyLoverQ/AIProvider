@@ -45,6 +45,21 @@ export const UI_THEME_PRESETS = [
   preset("oxocarbon", "Oxocarbon", "工业黑灰与电光青蓝对撞", {
     "--bg-page": "#080808", "--bg-sidebar": "#000000", "--bg-surface": "#161616", "--bg-card": "#262626", "--bg-card-hover": "#393939", "--bg-selected": "#164d4b", "--border-subtle": "#393939", "--border-normal": "#6f6f6f", "--border-focus": "#3ddbd9", "--text-primary": "#f2f4f8", "--text-secondary": "#dde1e6", "--text-muted": "#a2a9b0", "--accent-primary": "#3ddbd9", "--accent-secondary": "#78a9ff", "--accent-soft": "#be95ff", "--accent-blue": "#78a9ff", "--accent-cyan": "#3ddbd9", "--accent-mint": "#42be65", "--accent-yellow": "#f1c21b", "--accent-red": "#fa4d56",
   }),
+  preset("catppuccin-mocha", "Catppuccin Mocha", "温暖柔和的粉彩暗色", {
+    "--bg-page": "#1e1e2e", "--bg-sidebar": "#11111b", "--bg-surface": "#262637", "--bg-card": "#313244", "--bg-card-hover": "#45475a", "--bg-selected": "#4b3f6e", "--border-subtle": "#45475a", "--border-normal": "#6c7086", "--border-focus": "#cba6f7", "--text-primary": "#cdd6f4", "--text-secondary": "#bac2de", "--text-muted": "#a6adc8", "--accent-primary": "#cba6f7", "--accent-secondary": "#f5c2e7", "--accent-soft": "#b4befe", "--accent-blue": "#89b4fa", "--accent-cyan": "#94e2d5", "--accent-mint": "#a6e3a1", "--accent-yellow": "#f9e2af", "--accent-red": "#f38ba8",
+  }),
+  preset("rose-pine", "Rosé Pine", "优雅的玫瑰松木暗色", {
+    "--bg-page": "#191724", "--bg-sidebar": "#0f0e14", "--bg-surface": "#1f1d2e", "--bg-card": "#26233a", "--bg-card-hover": "#364152", "--bg-selected": "#403d52", "--border-subtle": "#403d52", "--border-normal": "#6e6a86", "--border-focus": "#eb6f92", "--text-primary": "#e0def4", "--text-secondary": "#c4c0dc", "--text-muted": "#908caa", "--accent-primary": "#eb6f92", "--accent-secondary": "#c4a7e7", "--accent-soft": "#ebbcba", "--accent-blue": "#56949f", "--accent-cyan": "#9ccfd8", "--accent-mint": "#31748f", "--accent-yellow": "#f6c177", "--accent-red": "#eb6f92",
+  }),
+  preset("kanagawa", "Kanagawa", "日式浮世绘风格暗色", {
+    "--bg-page": "#1F1F28", "--bg-sidebar": "#16161D", "--bg-surface": "#2A2A37", "--bg-card": "#363646", "--bg-card-hover": "#454559", "--bg-selected": "#3b2e4a", "--border-subtle": "#363646", "--border-normal": "#54546D", "--border-focus": "#7E9CD8", "--text-primary": "#DCD7BA", "--text-secondary": "#C8C093", "--text-muted": "#727169", "--accent-primary": "#7E9CD8", "--accent-secondary": "#957FB8", "--accent-soft": "#D27E99", "--accent-blue": "#7FB4CA", "--accent-cyan": "#6A9589", "--accent-mint": "#98BB6C", "--accent-yellow": "#E6C384", "--accent-red": "#E46876",
+  }),
+  preset("one-dark-pro", "One Dark Pro", "经典的 Atom 暗色主题", {
+    "--bg-page": "#282c34", "--bg-sidebar": "#21252b", "--bg-surface": "#2c313a", "--bg-card": "#353b45", "--bg-card-hover": "#454c58", "--bg-selected": "#3e4452", "--border-subtle": "#3e4452", "--border-normal": "#5c6370", "--border-focus": "#61afef", "--text-primary": "#e5e9f0", "--text-secondary": "#c8ccd4", "--text-muted": "#828997", "--accent-primary": "#61afef", "--accent-secondary": "#c678dd", "--accent-soft": "#d19a66", "--accent-blue": "#61afef", "--accent-cyan": "#56b6c2", "--accent-mint": "#98c379", "--accent-yellow": "#e5c07b", "--accent-red": "#e06c75",
+  }),
+  preset("ayu-dark", "Ayu Dark", "简约流畅的暗橙主题", {
+    "--bg-page": "#0a0e14", "--bg-sidebar": "#06080c", "--bg-surface": "#131721", "--bg-card": "#1f2430", "--bg-card-hover": "#2a3040", "--bg-selected": "#3a3028", "--border-subtle": "#2a3040", "--border-normal": "#5c6773", "--border-focus": "#ff8f40", "--text-primary": "#bfbdb6", "--text-secondary": "#a3a19b", "--text-muted": "#8a8e99", "--accent-primary": "#ff8f40", "--accent-secondary": "#d2a6ff", "--accent-soft": "#ffb87a", "--accent-blue": "#39bae6", "--accent-cyan": "#95e6cb", "--accent-mint": "#aad94c", "--accent-yellow": "#ffd173", "--accent-red": "#ff3333",
+  }),
 ];
 
 export function isUiThemePreset(theme, candidate) {
