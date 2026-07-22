@@ -31,6 +31,12 @@ class AsrTranscriptionServiceTest {
         assertEquals("asr_20260722_000007",result.getRecordId());verifyNoInteractions(client);verify(repository,never()).insert(any());
     }
 
+    @Test void transcribesAudioWithoutCharacterMetadata() throws Exception {
+        AsrRecordRepository repository=mock(AsrRecordRepository.class);AsrProviderClient client=mock(AsrProviderClient.class);AsrTranscriptionService service=service(repository,client);when(repository.findByRequestId(anyString())).thenReturn(null);
+        doAnswer(invocation->{AsrRecordMapper.Record row=invocation.getArgument(0);assertNull(row.getCharacterId());assertNull(row.getCharacterNameSnapshot());row.setId(8L);return 1;}).when(repository).insert(any());when(repository.assignRecordId(eq(8L),anyString())).thenReturn(1);when(client.transcribe(any(),eq("whisper-large-v3"),eq("zh"))).thenReturn(new AsrProviderClient.Result("纯音频转写",1000L,null,null,null));when(repository.markSuccess(eq(8L),eq("纯音频转写"),eq(1000L),anyLong(),isNull(),isNull(),isNull())).thenReturn(1);when(repository.findByRecordId(anyString())).thenReturn(successRow());
+        service.transcribe(audio(),null,null,"zh","request_audio_only");verify(repository,never()).findCharacterName(anyString());verify(client).transcribe(any(),eq("whisper-large-v3"),eq("zh"));
+    }
+
     @Test void recordsProviderFailureAndReturnsStablePublicError() throws Exception {
         AsrRecordRepository repository=mock(AsrRecordRepository.class);AsrProviderClient client=mock(AsrProviderClient.class);AsrTranscriptionService service=service(repository,client);when(repository.findByRequestId(anyString())).thenReturn(null);doAnswer(invocation->{AsrRecordMapper.Record row=invocation.getArgument(0);row.setId(7L);return 1;}).when(repository).insert(any());when(repository.assignRecordId(eq(7L),anyString())).thenReturn(1);when(client.transcribe(any(),anyString(),anyString())).thenThrow(new AsrProviderException("ASR_PROVIDER_HTTP_429","upstream rate limit",null));when(repository.markFailed(eq(7L),anyLong(),eq("ASR_PROVIDER_HTTP_429"),eq("语音识别失败"))).thenReturn(1);
         AsrTranscriptionException error=assertThrows(AsrTranscriptionException.class,()->service.transcribe(audio(),"character_001",null,"zh","request_001"));
