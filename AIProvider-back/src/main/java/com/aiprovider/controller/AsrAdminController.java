@@ -13,7 +13,7 @@ import java.util.Map;
 @RequestMapping("/api/admin/asr/records")
 public class AsrAdminController {
     private final AsrTranscriptionService service;public AsrAdminController(AsrTranscriptionService service){this.service=service;}
-    @GetMapping public Result<AsrRecordPageVO> page(@RequestParam(defaultValue="1") int page,@RequestParam(defaultValue="20") int pageSize,@RequestParam(required=false) String characterId,@RequestParam(required=false) String status,@RequestParam(required=false) String provider,@RequestParam(required=false) String model,@RequestParam(required=false) String keyword,@RequestParam(required=false) String startTime,@RequestParam(required=false) String endTime){return Result.success(service.page(page,pageSize,characterId,status,provider,model,keyword,startTime,endTime));}
+    @GetMapping public Result<AsrRecordPageVO> page(@RequestParam(defaultValue="1") int page,@RequestParam(defaultValue="20") int pageSize,@RequestParam(required=false) String status,@RequestParam(required=false) String provider,@RequestParam(required=false) String model,@RequestParam(required=false) String keyword,@RequestParam(required=false) String startTime,@RequestParam(required=false) String endTime){return Result.success(service.page(page,pageSize,status,provider,model,keyword,startTime,endTime));}
     @GetMapping("/filters") public Result<Map<String,Object>> filters(){return Result.success(service.filters());}
     @GetMapping("/quota") public Result<AsrQuotaVO> quota(){return Result.success(service.quota());}
     @GetMapping("/{recordId}") public Result<AsrRecordVO> get(@PathVariable String recordId){return Result.success(service.get(recordId));}

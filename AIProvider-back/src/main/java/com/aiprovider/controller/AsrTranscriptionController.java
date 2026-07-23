@@ -11,5 +11,5 @@ import org.springframework.web.multipart.MultipartFile;
 public class AsrTranscriptionController {
     private final AsrTranscriptionService service;public AsrTranscriptionController(AsrTranscriptionService service){this.service=service;}
     @PostMapping(consumes=MediaType.MULTIPART_FORM_DATA_VALUE)
-    public AsrApiResponse transcribe(@RequestParam("audio") MultipartFile audio,@RequestParam(required=false) String characterId,@RequestParam(required=false) String sessionId,@RequestParam(defaultValue="zh") String language,@RequestParam String requestId){return AsrApiResponse.success(service.transcribe(audio,characterId,sessionId,language,requestId));}
+    public AsrApiResponse transcribe(@RequestParam("audio") MultipartFile audio,@RequestParam(required=false) String sessionId,@RequestParam(defaultValue="zh") String language,@RequestParam String requestId){return AsrApiResponse.success(service.transcribe(audio,sessionId,language,requestId));}
 }
