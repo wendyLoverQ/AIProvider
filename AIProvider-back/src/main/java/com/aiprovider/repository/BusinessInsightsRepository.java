@@ -17,79 +17,48 @@ public class BusinessInsightsRepository {
     public Map<String, Long> countAll(List<String> tables) {
         Map<String, Long> counts = new LinkedHashMap<>();
         for (String table : tables) {
-            try {
-                Long value = insightsMapper.count(table);
-                counts.put(table, value == null ? 0 : value);
-            } catch (Exception ignored) {
-                counts.put(table, 0L);
-            }
+            Long value = insightsMapper.count(table);
+            counts.put(table, value == null ? 0 : value);
         }
         return counts;
     }
 
     public Map<String, Object> queryFirst(String sql) {
-        try {
-            List<Map<String, Object>> rows = insightsMapper.queryList(sql);
-            return rows.isEmpty() ? Collections.<String, Object>emptyMap() : rows.get(0);
-        } catch (Exception ignored) {
-            return Collections.emptyMap();
-        }
+        List<Map<String, Object>> rows = insightsMapper.queryList(sql);
+        return rows.isEmpty() ? Collections.<String, Object>emptyMap() : rows.get(0);
     }
 
     public List<Map<String, Object>> queryList(String sql) {
-        try {
-            return insightsMapper.queryList(sql);
-        } catch (Exception ignored) {
-            return Collections.emptyList();
-        }
+        return insightsMapper.queryList(sql);
     }
 
     public Map<String, Object> runtimeState() {
-        try {
-            return insightsMapper.runtimeState();
-        } catch (Exception ignored) {
-            return Collections.emptyMap();
-        }
+        Map<String, Object> state = insightsMapper.runtimeState();
+        return state == null ? Collections.<String, Object>emptyMap() : state;
+    }
+
+    public String currentRoleId() {
+        return insightsMapper.currentRoleId();
     }
 
     public List<Map<String, Object>> activeReminders() {
-        try {
-            return insightsMapper.activeReminders();
-        } catch (Exception ignored) {
-            return Collections.emptyList();
-        }
+        return insightsMapper.activeReminders();
     }
 
     public List<Map<String, Object>> recentNotes() {
-        try {
-            return insightsMapper.recentNotes();
-        } catch (Exception ignored) {
-            return Collections.emptyList();
-        }
+        return insightsMapper.recentNotes();
     }
 
     public List<Map<String, Object>> recentVoiceLogs() {
-        try {
-            return insightsMapper.recentVoiceLogs();
-        } catch (Exception ignored) {
-            return Collections.emptyList();
-        }
+        return insightsMapper.recentVoiceLogs();
     }
 
     public List<Map<String, Object>> recentVideos() {
-        try {
-            return insightsMapper.recentVideos();
-        } catch (Exception ignored) {
-            return Collections.emptyList();
-        }
+        return insightsMapper.recentVideos();
     }
 
     public List<Map<String, Object>> recentRemoteVideos() {
-        try {
-            return insightsMapper.recentRemoteVideos();
-        } catch (Exception ignored) {
-            return Collections.emptyList();
-        }
+        return insightsMapper.recentRemoteVideos();
     }
 
     public List<Map<String, Object>> voiceRoles() {

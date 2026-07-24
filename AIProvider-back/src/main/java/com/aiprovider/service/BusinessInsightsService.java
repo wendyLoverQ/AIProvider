@@ -18,6 +18,7 @@ public class BusinessInsightsService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("counts", getCounts());
         result.put("runtime", insightsRepo.runtimeState());
+        result.put("currentRoleId", insightsRepo.currentRoleId());
         result.put("reminders", insightsRepo.activeReminders());
         result.put("notes", insightsRepo.recentNotes());
         result.put("voice", insightsRepo.recentVoiceLogs());
@@ -51,10 +52,15 @@ public class BusinessInsightsService {
     }
 
     private Map<String, Long> getCounts() {
-        return insightsRepo.countAll(Arrays.asList(
+        Map<String, Long> databaseCounts = insightsRepo.countAll(Arrays.asList(
             "maid_NotebookNotes", "maid_Reminders", "maid_VoiceConversations", "maid_VoiceTriggerLogs",
             "maid_VoiceRoles", "maid_VideoItems", "maid_RemoteVideoItems", "maid_AiConversations",
             "maid_ProactiveTriggerRules", "maid_ProactiveTriggerStates"
         ));
+        Map<String, Long> result = new LinkedHashMap<>();
+        databaseCounts.forEach((table, count) ->
+            result.put(table.startsWith("maid_") ? table.substring("maid_".length()) : table, count)
+        );
+        return result;
     }
 }

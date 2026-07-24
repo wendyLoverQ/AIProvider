@@ -240,15 +240,7 @@ function useDashboardData() {
         get("/monitor/ai-overview").catch(() => ({})),
         get("/monitor/providers").catch(() => ({})),
         get("/sync/status").catch(() => ({ recentRuns: [] })),
-        get("/insights/command").catch(() => ({
-          counts: {},
-          reminders: [],
-          notes: [],
-          voice: [],
-          videos: [],
-          remoteVideos: [],
-          runtime: {},
-        })),
+        get("/insights/command"),
       ]);
       setData({
         overview,
@@ -450,30 +442,79 @@ function HomeView({ data, onOpenWorkshop }) {
 
 /* ========== 我的女仆：聚合视图 ========== */
 function MaidView({ data }) {
-  const runtime = data.insights?.runtime || {};
-  const roles = data.insights?.voiceRoles || [];
-  const currentMaid = data.insights?.currentMaid || {};
-  const explicitCurrentRoleId = currentMaid.MaidId ?? currentMaid.maidId ?? runtime.LastRole ?? runtime.lastRole ?? "";
+  const [insights, setInsights] = useState(data.insights || {});
+  const [insightsError, setInsightsError] = useState("");
+  const runtime = insights.runtime || {};
+  const roles = insights.voiceRoles || [];
+  const currentMaid = insights.currentMaid || {};
+  const explicitCurrentRoleId = insights.currentRoleId ?? currentMaid.MaidId ?? currentMaid.maidId ?? runtime.LastRole ?? runtime.lastRole ?? "";
   const currentRoleId = explicitCurrentRoleId || roles[0]?.RoleId || roles[0]?.roleId || "";
   const [selectedRoleId, setSelectedRoleId] = useState(currentRoleId);
   const [roleData, setRoleData] = useState({ state: {}, card: {}, summary: {}, daily: [], recentCalls: [], businesses: [] });
   const [roleLoading, setRoleLoading] = useState(false);
   const [roleError, setRoleError] = useState("");
   const [avatarFailed, setAvatarFailed] = useState(false);
+  const previousCurrentRoleId = useRef(currentRoleId);
 
   useEffect(() => {
-    if (!selectedRoleId && currentRoleId) setSelectedRoleId(currentRoleId);
-  }, [currentRoleId, selectedRoleId]);
+    setInsights(data.insights || {});
+  }, [data.insights]);
+  useEffect(() => {
+    let cancelled = false;
+    const refreshInsights = () => {
+      get("/insights/command")
+        .then((result) => {
+          if (!cancelled) {
+            setInsights(result);
+            setInsightsError("");
+          }
+        })
+        .catch((exception) => {
+          if (!cancelled) setInsightsError(exception.message || "女仆总览数据刷新失败");
+        });
+    };
+    refreshInsights();
+    const timer = window.setInterval(refreshInsights, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+  useEffect(() => {
+    const previous = previousCurrentRoleId.current;
+    setSelectedRoleId((selected) => {
+      if (!selected || String(selected).toLowerCase() === String(previous).toLowerCase()) return currentRoleId;
+      return selected;
+    });
+    previousCurrentRoleId.current = currentRoleId;
+  }, [currentRoleId]);
   useEffect(() => {
     if (!selectedRoleId) return;
     let cancelled = false;
+    setRoleData({ state: {}, card: {}, summary: {}, daily: [], recentCalls: [], businesses: [] });
     setRoleLoading(true);
     setRoleError("");
-    get(`/insights/maid-role?roleId=${encodeURIComponent(selectedRoleId)}`)
-      .then((result) => { if (!cancelled) setRoleData(result); })
-      .catch((exception) => { if (!cancelled) setRoleError(exception.message || "角色数据加载失败"); })
-      .finally(() => { if (!cancelled) setRoleLoading(false); });
-    return () => { cancelled = true; };
+    const refreshRole = () => {
+      get(`/insights/maid-role?roleId=${encodeURIComponent(selectedRoleId)}`)
+        .then((result) => {
+          if (!cancelled) {
+            setRoleData(result);
+            setRoleError("");
+          }
+        })
+        .catch((exception) => {
+          if (!cancelled) setRoleError(exception.message || "角色数据加载失败");
+        })
+        .finally(() => {
+          if (!cancelled) setRoleLoading(false);
+        });
+    };
+    refreshRole();
+    const timer = window.setInterval(refreshRole, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, [selectedRoleId]);
   useEffect(() => setAvatarFailed(false), [selectedRoleId]);
 
@@ -501,6 +542,7 @@ function MaidView({ data }) {
   return (
     <div className="maid-compact-page kawaii-maid-space">
       <div className="maid-kawaii-banner" aria-hidden="true"><PawPrint weight="fill" /><span>MY DEAREST MAID</span><Heart weight="fill" /><b>いつもそばにいるよ</b><Sparkle weight="fill" /></div>
+      {insightsError && <div className="maid-role-error" role="alert"><Warning weight="fill" />{insightsError}</div>}
       {roleError && <div className="maid-role-error" role="alert"><Warning weight="fill" />角色数据未能按现役数据库结构加载：{roleError}</div>}
       <section className="maid-compact-hero">
         <div className="maid-avatar-stage">
@@ -608,7 +650,7 @@ function PanelHeader({ title, subtitle }) {
         <span>{subtitle}</span>
       </div>
       <span className="panel-live">
-        <i /> 实时
+        <i /> 30 秒刷新
       </span>
     </div>
   );

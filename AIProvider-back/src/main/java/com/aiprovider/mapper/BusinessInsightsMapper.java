@@ -28,6 +28,10 @@ public interface BusinessInsightsMapper {
             "FROM maid_AppRuntimeStates ORDER BY UpdatedAt DESC LIMIT 1")
     Map<String, Object> runtimeState();
 
+    @Select("SELECT `Value` FROM maid_AppSettings WHERE `Key` = 'voice_current_role_id' " +
+            "ORDER BY UpdatedAt DESC LIMIT 1")
+    String currentRoleId();
+
     @Select("SELECT Id, Title, Message, DueAt, NextDueAt, Enabled, AllowTts, LastTriggeredAt " +
             "FROM maid_Reminders WHERE Enabled = 1 ORDER BY COALESCE(NextDueAt, DueAt) ASC LIMIT 6")
     List<Map<String, Object>> activeReminders();
