@@ -43,6 +43,9 @@ public interface AsrRecordMapper {
     @Select("SELECT COALESCE(SUM(AudioDurationMs),0) FROM c_AsrTranscriptionRecords WHERE Provider=#{provider} AND Model=#{model} AND Status='SUCCESS' AND CreatedAt >= #{start} AND CreatedAt < #{end}")
     long sumAudioDurationMs(@Param("provider") String provider,@Param("model") String model,@Param("start") LocalDateTime start,@Param("end") LocalDateTime end);
 
+    @Select("SELECT COUNT(*) FROM c_AsrTranscriptionRecords WHERE Provider=#{provider} AND Model=#{model} AND CreatedAt >= #{start} AND CreatedAt < #{end}")
+    long countRequests(@Param("provider") String provider,@Param("model") String model,@Param("start") LocalDateTime start,@Param("end") LocalDateTime end);
+
     class Record {
         private Long id;private String requestId;private String sessionId;private String audioPath;private String audioFormat;private long audioSize;private String provider;private String model;private String language;
         public Long getId(){return id;}public void setId(Long v){id=v;}public String getRequestId(){return requestId;}public void setRequestId(String v){requestId=v;}public String getSessionId(){return sessionId;}public void setSessionId(String v){sessionId=v;}public String getAudioPath(){return audioPath;}public void setAudioPath(String v){audioPath=v;}public String getAudioFormat(){return audioFormat;}public void setAudioFormat(String v){audioFormat=v;}public long getAudioSize(){return audioSize;}public void setAudioSize(long v){audioSize=v;}public String getProvider(){return provider;}public void setProvider(String v){provider=v;}public String getModel(){return model;}public void setModel(String v){model=v;}public String getLanguage(){return language;}public void setLanguage(String v){language=v;}
