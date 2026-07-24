@@ -1,0 +1,273 @@
+/* Quant 独立页面 — 只使用全局语义主题变量，不引入功能页私有硬编码颜色。 */
+
+.quant-page{min-width:0;box-sizing:border-box;width:100%;max-width:100%;overflow:hidden;color:var(--text-primary);display:flex;flex-direction:column;gap:18px;padding:4px 0 12px}
+.quant-page *{box-sizing:border-box}
+
+/* ===== 页面内子区块标题 ===== */
+.quant-workspace-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+  margin:0 0 4px;
+}
+.quant-workspace-head>div{min-width:0}
+.quant-workspace-head .eyebrow{
+  display:block;
+  font-size:9px;
+  letter-spacing:.14em;
+  color:var(--text-muted);
+  text-transform:uppercase;
+}
+.quant-workspace-head h3{
+  margin:2px 0 0;
+  font-size:16px;
+  color:var(--text-primary);
+}
+.quant-workspace-head h3+small,
+.quant-workspace-head>div>small{
+  display:block;
+  margin-top:3px;
+  font-size:11px;
+  color:var(--text-muted);
+  line-height:1.5;
+}
+
+/* ===== 重新加载按钮 ===== */
+.quant-refresh{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  height:34px;
+  padding:0 14px;
+  border-radius:var(--control-radius);
+  border:1px solid var(--border-normal);
+  background:var(--bg-card);
+  color:var(--text-primary);
+  font-size:12px;
+  cursor:pointer;
+  transition:border-color .15s,background .15s;
+}
+.quant-refresh:hover:not(:disabled){border-color:var(--border-focus);background:var(--bg-card-hover)}
+.quant-refresh:disabled{opacity:.55;cursor:progress}
+.quant-refresh:focus-visible{outline:2px solid var(--border-focus);outline-offset:2px}
+.quant-refresh .spin{animation:quant-spin 1s linear infinite}
+@keyframes quant-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+
+/* ===== 加载 ===== */
+.quant-loading{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  padding:40px 16px;
+  color:var(--text-muted);
+  font-size:12px;
+}
+.quant-loader-dot{
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background:var(--accent-primary);
+  animation:quant-dot 1.2s ease-in-out infinite;
+}
+.quant-loader-dot:nth-child(2){animation-delay:.15s}
+.quant-loader-dot:nth-child(3){animation-delay:.3s}
+@keyframes quant-dot{
+  0%,80%,100%{opacity:.25;transform:scale(.7)}
+  40%{opacity:1;transform:scale(1)}
+}
+
+/* ===== 错误 ===== */
+.quant-error{
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr) auto;
+  align-items:center;
+  gap:12px;
+  padding:14px 16px;
+  border-radius:var(--card-radius);
+  border:1px solid color-mix(in srgb,var(--accent-red) 55%,var(--border-normal));
+  background:color-mix(in srgb,var(--accent-red) 10%,var(--bg-card));
+  color:var(--accent-red);
+}
+.quant-error svg{flex:none;font-size:22px}
+.quant-error div{min-width:0}
+.quant-error strong{display:block;font-size:13px;color:var(--accent-red)}
+.quant-error span{display:block;font-size:11px;color:var(--text-muted);word-break:break-word}
+.quant-error-retry{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  height:32px;
+  padding:0 12px;
+  border-radius:var(--control-radius);
+  border:1px solid var(--border-normal);
+  background:var(--bg-surface);
+  color:var(--text-primary);
+  font-size:12px;
+  cursor:pointer;
+}
+.quant-error-retry:hover{border-color:var(--border-focus);background:var(--bg-card-hover)}
+.quant-error-retry:focus-visible{outline:2px solid var(--border-focus);outline-offset:2px}
+
+/* ===== 状态卡片网格（总览） ===== */
+.quant-status-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));
+  gap:12px;
+}
+.quant-status-card{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:14px 16px;
+  border-radius:var(--card-radius);
+  border:1px solid var(--border-subtle);
+  background:var(--bg-surface);
+  min-width:0;
+}
+.quant-status-icon{
+  flex:none;
+  width:36px;
+  height:36px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:var(--control-radius);
+  font-size:20px;
+  background:color-mix(in srgb,var(--accent-primary) 12%,var(--bg-page));
+  color:var(--accent-primary);
+}
+.quant-status-card.tone-warning .quant-status-icon{
+  background:color-mix(in srgb,var(--accent-yellow) 14%,var(--bg-page));
+  color:var(--accent-yellow);
+}
+.quant-status-text{min-width:0}
+.quant-status-text span{
+  display:block;
+  font-size:10px;
+  letter-spacing:.08em;
+  color:var(--text-muted);
+  text-transform:uppercase;
+}
+.quant-status-text strong{
+  display:block;
+  margin-top:2px;
+  font-size:15px;
+  color:var(--text-primary);
+}
+
+/* ===== 区块标题 ===== */
+.quant-section-head{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:12px;
+  margin:0 0 10px;
+}
+.quant-section-head h3,
+.quant-section-head h4{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  margin:0;
+  font-size:14px;
+  color:var(--text-primary);
+}
+.quant-section-head h4{font-size:13px}
+.quant-section-head h3 svg,
+.quant-section-head h4 svg{color:var(--accent-primary)}
+.quant-section-head small{font-size:11px;color:var(--text-muted)}
+
+/* ===== 模块地图 ===== */
+.quant-module-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr));
+  gap:14px;
+}
+.quant-module-group{
+  min-width:0;
+  padding:14px 16px;
+  border-radius:var(--card-radius);
+  border:1px solid var(--border-subtle);
+  background:var(--bg-surface);
+}
+.quant-module-group>header{margin-bottom:8px}
+.quant-module-group h3{
+  margin:0;
+  font-size:12px;
+  letter-spacing:.06em;
+  color:var(--accent-secondary);
+  text-transform:uppercase;
+}
+.quant-module-list{display:flex;flex-direction:column;gap:8px;min-width:0}
+.quant-module-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:10px 12px;
+  min-width:0;
+  border-radius:var(--control-radius);
+  border:1px solid var(--border-normal);
+  background:var(--bg-card);
+}
+.quant-module-info{min-width:0}
+.quant-module-info strong{display:block;font-size:13px;color:var(--text-primary)}
+.quant-module-info small{display:block;font-size:11px;color:var(--text-muted);line-height:1.4}
+.quant-module-status{
+  flex:none;
+  font-size:11px;
+  padding:4px 10px;
+  border-radius:999px;
+  border:1px solid color-mix(in srgb,var(--accent-mint) 45%,var(--border-normal));
+  background:color-mix(in srgb,var(--accent-mint) 12%,var(--bg-card));
+  color:var(--accent-mint);
+  white-space:nowrap;
+}
+
+/* ===== 骨架页面能力项 ===== */
+.quant-cap-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));
+  gap:10px;
+}
+.quant-cap-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  min-width:0;
+  padding:12px 14px;
+  border-radius:var(--control-radius);
+  border:1px solid var(--border-normal);
+  background:var(--bg-card);
+}
+.quant-cap-name{font-size:13px;color:var(--text-primary)}
+.quant-cap-status{
+  flex:none;
+  font-size:11px;
+  padding:4px 10px;
+  border-radius:999px;
+  border:1px solid color-mix(in srgb,var(--text-muted) 40%,var(--border-normal));
+  background:color-mix(in srgb,var(--text-muted) 10%,var(--bg-card));
+  color:var(--text-muted);
+  white-space:nowrap;
+}
+.quant-skeleton-note{
+  margin:12px 0 0;
+  font-size:11px;
+  color:var(--text-muted);
+}
+
+/* ===== 响应式 — 桌面与移动端均不横向溢出 ===== */
+@media (max-width:720px){
+  .quant-status-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .quant-module-grid{grid-template-columns:minmax(0,1fr)}
+  .quant-workspace-head{flex-direction:column}
+  .quant-refresh{width:100%;justify-content:center}
+}
+@media (max-width:420px){
+  .quant-status-grid{grid-template-columns:minmax(0,1fr)}
+  .quant-module-row{flex-direction:column;align-items:flex-start}
+}

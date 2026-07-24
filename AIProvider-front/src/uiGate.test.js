@@ -1,11 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const srcDir = path.dirname(fileURLToPath(import.meta.url));
 const read = (name) => readFileSync(path.join(srcDir, name), "utf8");
-const jsxFiles = readdirSync(srcDir).filter((name) => name.endsWith(".jsx"));
+// 递归收集 src 下所有 JSX 文件，使门禁覆盖子目录（如 src/quant/）。
+function collectJsxFiles(dir) {
+  const result = [];
+  for (const entry of readdirSync(dir)) {
+    const full = path.join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      result.push(...collectJsxFiles(full));
+    } else if (entry.endsWith(".jsx")) {
+      result.push(path.relative(srcDir, full).split(path.sep).join("/"));
+    }
+  }
+  return result;
+}
+const jsxFiles = collectJsxFiles(srcDir);
 
 describe("UI release gate", () => {
   it("keeps monitor capacity cards compact instead of stretching to the viewport", () => {
@@ -39,7 +52,7 @@ describe("UI release gate", () => {
   it("keeps every primary workspace on semantic theme tokens", () => {
     const theme = read("SemanticTheme.css");
     const tokens = read("uiTheme.js");
-    ["favorite-library", "video-editor-shell", "foundry-workbench", "system-settings-shell", "file-transfer-page", "twitter-publisher", "content-operations-center", "platform-account-center", "asr-records-page", "prompt-scheme-list", "maid-panel", "universe-toolbar", "quant-workbench"].forEach((root) => {
+    ["favorite-library", "video-editor-shell", "foundry-workbench", "system-settings-shell", "file-transfer-page", "twitter-publisher", "content-operations-center", "platform-account-center", "asr-records-page", "prompt-scheme-list", "maid-panel", "universe-toolbar", "quant-page"].forEach((root) => {
       expect(theme, `${root} 未接入全局语义主题`).toContain(root);
     });
     const copy = read("UiControl.jsx");
@@ -233,40 +246,75 @@ describe("UI release gate", () => {
     expect(remoteCodex).not.toMatch(/<div[^>]+onClick=/);
   });
 
-  it("keeps Quant workbench reachable, semantic, native, and horizontally contained", () => {
+  it("keeps Quant as an independent nav group with 8 independent pages and routes", () => {
     const app = read("App.jsx");
-    const page = read("QuantWorkbench.jsx");
-    const css = read("QuantWorkbench.css");
-    expect(app).toContain('{ key: "quant"');
-    expect(app).toContain('quant: "/quant"');
-    expect(app).toContain('"/quant": "quant"');
-    expect(app).toContain("<QuantWorkbench />");
-    expect(app).toContain('quant: "策略研究、回测、风控与实盘运行总览"');
-    // 量化交易只保留单一一级入口，不得拆成多个全局导航项。
-    expect(app).not.toContain('key: "strategies"');
-    expect(app).not.toContain('key: "backtests"');
-    expect(app).not.toContain('key: "risk"');
-    expect(app).not.toContain('key: "portfolio"');
-    expect(app).not.toContain('key: "orders"');
-    expect(app).not.toContain('key: "logs"');
-    // 内部二级工作区：7 个，路径保持 /quant，不新增 /quant/* 路由。
-    expect(page).toContain("const WORKSPACES = [");
-    ["overview", "strategies", "backtests", "risk", "portfolio", "orders", "logs"].forEach((key) => {
-      expect(page, `缺少内部工作区 ${key}`).toContain(`key: "${key}"`);
+    const overview = read("quant/QuantOverview.jsx");
+    const scaffold = read("quant/QuantPageScaffold.jsx");
+    const pagesCss = read("quant/QuantPages.css");
+    const theme = read("SemanticTheme.css");
+
+    // 量化独立分组，顺序为 operate → quant → publish。
+    expect(app).toContain('{ key: "quant", label: "量化" }');
+    const groupsText = app.slice(app.indexOf("const NAV_GROUPS"), app.indexOf("const PAGE_DESCRIPTIONS"));
+    expect(groupsText.indexOf('key: "operate"')).toBeLessThan(groupsText.indexOf('key: "quant"'));
+    expect(groupsText.indexOf('key: "quant"')).toBeLessThan(groupsText.indexOf('key: "publish"'));
+
+    // 8 个菜单项均属于 quant 分组。
+    expect(app.match(/group: "quant"/g).length).toBe(8);
+    ["quantOverview", "market", "quantStrategies", "quantBacktests", "quantRisk", "quantPortfolio", "quantOrders", "quantLogs"].forEach((key) => {
+      expect(app, `缺少量化菜单项 ${key}`).toContain(`key: "${key}"`);
     });
-    expect(app).not.toMatch(/\/quant\/[a-z]/);
-    expect(page).toContain("/api/quant/overview");
-    // 内部导航使用原生按钮并带有 aria-current。
-    expect(page).toContain('className={selected ? "quant-tab active" : "quant-tab"}');
-    expect(page).toContain('aria-current={selected ? "page" : undefined}');
-    expect(page).toContain("type=\"button\"");
-    expect(page).not.toMatch(/<div[^>]+onClick=/);
-    expect(css).toContain("var(--bg-surface)");
-    expect(css).toContain("var(--text-primary)");
-    expect(css).toContain(":focus-visible");
-    expect(css).toMatch(/\.quant-workbench\{[^}]*min-width:0/);
-    expect(css).toMatch(/@media \(max-width:\s*720px\)/);
-    expect(read("SemanticTheme.css")).toContain(".quant-workbench");
+    // 市场行情归属量化分组，且不再属于运营与工具。
+    expect(app).toContain('{ key: "market", label: "市场行情", icon: ChartLineUp, group: "quant"');
+    // 不再存在旧的单一“量化交易”菜单。
+    expect(app).not.toContain('{ key: "quant", label: "量化交易"');
+
+    // 7 个量化独立路径（/market 已存在，单独验证）。
+    expect(app).toContain('"/quant": "quantOverview"');
+    expect(app).toContain('"/quant/strategies": "quantStrategies"');
+    expect(app).toContain('"/quant/backtests": "quantBacktests"');
+    expect(app).toContain('"/quant/risk": "quantRisk"');
+    expect(app).toContain('"/quant/portfolio": "quantPortfolio"');
+    expect(app).toContain('"/quant/orders": "quantOrders"');
+    expect(app).toContain('"/quant/logs": "quantLogs"');
+    // 反向映射也存在。
+    expect(app).toContain('quantOverview: "/quant"');
+    expect(app).toContain('quantLogs: "/quant/logs"');
+
+    // 7 个独立页面组件已 import 和挂载。
+    const components = ["QuantOverview", "QuantStrategies", "QuantBacktests", "QuantRisk", "QuantPortfolio", "QuantOrders", "QuantLogs"];
+    components.forEach((component) => {
+      expect(app, `未导入 ${component}`).toContain(`import ${component} from "./quant/${component}"`);
+      const viewKey = component[0].toLowerCase() + component.slice(1);
+      expect(app, `未挂载 ${component}`).toContain(`{view === "${viewKey}" && <${component} />}`);
+    });
+
+    // QuantOverview 请求真实接口，不伪造数据。
+    expect(overview).toContain("/api/quant/overview");
+
+    // 不再存在单页面 Tab 结构与旧文件。
+    expect(app).not.toContain("QuantWorkbench");
+    expect(overview).not.toContain("const WORKSPACES");
+    expect(scaffold).not.toContain("const WORKSPACES");
+    expect(pagesCss).not.toContain(".quant-tabs");
+    expect(pagesCss).not.toContain(".quant-tab");
+
+    // 各页面无 clickable div，使用语义变量，:focus-visible。
+    expect(overview).not.toMatch(/<div[^>]+onClick=/);
+    expect(scaffold).not.toMatch(/<div[^>]+onClick=/);
+    expect(pagesCss).toContain("var(--bg-surface)");
+    expect(pagesCss).toContain("var(--text-primary)");
+    expect(pagesCss).toContain(":focus-visible");
+    expect(pagesCss).toMatch(/\.quant-page\{[^}]*min-width:0/);
+    expect(pagesCss).toMatch(/@media \(max-width:\s*720px\)/);
+    expect(theme).toContain(".quant-page");
+
+    // 移动端仍使用原有 MOBILE_NAV 与 NavButton。
+    expect(app).toContain('const MOBILE_NAV = [{ key: "home"');
+    expect(app).toContain('scrollIntoView({ behavior: "smooth"');
+
+    // CryptoMarket 业务代码与 API 路径未被修改。
+    expect(read("CryptoMarket.jsx")).toContain("/api/crypto-market");
   });
 
   it("keeps content operation dialogs inside the desktop viewport", () => {

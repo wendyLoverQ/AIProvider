@@ -53,6 +53,11 @@ import {
   FolderSimple,
   IdentificationCard,
   ChartBar,
+  Flask,
+  ListChecks,
+  Scroll,
+  ShieldCheck,
+  Wallet,
 } from "@phosphor-icons/react";
 import {
   Area,
@@ -80,7 +85,13 @@ import ManualImageEditor from "./ManualImageEditor";
 import VideoEditor from "./VideoEditor";
 import FoundryWorkbench from "./FoundryWorkbench";
 import CryptoMarket from "./CryptoMarket";
-import QuantWorkbench from "./QuantWorkbench";
+import QuantOverview from "./quant/QuantOverview";
+import QuantStrategies from "./quant/QuantStrategies";
+import QuantBacktests from "./quant/QuantBacktests";
+import QuantRisk from "./quant/QuantRisk";
+import QuantPortfolio from "./quant/QuantPortfolio";
+import QuantOrders from "./quant/QuantOrders";
+import QuantLogs from "./quant/QuantLogs";
 import RemoteCodex from "./RemoteCodex";
 import FileTransfer from "./FileTransfer";
 import FavoriteMediaLibrary from "./FavoriteMediaLibrary";
@@ -102,14 +113,20 @@ const NAV = [
   { key: "manualEditor", label: "图片编辑", icon: PaintBrush, group: "create", color: "#6fe2df" },
   { key: "videoEditor", label: "视频编辑", icon: FilmSlate, group: "create", color: "#82b7ff" },
   { key: "maid", label: "我的女仆", icon: Heart, group: "create", color: "#ff718f" },
-  { key: "market", label: "市场行情", icon: ChartLineUp, group: "operate", color: "#72ddb1" },
-  { key: "quant", label: "量化交易", icon: ChartBar, group: "operate", color: "#a78bfa" },
   { key: "monitor", label: "监控中心", icon: Pulse, group: "operate", color: "#ff6b6b" },
   { key: "asrRecords", label: "语音识别", icon: MicrophoneStage, group: "operate", color: "#82b7ff" },
   { key: "remoteCodex", label: "远程 Codex", icon: ChatsCircle, group: "operate", color: "#a78bfa" },
   { key: "foundry", label: "链上工具", icon: Cube, group: "operate", color: "#f59e0b" },
   { key: "fileTransfer", label: "文件中转", icon: FolderSimple, group: "operate", color: "#60a5fa" },
   { key: "camera", label: "手机监控", icon: VideoCamera, closed: true, hidden: true, group: "operate" },
+  { key: "quantOverview", label: "量化总览", icon: ChartBar, group: "quant", color: "#a78bfa" },
+  { key: "market", label: "市场行情", icon: ChartLineUp, group: "quant", color: "#72ddb1" },
+  { key: "quantStrategies", label: "策略管理", icon: Stack, group: "quant", color: "#c69cff" },
+  { key: "quantBacktests", label: "回测实验", icon: Flask, group: "quant", color: "#f0a860" },
+  { key: "quantRisk", label: "风控中心", icon: ShieldCheck, group: "quant", color: "#ff6b6b" },
+  { key: "quantPortfolio", label: "账户仓位", icon: Wallet, group: "quant", color: "#34d399" },
+  { key: "quantOrders", label: "订单成交", icon: ListChecks, group: "quant", color: "#38bdf8" },
+  { key: "quantLogs", label: "运行记录", icon: Scroll, group: "quant", color: "#94a3b8" },
   { key: "twitter", label: "Twitter 发布", icon: XLogo, group: "publish", color: "#38bdf8" },
   { key: "contentOperations", label: "内容运营", icon: Broadcast, group: "publish", color: "#fb923c" },
   { key: "accounts", label: "账号中心", icon: IdentificationCard, group: "publish", color: "#34d399" },
@@ -119,6 +136,7 @@ const NAV = [
 const NAV_GROUPS = [
   { key: "create", label: "创作" },
   { key: "operate", label: "运营与工具" },
+  { key: "quant", label: "量化" },
   { key: "publish", label: "发布" },
   { key: "system", label: "系统" },
 ];
@@ -127,7 +145,13 @@ const PAGE_DESCRIPTIONS = {
   manualEditor: "本机画布、抠图与 AI 修补",
   videoEditor: "素材、画布与时间线编辑",
   market: "实时行情、K 线与订单簿",
-  quant: "策略研究、回测、风控与实盘运行总览",
+  quantOverview: "量化系统阶段、连接状态与模块运行总览",
+  quantStrategies: "策略定义、参数版本、启停状态与信号记录",
+  quantBacktests: "历史回放、撮合假设、参数实验与结果报告",
+  quantRisk: "仓位、杠杆、亏损熔断与交易安全控制",
+  quantPortfolio: "账户余额、保证金、仓位与盈亏状态",
+  quantOrders: "活跃订单、历史订单、成交与执行异常",
+  quantLogs: "策略、风控、对账与系统运行记录",
   prompts: "管理可复用的标签式与长文式提示词方案",
   promptOptions: "维护 Prompt 词条与分类规则",
   maid: "查看角色状态与模型活动",
@@ -275,14 +299,14 @@ function useDashboardData() {
 }
 
 function App() {
-  const viewFromPath = () => ({ "/favorites": "favorites", "/workshop": "workshop", "/manual-editor": "manualEditor", "/video-editor": "videoEditor", "/market": "market", "/quant": "quant", "/prompts": "prompts", "/prompt-options": "promptOptions", "/maid": "maid", "/admin/monitor": "monitor", "/admin/asr": "asrRecords", "/remote-codex": "remoteCodex", "/foundry": "foundry", "/file-transfer": "fileTransfer", "/camera": "camera", "/twitter": "twitter", "/content-operations": "contentOperations", "/accounts": "accounts", "/appearance": "appearance", "/settings": "settings" })[window.location.pathname] || "home";
+  const viewFromPath = () => ({ "/favorites": "favorites", "/workshop": "workshop", "/manual-editor": "manualEditor", "/video-editor": "videoEditor", "/market": "market", "/quant": "quantOverview", "/quant/strategies": "quantStrategies", "/quant/backtests": "quantBacktests", "/quant/risk": "quantRisk", "/quant/portfolio": "quantPortfolio", "/quant/orders": "quantOrders", "/quant/logs": "quantLogs", "/prompts": "prompts", "/prompt-options": "promptOptions", "/maid": "maid", "/admin/monitor": "monitor", "/admin/asr": "asrRecords", "/remote-codex": "remoteCodex", "/foundry": "foundry", "/file-transfer": "fileTransfer", "/camera": "camera", "/twitter": "twitter", "/content-operations": "contentOperations", "/accounts": "accounts", "/appearance": "appearance", "/settings": "settings" })[window.location.pathname] || "home";
   const [view, setView] = useState(viewFromPath);
   const [workshopMounted, setWorkshopMounted] = useState(() => viewFromPath() === "workshop");
   const [promptOptionCategory, setPromptOptionCategory] = useState("");
   const dashboard = useDashboardData();
   const current = NAV.find((item) => item.key === (view === "promptOptions" ? "prompts" : view));
   useEffect(() => {
-    const path = ({ favorites: "/favorites", workshop: "/workshop", manualEditor: "/manual-editor", videoEditor: "/video-editor", market: "/market", quant: "/quant", prompts: "/prompts", promptOptions: "/prompt-options", maid: "/maid", monitor: "/admin/monitor", asrRecords: "/admin/asr", remoteCodex: "/remote-codex", foundry: "/foundry", fileTransfer: "/file-transfer", camera: "/camera", twitter: "/twitter", contentOperations: "/content-operations", accounts: "/accounts", appearance: "/appearance", settings: "/settings" })[view] || "/";
+    const path = ({ favorites: "/favorites", workshop: "/workshop", manualEditor: "/manual-editor", videoEditor: "/video-editor", market: "/market", quantOverview: "/quant", quantStrategies: "/quant/strategies", quantBacktests: "/quant/backtests", quantRisk: "/quant/risk", quantPortfolio: "/quant/portfolio", quantOrders: "/quant/orders", quantLogs: "/quant/logs", prompts: "/prompts", promptOptions: "/prompt-options", maid: "/maid", monitor: "/admin/monitor", asrRecords: "/admin/asr", remoteCodex: "/remote-codex", foundry: "/foundry", fileTransfer: "/file-transfer", camera: "/camera", twitter: "/twitter", contentOperations: "/content-operations", accounts: "/accounts", appearance: "/appearance", settings: "/settings" })[view] || "/";
     if (window.location.pathname !== path) window.history.replaceState({}, "", path);
   }, [view]);
   useEffect(() => {
@@ -354,7 +378,13 @@ function App() {
         {view === "manualEditor" && <ManualImageEditor />}
         {view === "videoEditor" && <VideoEditor />}
         {view === "market" && <CryptoMarket />}
-        {view === "quant" && <QuantWorkbench />}
+        {view === "quantOverview" && <QuantOverview />}
+        {view === "quantStrategies" && <QuantStrategies />}
+        {view === "quantBacktests" && <QuantBacktests />}
+        {view === "quantRisk" && <QuantRisk />}
+        {view === "quantPortfolio" && <QuantPortfolio />}
+        {view === "quantOrders" && <QuantOrders />}
+        {view === "quantLogs" && <QuantLogs />}
         {view === "prompts" && <PromptManager onEditOptions={(category = "") => { setPromptOptionCategory(category); setView("promptOptions"); }} />}
         {view === "promptOptions" && <PromptOptionManager initialCategory={promptOptionCategory} onBack={() => setView("prompts")} />}
         {view === "maid" &&

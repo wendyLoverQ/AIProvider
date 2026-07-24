@@ -1,22 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ArrowsClockwise,
-  ChartBar,
   ChartLineUp,
   Database,
-  GearSix,
   Lightning,
-  ListChecks,
   LockKey,
-  Scroll,
-  ShieldCheck,
   Sparkle,
-  Stack,
-  Wallet,
   Warning,
 } from "@phosphor-icons/react";
-import { readJsonResponse } from "./apiResponse";
-import "./QuantWorkbench.css";
+import { readJsonResponse } from "../apiResponse";
+import QuantPageScaffold from "./QuantPageScaffold";
 
 const OVERVIEW_PATH = "/api/quant/overview";
 
@@ -33,59 +26,8 @@ const PHASE_LABELS = { FOUNDATION: "基础骨架" };
 const EXCHANGE_LABELS = { NOT_CONFIGURED: "未配置" };
 const STORAGE_LABELS = { NOT_CREATED: "未创建" };
 const MODULE_STATUS_LABELS = { SKELETON: "骨架已建立" };
-
 const GROUP_ORDER = ["research", "trading", "operations"];
 const GROUP_LABELS = { research: "研究链路", trading: "交易链路", operations: "运行管理" };
-
-const WORKSPACES = [
-  { key: "overview", label: "总览", icon: ChartBar },
-  { key: "strategies", label: "策略管理", icon: Stack },
-  { key: "backtests", label: "回测与参数实验", icon: ChartLineUp },
-  { key: "risk", label: "风控中心", icon: ShieldCheck },
-  { key: "portfolio", label: "账户与仓位", icon: Wallet },
-  { key: "orders", label: "订单与成交", icon: ListChecks },
-  { key: "logs", label: "运行记录", icon: Scroll },
-];
-
-// 非总览工作区只展示真实未接入状态，不提供任何功能入口、假开关或假数据。
-const SKELETON_WORKSPACES = {
-  strategies: {
-    title: "策略管理",
-    intro: "策略定义、参数版本、启停状态、信号记录",
-    items: ["策略定义", "参数版本", "启停状态", "信号记录"],
-    note: "尚未接入具体业务",
-  },
-  backtests: {
-    title: "回测与参数实验",
-    intro: "历史数据选择、回测任务、手续费与滑点、参数实验、结果报告",
-    items: ["历史数据选择", "回测任务", "手续费与滑点", "参数实验", "结果报告"],
-    note: "尚未接入具体业务 · 不展示收益、曲线或胜率",
-  },
-  risk: {
-    title: "风控中心",
-    intro: "仓位限制、杠杆限制、单笔风险、日亏熔断、连续亏损熔断、紧急停止",
-    items: ["仓位限制", "杠杆限制", "单笔风险", "日亏熔断", "连续亏损熔断", "紧急停止"],
-    note: "尚未接入具体业务 · 不提供开关或误操作按钮",
-  },
-  portfolio: {
-    title: "账户与仓位",
-    intro: "账户余额、可用保证金、当前仓位、已实现盈亏、未实现盈亏、资金费率",
-    items: ["账户余额", "可用保证金", "当前仓位", "已实现盈亏", "未实现盈亏", "资金费率"],
-    note: "尚未接入 · 不展示余额或盈亏数字",
-  },
-  orders: {
-    title: "订单与成交",
-    intro: "活跃订单、历史订单、成交记录、保护单、执行异常",
-    items: ["活跃订单", "历史订单", "成交记录", "保护单", "执行异常"],
-    note: "尚未接入具体业务 · 不展示订单",
-  },
-  logs: {
-    title: "运行记录",
-    intro: "策略运行日志、风控决策、对账记录、系统异常、发布版本",
-    items: ["策略运行日志", "风控决策", "对账记录", "系统异常", "发布版本"],
-    note: "尚未接入具体业务 · 不生成日志",
-  },
-};
 
 function TopStatusCard({ icon: Icon, label, value, tone }) {
   return (
@@ -124,7 +66,7 @@ function ModuleGroup({ group, modules }) {
   );
 }
 
-function OverviewWorkspace({ overview, state, error, load, refreshing }) {
+function OverviewBody({ overview, state, error, load, refreshing }) {
   if (state === "loading") {
     return (
       <div className="quant-loading" role="status" aria-live="polite">
@@ -159,11 +101,11 @@ function OverviewWorkspace({ overview, state, error, load, refreshing }) {
   const storageLabel = overview ? (STORAGE_LABELS[overview.storageState] || overview.storageState || "未创建") : "—";
 
   return (
-    <div className="quant-overview">
+    <>
       <div className="quant-workspace-head">
         <div>
           <span className="eyebrow">QUANT · FOUNDATION SKELETON</span>
-          <h3>总览</h3>
+          <h3>骨架总览</h3>
           <small>当前阶段只展示已建立的骨架结构，不提供具体量化业务</small>
         </div>
         <button type="button" className="quant-refresh" onClick={load} disabled={refreshing}>
@@ -190,35 +132,11 @@ function OverviewWorkspace({ overview, state, error, load, refreshing }) {
           ))}
         </div>
       </section>
-    </div>
+    </>
   );
 }
 
-function SkeletonWorkspace({ config }) {
-  return (
-    <div className="quant-skeleton" aria-label={config.title}>
-      <div className="quant-workspace-head">
-        <div>
-          <span className="eyebrow">QUANT · 尚未接入</span>
-          <h3>{config.title}</h3>
-          <small>{config.intro}</small>
-        </div>
-      </div>
-      <section className="quant-cap-grid" aria-label={`${config.title}能力结构`}>
-        {config.items.map((item) => (
-          <article key={item} className="quant-cap-row">
-            <span className="quant-cap-name">{item}</span>
-            <span className="quant-cap-status">未接入</span>
-          </article>
-        ))}
-      </section>
-      <p className="quant-skeleton-note">{config.note}</p>
-    </div>
-  );
-}
-
-export default function QuantWorkbench() {
-  const [active, setActive] = useState("overview");
+export default function QuantOverview() {
   const [overview, setOverview] = useState(null);
   const [state, setState] = useState("loading");
   const [error, setError] = useState("");
@@ -243,49 +161,14 @@ export default function QuantWorkbench() {
   useEffect(() => { load(); }, [load]);
 
   return (
-    <section className="quant-workbench" aria-label="量化交易工作区">
-      <header className="quant-hero">
-        <div className="quant-hero-icon"><Sparkle weight="duotone" /></div>
-        <div className="quant-hero-text">
-          <span>QUANT · FOUNDATION SKELETON</span>
-          <h2>量化交易工作区</h2>
-          <p>策略研究、回测、风控与实盘运行总览。当前阶段只展示已建立的骨架结构，不提供具体量化业务。</p>
-        </div>
-      </header>
-
-      <nav className="quant-tabs" aria-label="量化交易内部工作区">
-        {WORKSPACES.map((ws) => {
-          const Icon = ws.icon;
-          const selected = active === ws.key;
-          return (
-            <button
-              type="button"
-              key={ws.key}
-              className={selected ? "quant-tab active" : "quant-tab"}
-              aria-current={selected ? "page" : undefined}
-              onClick={() => setActive(ws.key)}
-            >
-              <Icon weight={selected ? "duotone" : "regular"} />
-              {ws.label}
-            </button>
-          );
-        })}
-      </nav>
-
-      <div className="quant-panel-area">
-        {active === "overview" && (
-          <OverviewWorkspace
-            overview={overview}
-            state={state}
-            error={error}
-            load={load}
-            refreshing={refreshing}
-          />
-        )}
-        {active !== "overview" && (
-          <SkeletonWorkspace config={SKELETON_WORKSPACES[active]} />
-        )}
-      </div>
-    </section>
+    <QuantPageScaffold pageClass="quant-overview-page" title="量化总览">
+      <OverviewBody
+        overview={overview}
+        state={state}
+        error={error}
+        load={load}
+        refreshing={refreshing}
+      />
+    </QuantPageScaffold>
   );
 }
