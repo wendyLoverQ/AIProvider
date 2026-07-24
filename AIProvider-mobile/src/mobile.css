@@ -45,8 +45,8 @@ button { -webkit-tap-highlight-color: transparent; }
 .mobile-bottom-nav span { width: 100%; overflow: hidden; font-size: 8px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Existing business workspaces retain one implementation; these rules only adapt their layout. */
-.mobile-page-content :where(.favorite-library, .cloud-monitor, .remote-codex-shell, .remote-codex-access, .ui-control-page, .file-transfer-page) { width: 100%; max-width: none; min-width: 0; margin: 0; }
-.mobile-page-content :where(.favorite-library, .cloud-monitor, .remote-codex-shell, .remote-codex-access, .ui-control-page, .file-transfer-page) button { min-height: 38px; }
+.mobile-page-content :where(.favorite-library, .cloud-monitor, .remote-codex-shell, .ui-control-page, .file-transfer-page) { width: 100%; max-width: none; min-width: 0; margin: 0; }
+.mobile-page-content :where(.favorite-library, .cloud-monitor, .remote-codex-shell, .ui-control-page, .file-transfer-page) button { min-height: 38px; }
 .favorite-library { padding: 0 !important; }
 .favorite-library-head, .favorite-toolbar { align-items: stretch !important; flex-direction: column !important; }
 .favorite-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 9px !important; }

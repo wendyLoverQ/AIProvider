@@ -18,7 +18,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -37,7 +36,7 @@ import java.util.concurrent.TimeUnit;
 
 @Service
 public class RemoteCodexService {
-    private final RemoteCodexRepository repository; private final ObjectMapper json; private final String command,workingDirectory,accessToken;
+    private final RemoteCodexRepository repository; private final ObjectMapper json; private final String command,workingDirectory;
     private final ExecutorService turns=Executors.newCachedThreadPool(); private final ExecutorService loginWorker=Executors.newSingleThreadExecutor(); private final ExecutorService quotaWorker=Executors.newSingleThreadExecutor();
     private final Map<String,LiveTurn> liveTurns=new ConcurrentHashMap<String,LiveTurn>();
     private final Map<String,CopyOnWriteArrayList<SseEmitter>> streams=new ConcurrentHashMap<String,CopyOnWriteArrayList<SseEmitter>>();
@@ -46,18 +45,12 @@ public class RemoteCodexService {
 
     public RemoteCodexService(RemoteCodexRepository repository,ObjectMapper json,
         @Value("${remote-codex.command:codex}") String command,
-        @Value("${remote-codex.working-directory:}") String workingDirectory,
-        @Value("${remote-codex.access-token:}") String accessToken) {
-        this.repository=repository;this.json=json;this.command=command;this.workingDirectory=workingDirectory;this.accessToken=accessToken;
+        @Value("${remote-codex.working-directory:}") String workingDirectory) {
+        this.repository=repository;this.json=json;this.command=command;this.workingDirectory=workingDirectory;
     }
 
     @PostConstruct public void recoverInterruptedTurns(){repository.recoverInterrupted(LocalDateTime.now());}
 
-    public void authorize(String supplied) {
-        if(accessToken==null||accessToken.length()<16)throw new RemoteCodexException("远程 Codex 访问密钥尚未配置");
-        byte[] expected=accessToken.getBytes(StandardCharsets.UTF_8),actual=(supplied==null?"":supplied).getBytes(StandardCharsets.UTF_8);
-        if(!MessageDigest.isEqual(expected,actual))throw new SecurityException("远程 Codex 访问密钥不正确");
-    }
     public Map<String,Object> status() {
         if(Duration.between(authCheckedAt,Instant.now()).getSeconds()>=10){loggedIn=checkLogin();authCheckedAt=Instant.now();}
         Map<String,Object> value=new LinkedHashMap<String,Object>();value.put("available",Files.isExecutable(Paths.get(command))||"codex".equals(command));

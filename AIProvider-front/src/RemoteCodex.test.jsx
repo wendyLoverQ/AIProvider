@@ -9,18 +9,23 @@ const status = { loggedIn: true, loginState: "IDLE", workingDirectory: "/home/ub
 const conversation = { id: "conversation-1", title: "新对话", status: "READY", messages: [] };
 const quota = { rateLimits: { planType: "plus", primary: { usedPercent: 25, windowDurationMins: 10080, resetsAt: 1784981515 } } };
 
-afterEach(() => { cleanup(); sessionStorage.clear(); delete Element.prototype.scrollIntoView; vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); delete Element.prototype.scrollIntoView; vi.restoreAllMocks(); });
 
 describe("RemoteCodex", () => {
-  it("requires the protected access token before loading conversations", () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch");
+  it("loads conversations without an access token", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((url) => {
+      if (url === "/api/remote-codex/status") return ok({ ...status, loggedIn: false });
+      if (url === "/api/remote-codex/conversations") return ok([]);
+      throw new Error(`unexpected request: ${url}`);
+    });
     render(<RemoteCodex />);
-    expect(screen.getByRole("heading", { name: "连接远程 Codex" })).toBeTruthy();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await screen.findByText("Codex 未登录")).toBeTruthy();
+    expect(screen.queryByText("访问密钥")).toBeNull();
+    expect(fetchMock.mock.calls.every(([, options]) =>
+      !Object.hasOwn(options?.headers || {}, "X-Remote-Codex-Token"))).toBe(true);
   });
 
   it("loads, creates and sends a basic remote conversation", async () => {
-    sessionStorage.setItem("remoteCodexToken", "a-secure-remote-token");
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((url, options = {}) => {
       if (url === "/api/remote-codex/status") return ok(status);
       if (url === "/api/remote-codex/quota") return ok(quota);
@@ -47,7 +52,6 @@ describe("RemoteCodex", () => {
   });
 
   it("keeps Shift+Enter as a newline and scrolls new messages into view", async () => {
-    sessionStorage.setItem("remoteCodexToken", "a-secure-remote-token");
     const scrollMock = vi.fn();
     Element.prototype.scrollIntoView = scrollMock;
     const detail = { ...conversation, messages: [{ id: 1, role: "assistant", content: "已完成", createdAt: "2026-07-18T20:00:00" }] };
@@ -69,7 +73,6 @@ describe("RemoteCodex", () => {
   });
 
   it("opens the OpenAI device page and highlights the generated code", async () => {
-    sessionStorage.setItem("remoteCodexToken", "a-secure-remote-token");
     const openMock = vi.spyOn(window, "open").mockReturnValue({});
     vi.spyOn(globalThis, "fetch").mockImplementation((url, options = {}) => {
       if (url === "/api/remote-codex/status") return ok({ ...status, loggedIn: false, loginState: "IDLE", loginOutput: "" });

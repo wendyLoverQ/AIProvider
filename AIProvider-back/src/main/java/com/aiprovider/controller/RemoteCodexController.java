@@ -14,16 +14,15 @@ import java.util.Map;
 @RequestMapping("/api/remote-codex")
 public class RemoteCodexController {
     private final RemoteCodexService service; public RemoteCodexController(RemoteCodexService service){this.service=service;}
-    private void authorize(String token){service.authorize(token);}
-    @GetMapping("/status") public Result<Map<String,Object>> status(@RequestHeader(value="X-Remote-Codex-Token",required=false) String token){authorize(token);return Result.success(service.status());}
-    @PostMapping("/login") public Result<Map<String,Object>> login(@RequestHeader("X-Remote-Codex-Token") String token){authorize(token);return Result.success(service.startLogin());}
-    @GetMapping("/quota") public Result<Map<String,Object>> quota(@RequestHeader("X-Remote-Codex-Token") String token){authorize(token);return Result.success(service.quota());}
-    @GetMapping("/models") public Result<Object> models(@RequestHeader("X-Remote-Codex-Token") String token){authorize(token);return Result.success(service.models());}
-    @GetMapping("/conversations") public Result<List<Map<String,Object>>> list(@RequestHeader("X-Remote-Codex-Token") String token){authorize(token);return Result.success(service.list());}
-    @PostMapping("/conversations") public Result<Map<String,Object>> create(@RequestHeader("X-Remote-Codex-Token") String token){authorize(token);return Result.success(service.create());}
-    @GetMapping("/conversations/{id}") public Result<Map<String,Object>> get(@RequestHeader("X-Remote-Codex-Token") String token,@PathVariable String id){authorize(token);return Result.success(service.conversation(id));}
-    @PostMapping("/conversations/{id}/messages") public Result<Map<String,Object>> send(@RequestHeader("X-Remote-Codex-Token") String token,@PathVariable String id,@RequestBody Map<String,String> body){authorize(token);return Result.success(service.send(id,body.get("content"),body.get("model")));}
-    @PostMapping("/conversations/{id}/steer") public Result<Map<String,Object>> steer(@RequestHeader("X-Remote-Codex-Token") String token,@PathVariable String id,@RequestBody Map<String,String> body){authorize(token);return Result.success(service.steer(id,body.get("content")));}
-    @PostMapping("/conversations/{id}/interrupt") public Result<Map<String,Object>> interrupt(@RequestHeader("X-Remote-Codex-Token") String token,@PathVariable String id){authorize(token);return Result.success(service.interrupt(id));}
-    @GetMapping(value="/conversations/{id}/events",produces=MediaType.TEXT_EVENT_STREAM_VALUE) public ResponseEntity<SseEmitter> events(@RequestHeader("X-Remote-Codex-Token") String token,@PathVariable String id){authorize(token);return ResponseEntity.ok().header("X-Accel-Buffering","no").header("Cache-Control","no-cache").body(service.subscribe(id));}
+    @GetMapping("/status") public Result<Map<String,Object>> status(){return Result.success(service.status());}
+    @PostMapping("/login") public Result<Map<String,Object>> login(){return Result.success(service.startLogin());}
+    @GetMapping("/quota") public Result<Map<String,Object>> quota(){return Result.success(service.quota());}
+    @GetMapping("/models") public Result<Object> models(){return Result.success(service.models());}
+    @GetMapping("/conversations") public Result<List<Map<String,Object>>> list(){return Result.success(service.list());}
+    @PostMapping("/conversations") public Result<Map<String,Object>> create(){return Result.success(service.create());}
+    @GetMapping("/conversations/{id}") public Result<Map<String,Object>> get(@PathVariable String id){return Result.success(service.conversation(id));}
+    @PostMapping("/conversations/{id}/messages") public Result<Map<String,Object>> send(@PathVariable String id,@RequestBody Map<String,String> body){return Result.success(service.send(id,body.get("content"),body.get("model")));}
+    @PostMapping("/conversations/{id}/steer") public Result<Map<String,Object>> steer(@PathVariable String id,@RequestBody Map<String,String> body){return Result.success(service.steer(id,body.get("content")));}
+    @PostMapping("/conversations/{id}/interrupt") public Result<Map<String,Object>> interrupt(@PathVariable String id){return Result.success(service.interrupt(id));}
+    @GetMapping(value="/conversations/{id}/events",produces=MediaType.TEXT_EVENT_STREAM_VALUE) public ResponseEntity<SseEmitter> events(@PathVariable String id){return ResponseEntity.ok().header("X-Accel-Buffering","no").header("Cache-Control","no-cache").body(service.subscribe(id));}
 }

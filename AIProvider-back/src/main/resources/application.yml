@@ -102,7 +102,6 @@ twitter:
 remote-codex:
   command: ${REMOTE_CODEX_COMMAND:codex}
   working-directory: ${REMOTE_CODEX_WORKING_DIRECTORY:}
-  access-token: ${REMOTE_CODEX_ACCESS_TOKEN:}
 
 content-ai:
   secret-encryption-key: ${CONTENT_AI_SECRET_ENCRYPTION_KEY:}

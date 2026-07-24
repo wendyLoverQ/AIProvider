@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowClockwise,
   ChatCircleDots,
-  LockKey,
   PaperPlaneTilt,
   Plus,
   SignIn,
@@ -16,12 +15,11 @@ import "./RemoteCodexQuota.css";
 
 const API = "/api/remote-codex";
 
-async function request(path, token, options = {}) {
+async function request(path, options = {}) {
   const response = await fetch(`${API}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      "X-Remote-Codex-Token": token,
       ...(options.headers || {}),
     },
   });
@@ -42,10 +40,6 @@ const resetTime = (value) =>
 const DEVICE_LOGIN_URL = "https://auth.openai.com/codex/device";
 
 export default function RemoteCodex() {
-  const [token, setToken] = useState(
-    () => sessionStorage.getItem("remoteCodexToken") || "",
-  );
-  const [draftToken, setDraftToken] = useState("");
   const [status, setStatus] = useState(null);
   const [conversations, setConversations] = useState([]);
   const [selectedId, setSelectedId] = useState("");
@@ -68,11 +62,10 @@ export default function RemoteCodex() {
 
   const load = useCallback(
     async (quiet = false) => {
-      if (!token) return;
       try {
         const [nextStatus, nextList] = await Promise.all([
-          request("/status", token),
-          request("/conversations", token),
+          request("/status"),
+          request("/conversations"),
         ]);
         setStatus(nextStatus);
         setConversations(nextList || []);
@@ -80,21 +73,21 @@ export default function RemoteCodex() {
         const target = selectedId || nextList?.[0]?.id;
         if (target) {
           setSelectedId(target);
-          setConversation(await request(`/conversations/${target}`, token));
+          setConversation(await request(`/conversations/${target}`));
         }
       } catch (exception) {
         if (!quiet) setError(exception.message);
       }
     },
-    [selectedId, token],
+    [selectedId],
   );
 
   useEffect(() => {
     load();
   }, [load]);
   useEffect(() => {
-    if (!token || !status?.loggedIn) return;
-    request("/models", token)
+    if (!status?.loggedIn) return;
+    request("/models")
       .then((value) => {
         const list = value?.data || [];
         setModels(list);
@@ -107,14 +100,13 @@ export default function RemoteCodex() {
         );
       })
       .catch((exception) => setError(exception.message));
-  }, [status?.loggedIn, token]);
+  }, [status?.loggedIn]);
   useEffect(() => {
-    if (!token || !selectedId) return undefined;
+    if (!selectedId) return undefined;
     const controller = new AbortController();
     Promise.resolve()
       .then(() =>
         fetch(`${API}/conversations/${selectedId}/events`, {
-          headers: { "X-Remote-Codex-Token": token },
           signal: controller.signal,
         }),
       )
@@ -144,17 +136,16 @@ export default function RemoteCodex() {
         if (exception.name !== "AbortError") setError(exception.message);
       });
     return () => controller.abort();
-  }, [selectedId, token]);
+  }, [selectedId]);
   useEffect(() => {
     if (
-      !token ||
       (!conversation?.status?.includes("RUNNING") &&
         status?.loginState !== "RUNNING")
     )
       return undefined;
     const timer = setInterval(() => load(true), 1500);
     return () => clearInterval(timer);
-  }, [conversation?.status, load, status?.loginState, token]);
+  }, [conversation?.status, load, status?.loginState]);
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView?.({
       behavior: "smooth",
@@ -162,15 +153,15 @@ export default function RemoteCodex() {
     });
   }, [conversation?.id, conversation?.status, messageCount]);
   const loadQuota = useCallback(async () => {
-    if (!token || !status?.loggedIn) return;
+    if (!status?.loggedIn) return;
     try {
-      setQuota(await request("/quota", token));
+      setQuota(await request("/quota"));
       setQuotaError("");
     } catch (exception) {
       setQuota(null);
       setQuotaError(exception.message);
     }
-  }, [status?.loggedIn, token]);
+  }, [status?.loggedIn]);
   useEffect(() => {
     if (!status?.loggedIn) return undefined;
     loadQuota();
@@ -178,28 +169,10 @@ export default function RemoteCodex() {
     return () => clearInterval(timer);
   }, [loadQuota, status?.loggedIn]);
 
-  const connect = async (event) => {
-    event.preventDefault();
-    const value = draftToken.trim();
-    if (!value) return;
-    sessionStorage.setItem("remoteCodexToken", value);
-    setToken(value);
-    setDraftToken("");
-  };
-  const disconnect = () => {
-    sessionStorage.removeItem("remoteCodexToken");
-    setToken("");
-    setStatus(null);
-    setConversations([]);
-    setConversation(null);
-    setQuota(null);
-    setQuotaError("");
-    setError("");
-  };
   const create = async () => {
     setBusy(true);
     try {
-      const next = await request("/conversations", token, { method: "POST" });
+      const next = await request("/conversations", { method: "POST" });
       setSelectedId(next.id);
       setConversation(next);
       await load(true);
@@ -212,7 +185,7 @@ export default function RemoteCodex() {
   const select = async (id) => {
     setSelectedId(id);
     try {
-      setConversation(await request(`/conversations/${id}`, token));
+      setConversation(await request(`/conversations/${id}`));
       setError("");
     } catch (exception) {
       setError(exception.message);
@@ -226,7 +199,7 @@ export default function RemoteCodex() {
     );
     setBusy(true);
     try {
-      setStatus(await request("/login", token, { method: "POST" }));
+      setStatus(await request("/login", { method: "POST" }));
       setError(
         authWindow
           ? ""
@@ -247,7 +220,6 @@ export default function RemoteCodex() {
       const running = conversation.status === "RUNNING";
       const next = await request(
         `/conversations/${conversation.id}/${running ? "steer" : "messages"}`,
-        token,
         { method: "POST", body: JSON.stringify({ content, model }) },
       );
       setPrompt("");
@@ -264,7 +236,7 @@ export default function RemoteCodex() {
     setBusy(true);
     try {
       setConversation(
-        await request(`/conversations/${conversation.id}/interrupt`, token, {
+        await request(`/conversations/${conversation.id}/interrupt`, {
           method: "POST",
         }),
       );
@@ -289,31 +261,6 @@ export default function RemoteCodex() {
     () => conversations.find((item) => item.id === selectedId),
     [conversations, selectedId],
   );
-
-  if (!token)
-    return (
-      <section className="remote-codex-access">
-        <form onSubmit={connect}>
-          <LockKey />
-          <span>REMOTE CODEX · SECURE ACCESS</span>
-          <h2>连接远程 Codex</h2>
-          <p>输入远程 Codex 访问密钥后，才能查看和开启服务器对话。</p>
-          <label>
-            <span>访问密钥</span>
-            <input
-              type="password"
-              value={draftToken}
-              onChange={(event) => setDraftToken(event.target.value)}
-              autoComplete="current-password"
-            />
-          </label>
-          <button type="submit" disabled={!draftToken.trim()}>
-            <SignIn />
-            进入对话
-          </button>
-        </form>
-      </section>
-    );
 
   return (
     <section className="remote-codex-shell">
@@ -367,9 +314,6 @@ export default function RemoteCodex() {
           >
             <ArrowClockwise />
             刷新
-          </button>
-          <button type="button" onClick={disconnect}>
-            退出访问
           </button>
         </div>
       </header>
