@@ -39,7 +39,7 @@ describe("UI release gate", () => {
   it("keeps every primary workspace on semantic theme tokens", () => {
     const theme = read("SemanticTheme.css");
     const tokens = read("uiTheme.js");
-    ["favorite-library", "video-editor-shell", "foundry-workbench", "system-settings-shell", "file-transfer-page", "twitter-publisher", "content-operations-center", "platform-account-center", "asr-records-page", "prompt-scheme-list", "maid-panel", "universe-toolbar"].forEach((root) => {
+    ["favorite-library", "video-editor-shell", "foundry-workbench", "system-settings-shell", "file-transfer-page", "twitter-publisher", "content-operations-center", "platform-account-center", "asr-records-page", "prompt-scheme-list", "maid-panel", "universe-toolbar", "quant-workbench"].forEach((root) => {
       expect(theme, `${root} 未接入全局语义主题`).toContain(root);
     });
     const copy = read("UiControl.jsx");
@@ -231,6 +231,26 @@ describe("UI release gate", () => {
     expect(remoteCodex).toContain('aria-label="新建远程 Codex 对话"');
     expect(remoteCodex).toMatch(/aria-label=\{[\s\S]*"插话"\s*:\s*"发送消息"[\s\S]*\}/);
     expect(remoteCodex).not.toMatch(/<div[^>]+onClick=/);
+  });
+
+  it("keeps Quant workbench reachable, semantic, native, and horizontally contained", () => {
+    const app = read("App.jsx");
+    const page = read("QuantWorkbench.jsx");
+    const css = read("QuantWorkbench.css");
+    expect(app).toContain('{ key: "quant"');
+    expect(app).toContain('quant: "/quant"');
+    expect(app).toContain('"/quant": "quant"');
+    expect(app).toContain("<QuantWorkbench />");
+    expect(app).toContain('quant: "策略研究、回测、风控与实盘运行总览"');
+    expect(page).toContain("/api/quant/overview");
+    expect(page).toContain("type=\"button\"");
+    expect(page).not.toMatch(/<div[^>]+onClick=/);
+    expect(css).toContain("var(--bg-surface)");
+    expect(css).toContain("var(--text-primary)");
+    expect(css).toContain(":focus-visible");
+    expect(css).toMatch(/\.quant-workbench\{[^}]*min-width:0/);
+    expect(css).toMatch(/@media \(max-width:\s*720px\)/);
+    expect(read("SemanticTheme.css")).toContain(".quant-workbench");
   });
 
   it("keeps content operation dialogs inside the desktop viewport", () => {
