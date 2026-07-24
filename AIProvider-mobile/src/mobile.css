@@ -54,6 +54,17 @@ button { -webkit-tap-highlight-color: transparent; }
 .favorite-card-image { aspect-ratio: 1 / 1 !important; height: auto !important; }
 .favorite-library-actions, .favorite-filter-tabs { width: 100%; overflow-x: auto; }
 .favorite-library-actions > *, .favorite-filter-tabs > * { flex: 0 0 auto; }
+.mobile-page-content .media-viewer { z-index: 3000; place-items: stretch; padding: max(48px, env(safe-area-inset-top)) 0 max(0px, env(safe-area-inset-bottom)); }
+.mobile-page-content .media-viewer-panel { width: 100%; height: 100%; max-height: none; border-right: 0; border-left: 0; border-radius: 0; }
+.mobile-page-content .media-viewer-header { position: relative; z-index: 4; grid-template-columns: minmax(0, 1fr) auto; min-height: 52px; padding: 7px 10px; }
+.mobile-page-content .media-viewer-title { min-width: 0; max-width: none; justify-content: flex-start; }
+.mobile-page-content .media-viewer-title strong { min-width: 0; font-size: 11px; }
+.mobile-page-content .media-viewer-title span { font-size: 9px; }
+.mobile-page-content .media-viewer-actions { flex: none; gap: 7px; }
+.mobile-page-content .media-viewer-actions button,
+.mobile-page-content .media-viewer-actions a { width: 38px !important; height: 38px !important; border-radius: 11px; }
+.mobile-page-content .media-viewer-actions button[aria-label="关闭预览"] { border-color: var(--border-focus); background: var(--bg-selected); color: var(--text-primary); }
+.mobile-page-content .media-viewer-nav { width: 42px; height: 54px; }
 
 .cloud-monitor { padding: 0 !important; }
 .cloud-toolbar, .cloud-toolbar-actions { align-items: stretch !important; flex-direction: column !important; }
@@ -126,4 +137,14 @@ button { -webkit-tap-highlight-color: transparent; }
   .mobile-workspace { max-width: 920px; margin: 0 auto; padding-right: 20px; padding-left: 20px; }
   .mobile-drawer { right: 16px; left: auto; width: 420px; border: 1px solid var(--border-normal); border-top: 0; border-radius: 0 0 16px 16px; }
   .favorite-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+}
+
+/* iPhone 15 Pro Max portrait: 430 × 932 CSS px. */
+@media (max-width: 431px) {
+  .mobile-page-content .media-viewer {
+    padding-top: max(59px, env(safe-area-inset-top));
+    padding-bottom: max(34px, env(safe-area-inset-bottom));
+  }
+  .mobile-page-content .media-viewer-header { min-height: 54px; }
+  .mobile-page-content .media-viewer-title strong { max-width: 210px; }
 }

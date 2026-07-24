@@ -172,7 +172,28 @@ export default function FileTransfer() {
   };
   const copyText = async () => {
     try {
-      await navigator.clipboard.writeText(transferText);
+      let copied = false;
+      if (navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(transferText);
+          copied = true;
+        } catch {
+          copied = false;
+        }
+      }
+      if (!copied) {
+        const textarea = document.createElement("textarea");
+        textarea.value = transferText;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "fixed";
+        textarea.style.inset = "0 auto auto -9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        textarea.setSelectionRange(0, textarea.value.length);
+        copied = document.execCommand("copy");
+        textarea.remove();
+        if (!copied) throw new Error("当前 APP 未开放剪贴板权限");
+      }
       setNotice("文本已复制");
       setError("");
     } catch (exception) {

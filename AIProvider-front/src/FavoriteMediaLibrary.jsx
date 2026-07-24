@@ -316,7 +316,10 @@ export default function FavoriteMediaLibrary() {
         onClose={closePreview}
         onNavigate={navigatePreview}
         onContextMenu={(event) => { event.preventDefault(); setMenu({ item, x: Math.min(event.clientX, window.innerWidth - 210), y: Math.min(event.clientY, window.innerHeight - 150) }); }}
-        actions={<button type="button" aria-label="应用为壁纸" title="应用为壁纸" onClick={() => openWallpaper(item)}><Desktop /></button>}
+        actions={<>
+          <a className="favorite-viewer-download" href={item.contentUrl} download={mediaFileName(item)} aria-label="保存到手机" title="保存到手机"><DownloadSimple /></a>
+          <button type="button" aria-label="应用为壁纸" title="应用为壁纸" onClick={() => openWallpaper(item)}><Desktop /></button>
+        </>}
       />;
     })()}
     {!!pendingDropFiles.length && <div className="favorite-confirm" role="dialog" aria-modal="true" aria-label="确认拖放上传"><div><UploadSimple /><h3>上传这些媒体？</h3><p>即将把 {pendingDropFiles.length} 个图片或视频复制到服务器“我的最爱”。</p><span className="favorite-drop-files">{pendingDropFiles.slice(0, 4).map((file) => file.name).join("、")}{pendingDropFiles.length > 4 ? ` 等 ${pendingDropFiles.length} 个文件` : ""}</span><footer><button type="button" onClick={() => setPendingDropFiles([])}>取消</button><button type="button" className="primary" onClick={() => { const files = pendingDropFiles; setPendingDropFiles([]); uploadFiles(files); }}>确认上传</button></footer></div></div>}
