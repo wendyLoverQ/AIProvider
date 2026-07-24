@@ -8,6 +8,7 @@
 2. 当前主要模块职责：
    - `AIProvider-front`：React/Vite Web 工作区、界面和临时交互状态。
    - `AIProvider-back`：Spring Boot/MyBatis/Flyway 后端，负责业务编排、数据库状态、权限校验和外部服务接入。
+   - `AIProvider-quant`：Quant 领域 Maven 大模块，作为普通 jar 被 `AIProvider-back` 依赖，仍随同一个 Spring Boot 进程和同一个后端 Jar 部署；不独立运行、不创建第二个服务、不引入 Web/数据库/MyBatis/Flyway/交易所 SDK/Spring Boot 插件。
    - `ComfyUIAgent`：本机 Bridge，负责 ComfyUI 生命周期、本机文件、生成任务和其他本地能力。
    - `CCXTGateway`：行情与交易所适配能力。
    - `TwitterChromeExtension`：浏览器侧 Twitter/X 发布适配能力。
@@ -15,6 +16,7 @@
 3. `AIMaid` 的 Electron、C# CoreHost、固定主题和旧 WPF 迁移规则不适用于本项目。
 4. 当前代码、最新 `master` 提交和真实运行日志高于历史文档；文档与代码不一致时，以当前事实为准，并在同次任务中修正文档。
 5. 不把项目当 Demo，不写一次性补丁，不为了“先跑起来”破坏正式结构。
+6. 量化交易在 `AIProvider-front` 中保持单一一级导航入口 `/quant`；策略、回测与参数实验、风控中心、账户与仓位、订单与成交、运行记录属于 Quant 页面内部二级工作区，由 `QuantWorkbench` 以本地状态切换、路径始终为 `/quant`，不得拆成多个全局一级导航项或独立前端项目，不得新增 `/quant/*` 路由或引入 React Router。
 
 ## 二、核心原则
 

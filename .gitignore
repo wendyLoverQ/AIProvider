@@ -9,6 +9,7 @@ server-configs/mihomo-*.yaml
 server-configs/ss-config.json
 server-configs/*mysql_setup.sql
 AIProvider-back/target/
+AIProvider-quant/target/
 AIProvider-front/dist/
 AIProvider-front/dist-release-*/
 AIProvider-front/dist-*.tar.gz

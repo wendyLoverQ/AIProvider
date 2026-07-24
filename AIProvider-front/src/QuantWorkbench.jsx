@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ArrowsClockwise,
+  ChartBar,
   ChartLineUp,
   Database,
   GearSix,
   Lightning,
+  ListChecks,
   LockKey,
+  Scroll,
+  ShieldCheck,
   Sparkle,
+  Stack,
+  Wallet,
   Warning,
 } from "@phosphor-icons/react";
 import { readJsonResponse } from "./apiResponse";
@@ -31,14 +37,55 @@ const MODULE_STATUS_LABELS = { SKELETON: "骨架已建立" };
 const GROUP_ORDER = ["research", "trading", "operations"];
 const GROUP_LABELS = { research: "研究链路", trading: "交易链路", operations: "运行管理" };
 
-const FUTURE_WORKSPACES = [
-  { key: "strategy-management", label: "策略管理" },
-  { key: "backtest-experiments", label: "回测与参数实验" },
-  { key: "portfolio", label: "账户与仓位" },
-  { key: "orders-fills", label: "订单与成交" },
-  { key: "risk-center", label: "风控中心" },
-  { key: "run-logs", label: "运行记录" },
+const WORKSPACES = [
+  { key: "overview", label: "总览", icon: ChartBar },
+  { key: "strategies", label: "策略管理", icon: Stack },
+  { key: "backtests", label: "回测与参数实验", icon: ChartLineUp },
+  { key: "risk", label: "风控中心", icon: ShieldCheck },
+  { key: "portfolio", label: "账户与仓位", icon: Wallet },
+  { key: "orders", label: "订单与成交", icon: ListChecks },
+  { key: "logs", label: "运行记录", icon: Scroll },
 ];
+
+// 非总览工作区只展示真实未接入状态，不提供任何功能入口、假开关或假数据。
+const SKELETON_WORKSPACES = {
+  strategies: {
+    title: "策略管理",
+    intro: "策略定义、参数版本、启停状态、信号记录",
+    items: ["策略定义", "参数版本", "启停状态", "信号记录"],
+    note: "尚未接入具体业务",
+  },
+  backtests: {
+    title: "回测与参数实验",
+    intro: "历史数据选择、回测任务、手续费与滑点、参数实验、结果报告",
+    items: ["历史数据选择", "回测任务", "手续费与滑点", "参数实验", "结果报告"],
+    note: "尚未接入具体业务 · 不展示收益、曲线或胜率",
+  },
+  risk: {
+    title: "风控中心",
+    intro: "仓位限制、杠杆限制、单笔风险、日亏熔断、连续亏损熔断、紧急停止",
+    items: ["仓位限制", "杠杆限制", "单笔风险", "日亏熔断", "连续亏损熔断", "紧急停止"],
+    note: "尚未接入具体业务 · 不提供开关或误操作按钮",
+  },
+  portfolio: {
+    title: "账户与仓位",
+    intro: "账户余额、可用保证金、当前仓位、已实现盈亏、未实现盈亏、资金费率",
+    items: ["账户余额", "可用保证金", "当前仓位", "已实现盈亏", "未实现盈亏", "资金费率"],
+    note: "尚未接入 · 不展示余额或盈亏数字",
+  },
+  orders: {
+    title: "订单与成交",
+    intro: "活跃订单、历史订单、成交记录、保护单、执行异常",
+    items: ["活跃订单", "历史订单", "成交记录", "保护单", "执行异常"],
+    note: "尚未接入具体业务 · 不展示订单",
+  },
+  logs: {
+    title: "运行记录",
+    intro: "策略运行日志、风控决策、对账记录、系统异常、发布版本",
+    items: ["策略运行日志", "风控决策", "对账记录", "系统异常", "发布版本"],
+    note: "尚未接入具体业务 · 不生成日志",
+  },
+};
 
 function TopStatusCard({ icon: Icon, label, value, tone }) {
   return (
@@ -77,16 +124,101 @@ function ModuleGroup({ group, modules }) {
   );
 }
 
-function FutureWorkspaceCard({ item }) {
+function OverviewWorkspace({ overview, state, error, load, refreshing }) {
+  if (state === "loading") {
+    return (
+      <div className="quant-loading" role="status" aria-live="polite">
+        <div className="quant-loader-dot" /><div className="quant-loader-dot" /><div className="quant-loader-dot" />
+        <span>正在读取骨架总览…</span>
+      </div>
+    );
+  }
+  if (state === "error") {
+    return (
+      <div className="quant-error" role="alert">
+        <Warning weight="fill" />
+        <div>
+          <strong>骨架总览加载失败</strong>
+          <span>{error}</span>
+        </div>
+        <button type="button" className="quant-error-retry" onClick={load}>
+          <ArrowsClockwise />重新加载
+        </button>
+      </div>
+    );
+  }
+  const groupedModules = (overview?.modules || []).reduce((groups, module) => {
+    const group = module.group || "operations";
+    if (!groups[group]) groups[group] = [];
+    groups[group].push(module);
+    return groups;
+  }, {});
+  const phaseLabel = overview ? (PHASE_LABELS[overview.phase] || overview.phase || "未接入") : "—";
+  const liveTradingLabel = overview ? (overview.liveTradingEnabled ? "已启用" : "未启用") : "—";
+  const exchangeLabel = overview ? (EXCHANGE_LABELS[overview.exchangeState] || overview.exchangeState || "未配置") : "—";
+  const storageLabel = overview ? (STORAGE_LABELS[overview.storageState] || overview.storageState || "未创建") : "—";
+
   return (
-    <article className="quant-future-card">
-      <span className="quant-future-label">{item.label}</span>
-      <small>尚未接入具体业务</small>
-    </article>
+    <div className="quant-overview">
+      <div className="quant-workspace-head">
+        <div>
+          <span className="eyebrow">QUANT · FOUNDATION SKELETON</span>
+          <h3>总览</h3>
+          <small>当前阶段只展示已建立的骨架结构，不提供具体量化业务</small>
+        </div>
+        <button type="button" className="quant-refresh" onClick={load} disabled={refreshing}>
+          <ArrowsClockwise className={refreshing ? "spin" : ""} />
+          {refreshing ? "加载中" : "重新加载"}
+        </button>
+      </div>
+
+      <section className="quant-status-grid" aria-label="骨架总览状态">
+        <TopStatusCard icon={Sparkle} label="当前阶段" value={phaseLabel} tone="primary" />
+        <TopStatusCard icon={LockKey} label="实盘交易" value={liveTradingLabel} tone="warning" />
+        <TopStatusCard icon={Lightning} label="交易所" value={exchangeLabel} tone="warning" />
+        <TopStatusCard icon={Database} label="数据存储" value={storageLabel} tone="warning" />
+      </section>
+
+      <section className="quant-modules" aria-label="模块地图">
+        <header className="quant-section-head">
+          <h4><ChartLineUp weight="duotone" />模块地图</h4>
+          <small>仅展示当前已建立的骨架结构，未接入具体业务</small>
+        </header>
+        <div className="quant-module-grid">
+          {GROUP_ORDER.map((group) => (
+            <ModuleGroup key={group} group={group} modules={groupedModules[group] || []} />
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SkeletonWorkspace({ config }) {
+  return (
+    <div className="quant-skeleton" aria-label={config.title}>
+      <div className="quant-workspace-head">
+        <div>
+          <span className="eyebrow">QUANT · 尚未接入</span>
+          <h3>{config.title}</h3>
+          <small>{config.intro}</small>
+        </div>
+      </div>
+      <section className="quant-cap-grid" aria-label={`${config.title}能力结构`}>
+        {config.items.map((item) => (
+          <article key={item} className="quant-cap-row">
+            <span className="quant-cap-name">{item}</span>
+            <span className="quant-cap-status">未接入</span>
+          </article>
+        ))}
+      </section>
+      <p className="quant-skeleton-note">{config.note}</p>
+    </div>
   );
 }
 
 export default function QuantWorkbench() {
+  const [active, setActive] = useState("overview");
   const [overview, setOverview] = useState(null);
   const [state, setState] = useState("loading");
   const [error, setError] = useState("");
@@ -110,18 +242,6 @@ export default function QuantWorkbench() {
 
   useEffect(() => { load(); }, [load]);
 
-  const groupedModules = (overview?.modules || []).reduce((groups, module) => {
-    const group = module.group || "operations";
-    if (!groups[group]) groups[group] = [];
-    groups[group].push(module);
-    return groups;
-  }, {});
-
-  const phaseLabel = overview ? (PHASE_LABELS[overview.phase] || overview.phase || "未接入") : "—";
-  const liveTradingLabel = overview ? (overview.liveTradingEnabled ? "已启用" : "未启用") : "—";
-  const exchangeLabel = overview ? (EXCHANGE_LABELS[overview.exchangeState] || overview.exchangeState || "未配置") : "—";
-  const storageLabel = overview ? (STORAGE_LABELS[overview.storageState] || overview.storageState || "未创建") : "—";
-
   return (
     <section className="quant-workbench" aria-label="量化交易工作区">
       <header className="quant-hero">
@@ -131,64 +251,41 @@ export default function QuantWorkbench() {
           <h2>量化交易工作区</h2>
           <p>策略研究、回测、风控与实盘运行总览。当前阶段只展示已建立的骨架结构，不提供具体量化业务。</p>
         </div>
-        <button type="button" className="quant-refresh" onClick={load} disabled={refreshing}>
-          <ArrowsClockwise className={refreshing ? "spin" : ""} />
-          {refreshing ? "加载中" : "重新加载"}
-        </button>
       </header>
 
-      {state === "loading" && (
-        <div className="quant-loading" role="status" aria-live="polite">
-          <div className="quant-loader-dot" /><div className="quant-loader-dot" /><div className="quant-loader-dot" />
-          <span>正在读取骨架总览…</span>
-        </div>
-      )}
+      <nav className="quant-tabs" aria-label="量化交易内部工作区">
+        {WORKSPACES.map((ws) => {
+          const Icon = ws.icon;
+          const selected = active === ws.key;
+          return (
+            <button
+              type="button"
+              key={ws.key}
+              className={selected ? "quant-tab active" : "quant-tab"}
+              aria-current={selected ? "page" : undefined}
+              onClick={() => setActive(ws.key)}
+            >
+              <Icon weight={selected ? "duotone" : "regular"} />
+              {ws.label}
+            </button>
+          );
+        })}
+      </nav>
 
-      {state === "error" && (
-        <div className="quant-error" role="alert">
-          <Warning weight="fill" />
-          <div>
-            <strong>骨架总览加载失败</strong>
-            <span>{error}</span>
-          </div>
-          <button type="button" className="quant-error-retry" onClick={load}>
-            <ArrowsClockwise />重新加载
-          </button>
-        </div>
-      )}
-
-      {state === "ready" && overview && (
-        <>
-          <section className="quant-status-grid" aria-label="骨架总览状态">
-            <TopStatusCard icon={Sparkle} label="当前阶段" value={phaseLabel} tone="primary" />
-            <TopStatusCard icon={LockKey} label="实盘交易" value={liveTradingLabel} tone="warning" />
-            <TopStatusCard icon={Lightning} label="交易所" value={exchangeLabel} tone="warning" />
-            <TopStatusCard icon={Database} label="数据存储" value={storageLabel} tone="warning" />
-          </section>
-
-          <section className="quant-modules" aria-label="模块地图">
-            <header className="quant-section-head">
-              <h3><ChartLineUp weight="duotone" />模块地图</h3>
-              <small>仅展示当前已建立的骨架结构，未接入具体业务</small>
-            </header>
-            <div className="quant-module-grid">
-              {GROUP_ORDER.map((group) => (
-                <ModuleGroup key={group} group={group} modules={groupedModules[group] || []} />
-              ))}
-            </div>
-          </section>
-
-          <section className="quant-future" aria-label="后续工作区">
-            <header className="quant-section-head">
-              <h3><GearSix weight="duotone" />后续工作区</h3>
-              <small>以下能力尚未接入具体业务，未提供任何功能入口</small>
-            </header>
-            <div className="quant-future-grid">
-              {FUTURE_WORKSPACES.map((item) => <FutureWorkspaceCard key={item.key} item={item} />)}
-            </div>
-          </section>
-        </>
-      )}
+      <div className="quant-panel-area">
+        {active === "overview" && (
+          <OverviewWorkspace
+            overview={overview}
+            state={state}
+            error={error}
+            load={load}
+            refreshing={refreshing}
+          />
+        )}
+        {active !== "overview" && (
+          <SkeletonWorkspace config={SKELETON_WORKSPACES[active]} />
+        )}
+      </div>
     </section>
   );
 }

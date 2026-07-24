@@ -242,7 +242,23 @@ describe("UI release gate", () => {
     expect(app).toContain('"/quant": "quant"');
     expect(app).toContain("<QuantWorkbench />");
     expect(app).toContain('quant: "策略研究、回测、风控与实盘运行总览"');
+    // 量化交易只保留单一一级入口，不得拆成多个全局导航项。
+    expect(app).not.toContain('key: "strategies"');
+    expect(app).not.toContain('key: "backtests"');
+    expect(app).not.toContain('key: "risk"');
+    expect(app).not.toContain('key: "portfolio"');
+    expect(app).not.toContain('key: "orders"');
+    expect(app).not.toContain('key: "logs"');
+    // 内部二级工作区：7 个，路径保持 /quant，不新增 /quant/* 路由。
+    expect(page).toContain("const WORKSPACES = [");
+    ["overview", "strategies", "backtests", "risk", "portfolio", "orders", "logs"].forEach((key) => {
+      expect(page, `缺少内部工作区 ${key}`).toContain(`key: "${key}"`);
+    });
+    expect(app).not.toMatch(/\/quant\/[a-z]/);
     expect(page).toContain("/api/quant/overview");
+    // 内部导航使用原生按钮并带有 aria-current。
+    expect(page).toContain('className={selected ? "quant-tab active" : "quant-tab"}');
+    expect(page).toContain('aria-current={selected ? "page" : undefined}');
     expect(page).toContain("type=\"button\"");
     expect(page).not.toMatch(/<div[^>]+onClick=/);
     expect(css).toContain("var(--bg-surface)");
