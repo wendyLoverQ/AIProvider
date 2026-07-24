@@ -14,6 +14,9 @@ AIProvider-front/dist-release-*/
 AIProvider-front/dist-*.tar.gz
 AIProvider-front/coverage/
 AIProvider-front/node_modules/
+AIProvider-mobile/dist/
+AIProvider-mobile/coverage/
+AIProvider-mobile/node_modules/
 AIProvider-front/ui-audit-*/
 AIProvider-front/unit09-layer-preview.png
 AIProvider-front/design-qa.md

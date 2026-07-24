@@ -15,6 +15,9 @@
   "frontendModule": "AIProvider-front",
   "frontendArtifact": "AIProvider-front/dist",
   "frontendPath": "/opt/aiprovider/frontend",
+  "mobileFrontendModule": "AIProvider-mobile",
+  "mobileFrontendArtifact": "AIProvider-mobile/dist",
+  "mobileFrontendPath": "/opt/aiprovider/mobile",
   "environmentFile": "/etc/aimaid/aimaid.env",
   "healthUrl": "http://127.0.0.1:8888/api/health",
   "publicBaseUrl": "http://35.78.120.126"
