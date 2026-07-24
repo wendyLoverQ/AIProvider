@@ -75,6 +75,7 @@ export default function FavoriteMediaLibrary() {
   const inputRef = useRef(null);
   const dragDepth = useRef(0);
   const uploadingRef = useRef(false);
+  const saveFilesRef = useRef(new Map());
   const [items, setItems] = useState([]);
   const [state, setState] = useState("loading");
   const [error, setError] = useState("");
@@ -88,6 +89,8 @@ export default function FavoriteMediaLibrary() {
   const [pendingDropFiles, setPendingDropFiles] = useState([]);
   const [previewIndex, setPreviewIndex] = useState(null);
   const [menu, setMenu] = useState(null);
+  const [savingId, setSavingId] = useState(null);
+  const [mobileSave, setMobileSave] = useState(null);
   const [deleteIds, setDeleteIds] = useState([]);
   const [wallpaper, setWallpaper] = useState({ open: false, item: null, monitors: [], selectedId: "", fitMode: "smart", loading: false, token: "" });
 
@@ -220,6 +223,95 @@ export default function FavoriteMediaLibrary() {
       setSelected(new Set()); setSelectionMode(false); setDeleteIds([]); setNotice(`已移除 ${result.data?.deleted || deleting.size} 项`);
     } catch (exception) { setError(`移除失败：${exception.message}`); }
   };
+  const prepareSaveFile = useCallback((item) => {
+    if (!item?.id) return Promise.reject(new Error("媒体记录无效"));
+    const cached = saveFilesRef.current.get(item.id);
+    if (cached) return cached;
+    const pending = Promise.resolve().then(() => fetch(item.contentUrl)).then(async (response) => {
+      if (!response.ok) throw new Error("无法从服务器读取原文件");
+      const blob = await response.blob();
+      return new File([blob], mediaFileName(item), {
+        type: blob.type || item.contentType || "application/octet-stream",
+        lastModified: Date.now(),
+      });
+    }).catch((exception) => {
+      saveFilesRef.current.delete(item.id);
+      throw exception;
+    });
+    saveFilesRef.current.set(item.id, pending);
+    return pending;
+  }, []);
+  const closeMobileSave = useCallback(() => {
+    setMobileSave((current) => {
+      if (current?.revokeUrl && current.url) URL.revokeObjectURL(current.url);
+      return null;
+    });
+  }, []);
+  useEffect(() => () => {
+    if (mobileSave?.revokeUrl && mobileSave.url) URL.revokeObjectURL(mobileSave.url);
+  }, [mobileSave]);
+  useEffect(() => {
+    const item = previewIndex === null ? null : filtered[previewIndex];
+    if (!item || isVideoItem(item)) return;
+    if (typeof navigator.share !== "function") return;
+    prepareSaveFile(item).catch(() => {});
+    return () => saveFilesRef.current.delete(item.id);
+  }, [filtered, prepareSaveFile, previewIndex]);
+  const downloadFile = (prepared) => {
+    const url = prepared.file ? URL.createObjectURL(prepared.file) : prepared.url;
+    const link = document.createElement("a");
+    link.href = url; link.download = prepared.file?.name || prepared.fileName; link.style.display = "none";
+    document.body.appendChild(link); link.click(); link.remove();
+    if (prepared.file) window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const saveToDevice = async (item) => {
+    if (!item || savingId !== null) return;
+    setMenu(null); setError(""); setNotice(""); setSavingId(item.id);
+    try {
+      if (typeof navigator.share !== "function") {
+        closeMobileSave();
+        setMobileSave({
+          file: null,
+          fileName: mediaFileName(item),
+          url: item.contentUrl,
+          revokeUrl: false,
+          isVideo: isVideoItem(item),
+          title: item.title || mediaFileName(item),
+        });
+        return;
+      }
+      const file = await prepareSaveFile(item);
+      const shareData = { files: [file], title: item.title || file.name };
+      let canShareFile = typeof navigator.canShare !== "function";
+      if (typeof navigator.canShare === "function") {
+        try { canShareFile = navigator.canShare(shareData); }
+        catch { canShareFile = false; }
+      }
+      if (canShareFile) {
+        try {
+          await navigator.share(shareData);
+          setNotice("已打开系统保存菜单，可选择“存储到照片”");
+          return;
+        } catch (exception) {
+          if (exception?.name === "AbortError") return;
+        }
+      }
+      closeMobileSave();
+      setMobileSave({
+        file,
+        fileName: file.name,
+        url: URL.createObjectURL(file),
+        revokeUrl: true,
+        isVideo: isVideoItem(item),
+        title: item.title || file.name,
+      });
+    } catch (exception) {
+      setError(`保存失败：${exception.message}`);
+    } finally {
+      saveFilesRef.current.delete(item.id);
+      setSavingId(null);
+    }
+  };
   const openWallpaper = async (item) => {
     setMenu(null); setError(""); setWallpaper({ open: true, item, monitors: [], selectedId: "", fitMode: "smart", loading: true, token: "" });
     try {
@@ -297,7 +389,7 @@ export default function FavoriteMediaLibrary() {
         </article>)}</div>}
 
     {menu && <div className="favorite-context-menu" style={{ left: menu.x, top: menu.y }}>
-      <a href={menu.item.contentUrl} download={mediaFileName(menu.item)} onClick={() => setMenu(null)}><DownloadSimple />另存为下载</a>
+      <button type="button" onClick={() => saveToDevice(menu.item)} disabled={savingId !== null}><DownloadSimple />{savingId === menu.item.id ? "正在准备原文件…" : "保存或分享"}</button>
       <button type="button" onClick={() => openWallpaper(menu.item)}><Desktop />应用为壁纸</button>
       <button type="button" onClick={() => { const targetIndex = filtered.findIndex((entry) => entry.id === menu.item.id); setMenu(null); if (targetIndex >= 0) openPreview(targetIndex); }}><ImageSquare />查看原图</button>
       <button type="button" className="danger" onClick={() => { setMenu(null); setDeleteIds([menu.item.id]); }}><Trash />从我的最爱移除</button>
@@ -317,11 +409,20 @@ export default function FavoriteMediaLibrary() {
         onNavigate={navigatePreview}
         onContextMenu={(event) => { event.preventDefault(); setMenu({ item, x: Math.min(event.clientX, window.innerWidth - 210), y: Math.min(event.clientY, window.innerHeight - 150) }); }}
         actions={<>
-          <a className="favorite-viewer-download" href={item.contentUrl} download={mediaFileName(item)} aria-label="保存到手机" title="保存到手机"><DownloadSimple /></a>
-          <button type="button" aria-label="应用为壁纸" title="应用为壁纸" onClick={() => openWallpaper(item)}><Desktop /></button>
+          <button type="button" className="favorite-viewer-download" disabled={savingId !== null} aria-label={savingId === item.id ? "正在准备原文件" : "保存到手机相册"} title="保存到手机相册" onClick={() => saveToDevice(item)}><DownloadSimple /></button>
+          <button type="button" className="favorite-desktop-only" aria-label="应用为壁纸" title="应用为壁纸" onClick={() => openWallpaper(item)}><Desktop /></button>
         </>}
       />;
     })()}
+    {mobileSave && <div className="favorite-mobile-save" role="dialog" aria-modal="true" aria-label={mobileSave.isVideo ? "保存视频到手机" : "保存图片到相册"}>
+      <div>
+        <header><div><strong>{mobileSave.isVideo ? "保存视频到手机" : "保存图片到相册"}</strong><span>{mobileSave.isVideo ? "点击下方按钮下载原视频" : "长按原图，选择“存储到照片”"}</span></div><button type="button" aria-label="关闭保存窗口" onClick={closeMobileSave}><X /></button></header>
+        <div className="favorite-mobile-save-media">{mobileSave.isVideo
+          ? <video src={mobileSave.url} controls playsInline preload="metadata" />
+          : <img src={mobileSave.url} alt={mobileSave.title} />}</div>
+        <footer><button type="button" onClick={closeMobileSave}>取消</button><button type="button" className="primary" onClick={() => downloadFile(mobileSave)}><DownloadSimple />下载原文件</button></footer>
+      </div>
+    </div>}
     {!!pendingDropFiles.length && <div className="favorite-confirm" role="dialog" aria-modal="true" aria-label="确认拖放上传"><div><UploadSimple /><h3>上传这些媒体？</h3><p>即将把 {pendingDropFiles.length} 个图片或视频复制到服务器“我的最爱”。</p><span className="favorite-drop-files">{pendingDropFiles.slice(0, 4).map((file) => file.name).join("、")}{pendingDropFiles.length > 4 ? ` 等 ${pendingDropFiles.length} 个文件` : ""}</span><footer><button type="button" onClick={() => setPendingDropFiles([])}>取消</button><button type="button" className="primary" onClick={() => { const files = pendingDropFiles; setPendingDropFiles([]); uploadFiles(files); }}>确认上传</button></footer></div></div>}
     {!!deleteIds.length && <div className="favorite-confirm" role="dialog" aria-modal="true" aria-label="确认删除"><div><Trash /><h3>删除选中的媒体？</h3><p>将按 ID 删除服务器上的 {deleteIds.length} 个原图及其记录，此操作不可恢复。</p><footer><button type="button" onClick={() => setDeleteIds([])}>取消</button><button type="button" className="danger" onClick={remove}>确认删除</button></footer></div></div>}
     {wallpaper.open && <div className="favorite-confirm wallpaper-dialog" role="dialog" aria-modal="true" aria-label="选择壁纸显示器"><div>

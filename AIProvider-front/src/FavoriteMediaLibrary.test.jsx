@@ -8,6 +8,11 @@ const item = { id: 7, title: "星夜海岸", originalFileName: "coast.png", medi
 const jsonResponse = (data) => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(data) });
 
 beforeEach(() => {
+  const NativeURL = globalThis.URL;
+  class MockURL extends NativeURL {}
+  MockURL.createObjectURL = vi.fn(() => "blob:favorite-media");
+  MockURL.revokeObjectURL = vi.fn();
+  vi.stubGlobal("URL", MockURL);
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
   vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue({ width: 1920, height: 1080, close: vi.fn() }));
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ fillStyle: "", filter: "", fillRect: vi.fn(), drawImage: vi.fn(), save: vi.fn(), restore: vi.fn() });
@@ -103,7 +108,7 @@ describe("FavoriteMediaLibrary", () => {
     fireEvent.click(screen.getByRole("button", { name: "关闭预览" }));
   });
 
-  it("filters by media type and offers the original file in the context menu", async () => {
+  it("filters by media type and opens a mobile-safe save fallback from the context menu", async () => {
     const video = { ...item, id: 8, title: "海岸视频", originalFileName: "coast.mp4", mediaType: "video", contentType: "video/mp4", contentUrl: "/api/favorites/8/content" };
     vi.spyOn(globalThis, "fetch").mockImplementation((url) => {
       if (url === "/api/favorites?page=1&pageSize=100") return jsonResponse({ code: 200, data: { items: [item, video], total: 2 } });
@@ -115,9 +120,27 @@ describe("FavoriteMediaLibrary", () => {
     expect(screen.queryByText("星夜海岸")).toBeNull();
     const preview = screen.getByRole("button", { name: "预览 海岸视频" });
     fireEvent.contextMenu(preview, { clientX: 200, clientY: 200 });
-    const download = screen.getByRole("link", { name: "另存为下载" });
-    expect(download.getAttribute("href")).toBe("/api/favorites/8/content");
-    expect(download.getAttribute("download")).toBe("coast.mp4");
+    fireEvent.click(screen.getByRole("button", { name: "保存或分享" }));
+    expect(await screen.findByRole("dialog", { name: "保存视频到手机" })).toBeTruthy();
+    expect(screen.getByText("点击下方按钮下载原视频")).toBeTruthy();
+  });
+
+  it("shares the original image file through the phone system menu when supported", async () => {
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...globalThis.navigator, canShare: vi.fn(() => true), share });
+    vi.spyOn(globalThis, "fetch").mockImplementation((url) => {
+      if (url === "/api/favorites?page=1&pageSize=100") return jsonResponse({ code: 200, data: { items: [item], total: 1 } });
+      if (url === "/api/favorites/7/content") return Promise.resolve({ ok: true, blob: () => Promise.resolve(new Blob(["image"], { type: "image/png" })) });
+      throw new Error(`unexpected request: ${url}`);
+    });
+    render(<FavoriteMediaLibrary />);
+    fireEvent.click(await screen.findByRole("button", { name: "预览 星夜海岸" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存到手机相册" }));
+    await waitFor(() => expect(share).toHaveBeenCalledOnce());
+    const sharedFile = share.mock.calls[0][0].files[0];
+    expect(sharedFile.name).toBe("coast.png");
+    expect(sharedFile.type).toBe("image/png");
+    expect(await screen.findByText("已打开系统保存菜单，可选择“存储到照片”")).toBeTruthy();
   });
 
   it("offers every detected display and uploads a monitor-sized smart wallpaper to the Bridge", async () => {

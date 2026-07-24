@@ -105,7 +105,9 @@ describe("UI release gate", () => {
     expect(page).toContain('body: JSON.stringify({ ids: deleteIds })');
     expect(page).toContain('<Trash />批量删除');
     expect(page).toContain('aria-label="按内容类型筛选"');
-    expect(page).toContain('download={mediaFileName(menu.item)}');
+    expect(page).toContain("saveToDevice(menu.item)");
+    expect(page).toContain("navigator.canShare");
+    expect(page).toContain('aria-label={mobileSave.isVideo ? "保存视频到手机" : "保存图片到相册"}');
     expect(page).not.toMatch(/<div[^>]+onClick=/);
     expect(css).toContain("var(--bg-surface)");
     expect(css).toContain("var(--text-primary)");
