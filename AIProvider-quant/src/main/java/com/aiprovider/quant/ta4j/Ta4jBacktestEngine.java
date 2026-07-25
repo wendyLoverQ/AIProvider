@@ -13,6 +13,7 @@ import com.aiprovider.quant.strategy.StrategyBuildResult;
 import com.aiprovider.quant.strategy.StrategyException;
 import com.aiprovider.quant.strategy.StrategyRegistry;
 import org.ta4j.core.BarSeries;
+import org.ta4j.core.BaseTradingRecord;
 import org.ta4j.core.Position;
 import org.ta4j.core.Strategy;
 import org.ta4j.core.Trade;
@@ -27,7 +28,9 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Deterministic Ta4j execution adapter. */
 public final class Ta4jBacktestEngine {
@@ -108,10 +111,14 @@ public final class Ta4jBacktestEngine {
 
     private List<EquityPoint> equityCurve(TradingRecord record, BarSeries series, List<BacktestTrade> trades, List<HistoricalCandle> candles) {
         List<EquityPoint> points = new ArrayList<>(candles.size());
-        CashFlow cashFlow = new CashFlow(series, record);
+        CashFlow cashFlow = new CashFlow(series, normalRecord(record));
+        Map<Integer, BigDecimal> sameBarMultipliers = sameBarMultipliers(record);
         BigDecimal peak = ONE;
         for (int bar = 0; bar < candles.size(); bar++) {
             BigDecimal equity = cashFlow.getValue(bar).bigDecimalValue();
+            for (Map.Entry<Integer, BigDecimal> sameBar : sameBarMultipliers.entrySet()) {
+                if (sameBar.getKey() <= bar) equity = equity.multiply(sameBar.getValue());
+            }
             peak = peak.max(equity);
             BigDecimal drawdown = peak.signum() <= 0 ? BigDecimal.ZERO : peak.subtract(equity).divide(peak, 12, RoundingMode.HALF_UP).max(BigDecimal.ZERO);
             final int currentBar = bar;
@@ -119,6 +126,33 @@ public final class Ta4jBacktestEngine {
             points.add(new EquityPoint(candles.get(bar).getOpenTime(), equity, drawdown, inPosition));
         }
         return points;
+    }
+
+    private TradingRecord normalRecord(TradingRecord record) {
+        List<Trade> normalTrades = new ArrayList<>();
+        for (Position position : record.getPositions()) {
+            if (position.getEntry().getIndex() != position.getExit().getIndex()) {
+                normalTrades.add(position.getEntry());
+                normalTrades.add(position.getExit());
+            }
+        }
+        if (normalTrades.isEmpty()) {
+            return new BaseTradingRecord(Trade.TradeType.BUY, record.getTransactionCostModel(), record.getHoldingCostModel());
+        }
+        return new BaseTradingRecord(record.getTransactionCostModel(), record.getHoldingCostModel(), normalTrades.toArray(Trade[]::new));
+    }
+
+    private Map<Integer, BigDecimal> sameBarMultipliers(TradingRecord record) {
+        Map<Integer, BigDecimal> multipliers = new HashMap<>();
+        for (Position position : record.getPositions()) {
+            if (position.getEntry().getIndex() != position.getExit().getIndex()) continue;
+            BigDecimal entryNetCost = bd(position.getEntry().getValue()).add(bd(position.getEntry().getCost()));
+            BigDecimal exitNetValue = bd(position.getExit().getValue()).subtract(bd(position.getExit().getCost()));
+            requirePositive(entryNetCost, "sameBarEntryNetCost");
+            BigDecimal multiplier = exitNetValue.divide(entryNetCost, 12, RoundingMode.HALF_UP);
+            multipliers.merge(position.getExit().getIndex(), multiplier, BigDecimal::multiply);
+        }
+        return multipliers;
     }
 
     private BacktestMetrics metrics(List<BacktestTrade> trades, List<EquityPoint> equity, List<HistoricalCandle> candles) {

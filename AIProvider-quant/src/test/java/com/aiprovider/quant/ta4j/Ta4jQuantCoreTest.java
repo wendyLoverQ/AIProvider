@@ -105,8 +105,16 @@ class Ta4jQuantCoreTest {
 
     @Test
     void emptyStrategyParametersResolveDefaultsWithoutTa4jNpe() {
-        var result = new com.aiprovider.quant.strategy.EmaCrossLongOnlyDefinition().build(Map.of(), 40);
+        var definition = new com.aiprovider.quant.strategy.EmaCrossLongOnlyDefinition();
+        var result = definition.build(Map.of(), 40);
         assertThat(result.getParameters()).containsExactlyInAnyOrderEntriesOf(Map.of("fastPeriod", 12, "slowPeriod", 26));
+        assertThat(definition.minimumRequiredBars(Map.of())).isEqualTo(result.getMinimumRequiredBars());
+        assertThat(definition.minimumRequiredBars(Map.of("fastPeriod", 2, "slowPeriod", 4))).isEqualTo(5);
+        assertThat(definition.build(Map.of("fastPeriod", 2, "slowPeriod", 4), 5).getMinimumRequiredBars()).isEqualTo(5);
+        assertThatThrownBy(() -> definition.build(Map.of("fastPeriod", 2, "slowPeriod", 4), 4))
+                .isInstanceOf(com.aiprovider.quant.strategy.StrategyException.class)
+                .extracting(e -> ((com.aiprovider.quant.strategy.StrategyException) e).getErrorCode())
+                .isEqualTo("BACKTEST_INSUFFICIENT_BARS");
     }
 
     @Test
@@ -118,6 +126,42 @@ class Ta4jQuantCoreTest {
             assertThat(point.equityRatio()).isEqualByComparingTo("1");
             assertThat(point.drawdownRatio()).isEqualByComparingTo("0");
         });
+    }
+
+    @Test
+    void sameBarForcedCloseKeepsTradeAndFiniteCashFlow() {
+        List<HistoricalCandle> input = sameBarSignalCandles(true);
+        var request = new BacktestRequest("EMA_CROSS_LONG_ONLY", "1.0.0", Map.of("fastPeriod", 2, "slowPeriod", 4), BigDecimal.ONE, new BigDecimal("0.001"), true);
+        var result = new BacktestEngine().run(request, "BTCUSDT", KlineInterval.M1, input);
+        assertThat(result.getTrades()).hasSize(1);
+        var trade = result.getTrades().get(0);
+        assertThat(trade.getEntrySignalIndex()).isEqualTo(input.size() - 2);
+        assertThat(trade.getEntryIndex()).isEqualTo(input.size() - 1);
+        assertThat(trade.getExitIndex()).isEqualTo(input.size() - 1);
+        assertThat(trade.getBarsHeld()).isZero();
+        assertThat(trade.getExitSignalIndex()).isNull();
+        assertThat(trade.getEntryPrice()).isEqualByComparingTo(input.get(input.size() - 1).getOpenPrice());
+        assertThat(trade.getExitPrice()).isEqualByComparingTo(input.get(input.size() - 1).getClosePrice());
+        assertThat(trade.getExitTime()).isEqualTo(input.get(input.size() - 1).getCloseTime());
+        assertThat(trade.isForcedExit()).isTrue();
+        assertThat(trade.getExitReason()).isEqualTo("END_OF_SERIES");
+        assertThat(result.getEquityCurve()).allSatisfy(point -> {
+            assertThat(point.equityRatio()).isNotNull();
+            assertThat(point.drawdownRatio()).isNotNull().isGreaterThanOrEqualTo(BigDecimal.ZERO);
+        });
+        assertThat(result.getEquityCurve().get(result.getEquityCurve().size() - 1).equityRatio().subtract(BigDecimal.ONE))
+                .isEqualByComparingTo(result.getMetrics().getTotalReturnRatio());
+    }
+
+    @Test
+    void sameBarLossWithoutFeeStillProducesFiniteDownwardEquity() {
+        List<HistoricalCandle> input = sameBarSignalCandles(false);
+        var result = new BacktestEngine().run(new BacktestRequest("EMA_CROSS_LONG_ONLY", "1.0.0", Map.of("fastPeriod", 2, "slowPeriod", 4), BigDecimal.ONE, BigDecimal.ZERO, true), "BTCUSDT", KlineInterval.M1, input);
+        assertThat(result.getTrades()).hasSize(1);
+        assertThat(result.getTrades().get(0).getNetProfit()).isNegative();
+        assertThat(result.getMetrics().getTotalFees()).isZero();
+        assertThat(result.getMetrics().getTotalReturnRatio()).isNegative();
+        assertThat(result.getEquityCurve()).allSatisfy(point -> assertThat(point.equityRatio()).isNotNull());
     }
 
     @Test
@@ -158,6 +202,21 @@ class Ta4jQuantCoreTest {
             c.setProvider(MarketProviderId.BINANCE_USDM); c.setMarketType(MarketType.USDM_PERPETUAL); c.setSymbol("BTCUSDT"); c.setInterval(KlineInterval.M1);
             c.setOpenTime(start.plusMillis(i * 60_000L)); c.setCloseTime(start.plusMillis(i * 60_000L + 59_999L));
             c.setOpenPrice(open); c.setHighPrice(open.add(BigDecimal.ONE)); c.setLowPrice(close.subtract(BigDecimal.ONE)); c.setClosePrice(close);
+            c.setVolume(BigDecimal.ONE); c.setQuoteVolume(BigDecimal.ONE); c.setTradeCount(1);
+            return c;
+        }).toList();
+    }
+
+    private List<HistoricalCandle> sameBarSignalCandles(boolean profitable) {
+        Instant start = Instant.ofEpochMilli(1_700_000_000_000L);
+        int[] closes = {100, 99, 98, 97, 120, profitable ? 130 : 90};
+        return java.util.stream.IntStream.range(0, closes.length).mapToObj(i -> {
+            BigDecimal close = BigDecimal.valueOf(closes[i]);
+            BigDecimal open = i == closes.length - 1 ? (profitable ? close.subtract(BigDecimal.valueOf(5)) : close.add(BigDecimal.valueOf(5))) : close;
+            HistoricalCandle c = new HistoricalCandle();
+            c.setProvider(MarketProviderId.BINANCE_USDM); c.setMarketType(MarketType.USDM_PERPETUAL); c.setSymbol("BTCUSDT"); c.setInterval(KlineInterval.M1);
+            c.setOpenTime(start.plusMillis(i * 60_000L)); c.setCloseTime(start.plusMillis(i * 60_000L + 59_999L));
+            c.setOpenPrice(open); c.setHighPrice(open.max(close).add(BigDecimal.ONE)); c.setLowPrice(open.min(close).subtract(BigDecimal.ONE)); c.setClosePrice(close);
             c.setVolume(BigDecimal.ONE); c.setQuoteVolume(BigDecimal.ONE); c.setTradeCount(1);
             return c;
         }).toList();

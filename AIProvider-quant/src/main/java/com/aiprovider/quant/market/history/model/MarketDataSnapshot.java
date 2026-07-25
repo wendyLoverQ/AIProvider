@@ -5,6 +5,7 @@ import com.aiprovider.quant.market.model.MarketProviderId;
 import com.aiprovider.quant.market.model.MarketType;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 
 /** Immutable, validated database input for a future backtest. */
@@ -41,7 +42,7 @@ public final class MarketDataSnapshot {
         this.actualCandleCount = actualCandleCount;
         this.datasetLastValidatedAt = datasetLastValidatedAt;
         this.datasetLastSyncTaskId = datasetLastSyncTaskId;
-        this.candles = List.copyOf(candles);
+        this.candles = copyCandles(candles);
     }
 
     public long getDatasetId() { return datasetId; }
@@ -56,5 +57,37 @@ public final class MarketDataSnapshot {
     public long getActualCandleCount() { return actualCandleCount; }
     public Instant getDatasetLastValidatedAt() { return datasetLastValidatedAt; }
     public String getDatasetLastSyncTaskId() { return datasetLastSyncTaskId; }
-    public List<HistoricalCandle> getCandles() { return candles; }
+    public List<HistoricalCandle> getCandles() { return copyCandles(candles); }
+
+    private static List<HistoricalCandle> copyCandles(List<HistoricalCandle> source) {
+        List<HistoricalCandle> copies = new ArrayList<>(source.size());
+        for (HistoricalCandle sourceCandle : source) {
+            if (sourceCandle == null) {
+                copies.add(null);
+                continue;
+            }
+            HistoricalCandle copy = new HistoricalCandle();
+            copy.setId(sourceCandle.getId());
+            copy.setDatasetId(sourceCandle.getDatasetId());
+            copy.setProvider(sourceCandle.getProvider());
+            copy.setMarketType(sourceCandle.getMarketType());
+            copy.setSymbol(sourceCandle.getSymbol());
+            copy.setInterval(sourceCandle.getInterval());
+            copy.setOpenTime(sourceCandle.getOpenTime());
+            copy.setCloseTime(sourceCandle.getCloseTime());
+            copy.setOpenPrice(sourceCandle.getOpenPrice());
+            copy.setHighPrice(sourceCandle.getHighPrice());
+            copy.setLowPrice(sourceCandle.getLowPrice());
+            copy.setClosePrice(sourceCandle.getClosePrice());
+            copy.setVolume(sourceCandle.getVolume());
+            copy.setQuoteVolume(sourceCandle.getQuoteVolume());
+            copy.setTradeCount(sourceCandle.getTradeCount());
+            copy.setTakerBuyBaseVolume(sourceCandle.getTakerBuyBaseVolume());
+            copy.setTakerBuyQuoteVolume(sourceCandle.getTakerBuyQuoteVolume());
+            copy.setSource(sourceCandle.getSource());
+            copy.setCreatedAt(sourceCandle.getCreatedAt());
+            copies.add(copy);
+        }
+        return List.copyOf(copies);
+    }
 }

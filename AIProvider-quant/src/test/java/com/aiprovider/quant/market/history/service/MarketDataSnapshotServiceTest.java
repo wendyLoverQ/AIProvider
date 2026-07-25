@@ -53,8 +53,14 @@ class MarketDataSnapshotServiceTest {
                 service.load(DATASET_ID, START, START.plusMillis(STEP * 3));
 
         assertEquals(3, snapshot.getExpectedCandleCount());
-        assertEquals(rows, snapshot.getCandles());
-        assertThrows(UnsupportedOperationException.class, () -> snapshot.getCandles().add(rows.get(0)));
+        assertEquals(rows.size(), snapshot.getCandles().size());
+        assertEquals(rows.get(0).getClosePrice(), snapshot.getCandles().get(0).getClosePrice());
+        rows.get(0).setClosePrice(new BigDecimal("999"));
+        assertEquals(new BigDecimal("105"), snapshot.getCandles().get(0).getClosePrice());
+        List<HistoricalCandle> exposed = snapshot.getCandles();
+        exposed.get(0).setClosePrice(new BigDecimal("888"));
+        assertEquals(new BigDecimal("105"), snapshot.getCandles().get(0).getClosePrice());
+        assertThrows(UnsupportedOperationException.class, () -> exposed.add(rows.get(0)));
         verify(datasets).findById(DATASET_ID);
         verify(candles).countRangeExclusive(DATASET_ID, START.toEpochMilli(), START.toEpochMilli() + STEP * 3);
         verify(candles).findRangeAscending(DATASET_ID, START.toEpochMilli(), START.toEpochMilli() + STEP * 3, 4);

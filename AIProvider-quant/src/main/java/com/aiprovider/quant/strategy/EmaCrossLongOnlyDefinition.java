@@ -10,14 +10,21 @@ public final class EmaCrossLongOnlyDefinition implements QuantStrategyDefinition
     public String version() { return "1.0.0"; }
     public String description() { return "仅用于验证指标、规则和回测链路，不代表盈利能力。"; }
     public List<StrategyParameterDefinition> parameters() { return List.of(new StrategyParameterDefinition("fastPeriod", 12, 2, 1000), new StrategyParameterDefinition("slowPeriod", 26, 2, 1000)); }
-    public int minimumRequiredBars(Map<String, Integer> values) { return values.getOrDefault("slowPeriod", 26); }
+    public int minimumRequiredBars(Map<String, Integer> values) { return calculateMinimumRequiredBars(resolve(values)); }
     public StrategyBuildResult build(Map<String, Integer> values, int barCount) {
         Map<String, Integer> resolved = resolve(values);
         int fast = resolved.get("fastPeriod"), slow = resolved.get("slowPeriod");
-        if (fast < 2 || slow < 2 || fast >= slow || slow > 1000) throw new StrategyException("BACKTEST_PARAMETER_INVALID", "fastPeriod=" + fast + " slowPeriod=" + slow);
-        int minimumBars = slow + 1;
+        int minimumBars = calculateMinimumRequiredBars(resolved);
         if (barCount < minimumBars) throw new StrategyException("BACKTEST_INSUFFICIENT_BARS", "barCount=" + barCount + " minimum=" + minimumBars);
         return new StrategyBuildResult(code(), version(), minimumBars, resolved);
+    }
+
+    private int calculateMinimumRequiredBars(Map<String, Integer> resolved) {
+        int fast = resolved.get("fastPeriod"), slow = resolved.get("slowPeriod");
+        if (fast < 2 || slow < 2 || fast >= slow || slow > 1000) {
+            throw new StrategyException("BACKTEST_PARAMETER_INVALID", "fastPeriod=" + fast + " slowPeriod=" + slow);
+        }
+        return slow + 1;
     }
 
     private Map<String, Integer> resolve(Map<String, Integer> values) {
