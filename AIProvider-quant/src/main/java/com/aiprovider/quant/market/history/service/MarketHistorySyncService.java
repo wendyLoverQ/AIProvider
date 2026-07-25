@@ -107,12 +107,12 @@ public class MarketHistorySyncService {
                     task, normalizedStart, normalizedEnd, serverTimeMs, -1,
                     current -> taskRepository.updateProgress(taskId, MarketSyncTaskStatus.WRITING,
                             current.fetched, current.inserted, current.existing, current.conflict, 0,
-                            current.batches, BigDecimal.valueOf(100), null));
+                            current.batches, current.progressPercent.min(BigDecimal.valueOf(99)), null));
 
             // 校验阶段
             taskRepository.updateProgress(taskId, MarketSyncTaskStatus.VALIDATING,
                     stats.fetched, stats.inserted, stats.existing, stats.conflict, 0,
-                    stats.batches, BigDecimal.valueOf(100), usedWeight1m);
+                    stats.batches, BigDecimal.valueOf(99), usedWeight1m);
 
             MarketDatasetValidationService.ValidationResult validationResult =
                     validationService.validateDataset(task.getDatasetId(), interval, taskId);

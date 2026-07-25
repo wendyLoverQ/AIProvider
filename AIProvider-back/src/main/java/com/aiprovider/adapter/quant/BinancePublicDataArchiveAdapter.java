@@ -355,11 +355,13 @@ public class BinancePublicDataArchiveAdapter implements HistoricalArchiveProvide
                     for (CSVRecord record : parser) {
                         if (!headerChecked) {
                             headerChecked = true;
-                            if (!matchesOfficialHeader(record)) {
-                                throw new ArchiveDataException(ArchiveDataException.ERR_ARCHIVE_CSV_INVALID,
-                                        "CSV header 不匹配官方 12 列 header entry=" + entryName);
+                            if (matchesOfficialHeader(record)) {
+                                continue;
                             }
-                            continue;
+                            if (!isValidDataRecordShape(record)) {
+                                throw new ArchiveDataException(ArchiveDataException.ERR_ARCHIVE_CSV_INVALID,
+                                        "CSV 首行既不是官方 header 也不是合法数据行 entry=" + entryName);
+                            }
                         }
 
                         if (record.size() != 12) {
@@ -412,6 +414,18 @@ public class BinancePublicDataArchiveAdapter implements HistoricalArchiveProvide
             }
         }
         return true;
+    }
+
+    private boolean isValidDataRecordShape(CSVRecord record) {
+        if (record.size() != OFFICIAL_CSV_HEADER.size()) {
+            return false;
+        }
+        try {
+            Long.parseLong(record.get(0).trim());
+            return true;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
     private MarketCandle toCandle(CSVRecord record, String symbol, KlineInterval interval) {

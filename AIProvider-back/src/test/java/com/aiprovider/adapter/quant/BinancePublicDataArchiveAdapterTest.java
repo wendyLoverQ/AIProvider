@@ -67,6 +67,10 @@ class BinancePublicDataArchiveAdapterTest {
             "1000,1.0,2.0,0.5,1.5,100.0,2000,150.0,10,50.0,75.0,ignore\n" +
             "1600,1.5,2.5,1.0,2.0,200.0,2200,300.0,20,100.0,150.0,ignore\n";
 
+    private static final String VALID_CSV_WITHOUT_HEADER =
+            "1000,1.0,2.0,0.5,1.5,100.0,2000,150.0,10,50.0,75.0,ignore\n" +
+            "1600,1.5,2.5,1.0,2.0,200.0,2200,300.0,20,100.0,150.0,ignore\n";
+
     // 11 列数据行（缺少最后一列 ignore）
     private static final String CSV_WRONG_COLUMNS =
             "open_time,open,high,low,close,volume,close_time,quote_asset_volume," +
@@ -109,6 +113,24 @@ class BinancePublicDataArchiveAdapterTest {
         assertThat(candles).hasSize(2);
         assertThat(candles.get(0).getOpenTime().toEpochMilli()).isEqualTo(1000L);
         assertThat(candles.get(1).getOpenTime().toEpochMilli()).isEqualTo(1600L);
+    }
+
+    @Test
+    void validZipWithoutHeaderKeepsFirstDataRow() throws Exception {
+        byte[] zipBytes = createZip(CSV_ENTRY_NAME, VALID_CSV_WITHOUT_HEADER);
+        String checksum = sha256Hex(zipBytes) + "  " + ZIP_FILE_NAME;
+        server = startServer((path, exchange) -> {
+            if (path.endsWith(".CHECKSUM")) sendString(exchange, 200, checksum);
+            else if (path.endsWith(".zip")) sendBytes(exchange, 200, zipBytes);
+            else send404(exchange);
+        });
+
+        BinancePublicDataArchiveAdapter adapter = createAdapter(server.getAddress().getPort(), 536_870_912L);
+        List<MarketCandle> candles = new ArrayList<>();
+        adapter.downloadAndParse(createTestFile(), SYMBOL, INTERVAL, candles::addAll);
+
+        assertThat(candles).hasSize(2);
+        assertThat(candles.get(0).getOpenTime().toEpochMilli()).isEqualTo(1000L);
     }
 
     // ---- CHECKSUM 缺失 ----

@@ -83,6 +83,8 @@ public class RestKlineRangeImporter {
 
         ImportStats stats = new ImportStats();
         stats.lastOpenTime = initialLastOpenTime;
+        stats.cursor = rangeStartInclusive;
+        stats.progressPercent = BigDecimal.ZERO;
 
         long cursor = rangeStartInclusive;
 
@@ -93,8 +95,11 @@ public class RestKlineRangeImporter {
                     task.getSymbol(), interval, cursor, batchEnd, batchSize, serverTimeMs);
 
             if (fetched == null || fetched.isEmpty()) {
+                if (progressCallback != null) {
+                    progressCallback.accept(stats);
+                }
                 log.info("operation=rest-import-batch taskId={} msg=空页结束 cursor={} batchEnd={}",
-                        taskId, cursor, batchEnd);
+                        taskId, stats.cursor, batchEnd);
                 break;
             }
 
@@ -129,7 +134,9 @@ public class RestKlineRangeImporter {
             stats.lastOpenTime = currentBatchLastOpenTime;
 
             // 推进游标
-            cursor = currentBatchLastOpenTime + durationMs;
+            cursor = Math.min(currentBatchLastOpenTime + durationMs, rangeEndExclusive);
+            stats.cursor = cursor;
+            stats.progressPercent = calculateProgress(cursor, rangeStartInclusive, rangeEndExclusive);
             if (progressCallback != null) {
                 progressCallback.accept(stats);
             }
@@ -144,6 +151,14 @@ public class RestKlineRangeImporter {
 
     // ---- 辅助方法 ----
 
+    private BigDecimal calculateProgress(long cursor, long start, long end) {
+        if (end <= start) return BigDecimal.valueOf(100);
+        long boundedCursor = Math.max(start, Math.min(cursor, end));
+        return BigDecimal.valueOf(boundedCursor - start)
+                .multiply(BigDecimal.valueOf(100))
+                .divide(BigDecimal.valueOf(end - start), 4, RoundingMode.HALF_UP);
+    }
+
     // ---- 内部类型 ----
 
     /** 导入统计。 */
@@ -154,6 +169,8 @@ public class RestKlineRangeImporter {
         public long conflict = 0;
         public int batches = 0;
         public long lastOpenTime = -1;
+        public long cursor;
+        public BigDecimal progressPercent = BigDecimal.ZERO;
     }
 
     /** REST 导入异常，携带错误码。 */

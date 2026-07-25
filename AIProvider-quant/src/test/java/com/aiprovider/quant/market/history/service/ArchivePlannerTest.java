@@ -6,6 +6,8 @@ import com.aiprovider.quant.market.history.model.ArchiveKlineFile;
 import com.aiprovider.quant.market.model.KlineInterval;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -143,5 +145,15 @@ class ArchivePlannerTest {
                 ArchiveImportMode.ARCHIVE_DAILY))
                 .isInstanceOf(ArchiveDataException.class)
                 .hasMessageContaining("当前 UTC 日期");
+    }
+
+    @Test
+    void strictValidationUsesOriginalRequestBoundary() {
+        assertThatThrownBy(() -> planner.validateStrictRequest(
+                Instant.parse("2025-01-01T00:01:00Z"),
+                Instant.parse("2025-02-01T00:00:00Z"),
+                FEB_04, ArchiveImportMode.ARCHIVE_MONTHLY))
+                .isInstanceOf(ArchiveDataException.class)
+                .hasMessageContaining("原始请求");
     }
 }

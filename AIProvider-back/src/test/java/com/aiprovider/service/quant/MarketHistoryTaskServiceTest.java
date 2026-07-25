@@ -9,6 +9,7 @@ import com.aiprovider.quant.market.history.port.MarketDatasetRepository;
 import com.aiprovider.quant.market.history.port.HistoricalMarketDataProvider;
 import com.aiprovider.quant.market.history.port.MarketSyncTaskRepository;
 import com.aiprovider.quant.market.history.service.ArchiveImportService;
+import com.aiprovider.quant.market.history.service.ArchivePlanner;
 import com.aiprovider.quant.market.history.service.MarketHistorySyncService;
 import com.aiprovider.quant.market.model.KlineInterval;
 import com.aiprovider.quant.market.model.MarketProviderId;
@@ -29,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -54,6 +56,7 @@ class MarketHistoryTaskServiceTest {
     private ThreadPoolTaskExecutor executor;
     private PublicMarketQueryService publicMarketQueryService;
     private HistoricalMarketDataProvider historicalMarketDataProvider;
+    private ArchivePlanner archivePlanner;
 
     private MarketHistoryTaskService service;
 
@@ -67,7 +70,8 @@ class MarketHistoryTaskServiceTest {
         executor = mock(ThreadPoolTaskExecutor.class);
         publicMarketQueryService = mock(PublicMarketQueryService.class);
         historicalMarketDataProvider = mock(HistoricalMarketDataProvider.class);
-        when(historicalMarketDataProvider.serverTime()).thenReturn(Instant.parse("2025-02-01T00:00:00Z"));
+        when(historicalMarketDataProvider.serverTime()).thenReturn(Instant.parse("2025-03-01T00:00:00Z"));
+        archivePlanner = new ArchivePlanner();
 
         // executor.execute(runnable) 立即执行传入的 Runnable，用于验证路由
         doAnswer(invocation -> {
@@ -78,7 +82,7 @@ class MarketHistoryTaskServiceTest {
 
         service = new MarketHistoryTaskService(syncService, archiveImportService,
                 taskRepository, datasetRepository, properties, executor, publicMarketQueryService,
-                historicalMarketDataProvider);
+                historicalMarketDataProvider, archivePlanner);
     }
 
     // ---- 合约校验 ----
@@ -121,7 +125,7 @@ class MarketHistoryTaskServiceTest {
 
         service.createTask("BTCUSDT", "1m",
                 Instant.parse("2025-01-01T00:00:00Z"),
-                Instant.parse("2025-01-01T00:01:00Z"),
+                Instant.parse("2025-02-01T00:00:00Z"),
                 "ARCHIVE_MONTHLY");
 
         verify(archiveImportService).executeArchiveImport(any(MarketSyncTask.class));
@@ -195,6 +199,21 @@ class MarketHistoryTaskServiceTest {
                 "UNKNOWN_MODE"))
                 .isInstanceOf(MarketHistoryTaskException.class)
                 .hasFieldOrPropertyWithValue("errorCode", "INVALID_SOURCE_MODE");
+    }
+
+    @Test
+    void strictArchiveRejectsOriginalPartialMonthBeforeCreatingTask() {
+        setupValidContract();
+
+        assertThatThrownBy(() -> service.createTask("BTCUSDT", "1m",
+                Instant.parse("2025-01-01T00:01:00Z"),
+                Instant.parse("2025-02-01T00:00:00Z"),
+                "ARCHIVE_MONTHLY"))
+                .isInstanceOf(MarketHistoryTaskException.class)
+                .hasFieldOrPropertyWithValue("errorCode", "ARCHIVE_MONTHLY_REQUIRES_FULL_MONTH");
+
+        verify(datasetRepository, never()).findByKey(any(), any(), any(), any(), any());
+        verify(taskRepository, never()).insert(any(MarketSyncTask.class));
     }
 
     @Test

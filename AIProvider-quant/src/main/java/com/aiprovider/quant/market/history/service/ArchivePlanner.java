@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -90,6 +91,30 @@ public class ArchivePlanner {
             return planMonthlyOnly(symbol, interval, normalizedStartMs, normalizedEndMs, serverTimeMs);
         }
         return planDailyOnly(symbol, interval, normalizedStartMs, normalizedEndMs, serverTimeMs);
+    }
+
+    /** Validates strict archive boundaries using the original request instants. */
+    public void validateStrictRequest(Instant requestedStart, Instant requestedEnd,
+                                      long serverTimeMs, ArchiveImportMode mode) {
+        if (mode != ArchiveImportMode.ARCHIVE_MONTHLY && mode != ArchiveImportMode.ARCHIVE_DAILY) {
+            return;
+        }
+        if (requestedStart == null || requestedEnd == null || !requestedStart.isBefore(requestedEnd)) {
+            throw new ArchiveDataException("INVALID_TIME_RANGE", "归档范围必须为正数");
+        }
+        LocalDateTime start = LocalDateTime.ofInstant(requestedStart, ZoneOffset.UTC);
+        LocalDateTime end = LocalDateTime.ofInstant(requestedEnd, ZoneOffset.UTC);
+        if (mode == ArchiveImportMode.ARCHIVE_MONTHLY) {
+            if (start.getDayOfMonth() != 1 || !start.toLocalTime().equals(java.time.LocalTime.MIDNIGHT)
+                    || end.getDayOfMonth() != 1 || !end.toLocalTime().equals(java.time.LocalTime.MIDNIGHT)) {
+                throw new ArchiveDataException("ARCHIVE_MONTHLY_REQUIRES_FULL_MONTH", "ARCHIVE_MONTHLY 要求原始请求为完整 UTC 月范围");
+            }
+        } else if (start.toLocalTime() != java.time.LocalTime.MIDNIGHT
+                || end.toLocalTime() != java.time.LocalTime.MIDNIGHT) {
+            throw new ArchiveDataException("ARCHIVE_DAILY_REQUIRES_FULL_DAY", "ARCHIVE_DAILY 要求原始请求为完整 UTC 自然日范围");
+        }
+        plan("BTCUSDT", KlineInterval.M1, requestedStart.toEpochMilli(), requestedEnd.toEpochMilli(),
+                serverTimeMs, mode);
     }
 
     private ArchiveImportPlan planAuto(String symbol,

@@ -134,7 +134,9 @@ class RestKlineRangeImporterTest {
         // batchSize=1 → batchEnd = 1*60000 = 60000
         RestKlineRangeImporter importer = new RestKlineRangeImporter(provider, ingestService, taskRepo, 1, 100_000);
         MarketSyncTask task = task(0, 120000);
-        RestKlineRangeImporter.ImportStats stats = importer.importRange(task, 0, 120000, SERVER_TIME, -1);
+        List<BigDecimal> progress = new ArrayList<>();
+        RestKlineRangeImporter.ImportStats stats = importer.importRange(task, 0, 120000, SERVER_TIME, -1,
+                current -> progress.add(current.progressPercent));
 
         // 第一次请求 cursor=0, batchEnd=60000
         verify(provider).fetchClosedKlines(SYMBOL, INTERVAL, 0L, 60000L, 1, SERVER_TIME);
@@ -142,6 +144,9 @@ class RestKlineRangeImporterTest {
         verify(provider).fetchClosedKlines(SYMBOL, INTERVAL, 60000L, 120000L, 1, SERVER_TIME);
 
         assertThat(stats.batches).isEqualTo(2);
+        assertThat(progress).containsExactly(BigDecimal.valueOf(50).setScale(4), BigDecimal.valueOf(100).setScale(4));
+        assertThat(stats.cursor).isEqualTo(120000L);
+        assertThat(stats.progressPercent).isEqualByComparingTo("100");
     }
 
     @Test

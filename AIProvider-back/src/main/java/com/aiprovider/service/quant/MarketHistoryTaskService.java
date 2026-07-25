@@ -11,6 +11,8 @@ import com.aiprovider.quant.market.history.port.MarketDatasetRepository;
 import com.aiprovider.quant.market.history.port.HistoricalMarketDataProvider;
 import com.aiprovider.quant.market.history.port.MarketSyncTaskRepository;
 import com.aiprovider.quant.market.history.service.ArchiveImportService;
+import com.aiprovider.quant.market.history.service.ArchiveDataException;
+import com.aiprovider.quant.market.history.service.ArchivePlanner;
 import com.aiprovider.quant.market.history.service.MarketHistorySyncService;
 import com.aiprovider.quant.market.model.KlineInterval;
 import com.aiprovider.quant.market.model.MarketProviderId;
@@ -66,6 +68,7 @@ public class MarketHistoryTaskService {
     private final ThreadPoolTaskExecutor executor;
     private final PublicMarketQueryService publicMarketQueryService;
     private final HistoricalMarketDataProvider historicalMarketDataProvider;
+    private final ArchivePlanner archivePlanner;
 
     public MarketHistoryTaskService(MarketHistorySyncService syncService,
                                      ArchiveImportService archiveImportService,
@@ -74,7 +77,8 @@ public class MarketHistoryTaskService {
                                      QuantMarketHistoryProperties properties,
                                      @Qualifier("quantHistorySyncExecutor") ThreadPoolTaskExecutor executor,
                                      PublicMarketQueryService publicMarketQueryService,
-                                     HistoricalMarketDataProvider historicalMarketDataProvider) {
+                                     HistoricalMarketDataProvider historicalMarketDataProvider,
+                                     ArchivePlanner archivePlanner) {
         this.syncService = syncService;
         this.archiveImportService = archiveImportService;
         this.taskRepository = taskRepository;
@@ -83,6 +87,7 @@ public class MarketHistoryTaskService {
         this.executor = executor;
         this.publicMarketQueryService = publicMarketQueryService;
         this.historicalMarketDataProvider = historicalMarketDataProvider;
+        this.archivePlanner = archivePlanner;
     }
 
     // ---- 任务创建 ----
@@ -197,13 +202,19 @@ public class MarketHistoryTaskService {
                     "起始时间必须早于结束时间");
         }
 
+        long referenceServerTimeMs = historicalMarketDataProvider.serverTime().toEpochMilli();
+        try {
+            archivePlanner.validateStrictRequest(startTime, endTime, referenceServerTimeMs, mode);
+        } catch (ArchiveDataException e) {
+            throw new MarketHistoryTaskException(e.getErrorCode(), e.getMessage());
+        }
+
         // 5. 归一化到周期边界
         long durationMs = interval.durationMillis();
         long normalizedStartMs = interval.alignOpenTime(startTime).toEpochMilli();
         long normalizedEndMs = interval.alignOpenTime(endTime).toEpochMilli();
 
         // 6. 钳制结束时间到当前周期（排除未闭合 K 线）
-        long referenceServerTimeMs = historicalMarketDataProvider.serverTime().toEpochMilli();
         long nowAlignedMs = interval.alignOpenTime(Instant.ofEpochMilli(referenceServerTimeMs)).toEpochMilli();
         if (normalizedEndMs > nowAlignedMs) {
             normalizedEndMs = nowAlignedMs;

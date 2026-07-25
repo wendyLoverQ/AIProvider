@@ -116,7 +116,7 @@ public class ArchiveImportService {
                 ArchiveKlineFile file = plan.getFiles().get(i);
 
                 // 更新进度：DOWNLOADING
-                BigDecimal progress = calculateFileProgress(i, plannedFileCount);
+                BigDecimal progress = calculateArchiveProgress(i, plannedFileCount, plan.isHasRestTail());
                 taskRepository.updateArchiveProgress(taskId, MarketSyncTaskStatus.DOWNLOADING.name(),
                         plan.getMode().name(), file.getZipFileName(),
                         plannedFileCount, i,
@@ -158,7 +158,7 @@ public class ArchiveImportService {
                 });
 
                 // 文件完成，更新进度：WRITING
-                progress = calculateFileProgress(i + 1, plannedFileCount);
+                progress = calculateArchiveProgress(i + 1, plannedFileCount, plan.isHasRestTail());
                 taskRepository.updateArchiveProgress(taskId, MarketSyncTaskStatus.WRITING.name(),
                         plan.getMode().name(), file.getZipFileName(),
                         plannedFileCount, i + 1,
@@ -187,7 +187,8 @@ public class ArchiveImportService {
                                 stats.plannedFileCount, stats.completedFileCount,
                                 stats.fetched + current.fetched, stats.inserted + current.inserted,
                                 stats.existing + current.existing, stats.conflict + current.conflict,
-                                stats.batches + current.batches, BigDecimal.valueOf(100)));
+                                stats.batches + current.batches,
+                                calculateRestOverallProgress(current.progressPercent, plan.isHasRestTail(), plannedFileCount)));
 
                 stats.fetched += restStats.fetched;
                 stats.inserted += restStats.inserted;
@@ -257,7 +258,7 @@ public class ArchiveImportService {
         taskRepository.updateArchiveProgress(taskId, MarketSyncTaskStatus.VALIDATING.name(),
                 task.getSourceMode(), null, stats.plannedFileCount, stats.completedFileCount,
                 stats.fetched, stats.inserted, stats.existing, stats.conflict,
-                stats.batches, BigDecimal.valueOf(100));
+                stats.batches, BigDecimal.valueOf(99));
 
         MarketDatasetValidationService.ValidationResult vr =
                 validationService.validateDataset(task.getDatasetId(), interval, taskId);
@@ -277,11 +278,24 @@ public class ArchiveImportService {
 
     // ---- 辅助方法 ----
 
-    private BigDecimal calculateFileProgress(int completedFiles, int totalFiles) {
-        if (totalFiles <= 0) return BigDecimal.valueOf(100);
+    private BigDecimal calculateArchiveProgress(int completedFiles, int totalFiles, boolean hasRestTail) {
+        if (totalFiles <= 0) return BigDecimal.ZERO;
+        BigDecimal ceiling = hasRestTail ? BigDecimal.valueOf(90) : BigDecimal.valueOf(99);
         return BigDecimal.valueOf(completedFiles)
-                .multiply(BigDecimal.valueOf(100))
+                .multiply(ceiling)
                 .divide(BigDecimal.valueOf(totalFiles), 4, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal calculateRestOverallProgress(BigDecimal restProgress,
+                                                    boolean hasArchive,
+                                                    int plannedFileCount) {
+        BigDecimal bounded = restProgress.max(BigDecimal.ZERO).min(BigDecimal.valueOf(100));
+        if (!hasArchive || plannedFileCount == 0) {
+            return bounded.multiply(BigDecimal.valueOf(99))
+                    .divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP);
+        }
+        return BigDecimal.valueOf(90).add(bounded.multiply(BigDecimal.valueOf(9))
+                .divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP));
     }
 
     private static String truncateMsg(String msg) {
