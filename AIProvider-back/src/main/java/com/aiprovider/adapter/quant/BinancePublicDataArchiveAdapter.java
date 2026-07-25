@@ -60,6 +60,11 @@ import java.util.zip.ZipInputStream;
  */
 public class BinancePublicDataArchiveAdapter implements HistoricalArchiveProvider {
 
+    private static final List<String> OFFICIAL_CSV_HEADER = List.of(
+            "open_time", "open", "high", "low", "close", "volume", "close_time",
+            "quote_asset_volume", "number_of_trades", "taker_buy_base_asset_volume",
+            "taker_buy_quote_asset_volume", "ignore");
+
     private static final Logger log = LoggerFactory.getLogger(BinancePublicDataArchiveAdapter.class);
 
     private final String baseUrl;
@@ -346,16 +351,15 @@ public class BinancePublicDataArchiveAdapter implements HistoricalArchiveProvide
                 List<MarketCandle> batch = new ArrayList<>(parseBatchSize);
                 try (CSVParser parser = CSVFormat.DEFAULT.parse(
                         new NonClosingReader(new InputStreamReader(zis, StandardCharsets.UTF_8)))) {
-                    boolean headerSkipped = false;
+                    boolean headerChecked = false;
                     for (CSVRecord record : parser) {
-                        // 官方 header 识别（第一行第一列非数字）
-                        if (!headerSkipped) {
-                            headerSkipped = true;
-                            String firstCol = record.get(0);
-                            if (!isNumeric(firstCol)) {
-                                log.debug("operation=archive-csv-header-skip entry={} firstCol={}", entryName, firstCol);
-                                continue;
+                        if (!headerChecked) {
+                            headerChecked = true;
+                            if (!matchesOfficialHeader(record)) {
+                                throw new ArchiveDataException(ArchiveDataException.ERR_ARCHIVE_CSV_INVALID,
+                                        "CSV header 不匹配官方 12 列 header entry=" + entryName);
                             }
+                            continue;
                         }
 
                         if (record.size() != 12) {
@@ -364,7 +368,12 @@ public class BinancePublicDataArchiveAdapter implements HistoricalArchiveProvide
                                             + " record=" + record + " entry=" + entryName);
                         }
 
-                        batch.add(toCandle(record, symbol, interval));
+                        MarketCandle candle = toCandle(record, symbol, interval);
+                        if (candle.getTradeCount() < 0) {
+                            throw new ArchiveDataException(ArchiveDataException.ERR_ARCHIVE_CSV_INVALID,
+                                    "number_of_trades 不能为负数 entry=" + entryName);
+                        }
+                        batch.add(candle);
                         totalRows++;
                         if (batch.size() >= parseBatchSize) {
                             consumer.accept(batch);
@@ -383,11 +392,27 @@ public class BinancePublicDataArchiveAdapter implements HistoricalArchiveProvide
             throw new ArchiveDataException(ArchiveDataException.ERR_ARCHIVE_ZIP_INVALID,
                     "ZIP 内未找到 CSV 条目 zipPath=" + zipPath);
         }
+        if (totalRows == 0) {
+            throw new ArchiveDataException(ArchiveDataException.ERR_ARCHIVE_CSV_INVALID,
+                    "CSV 为空或只有 header zipPath=" + zipPath);
+        }
 
         return totalRows;
     }
 
     // ---- CSV 转换 ----
+
+    private boolean matchesOfficialHeader(CSVRecord record) {
+        if (record.size() != OFFICIAL_CSV_HEADER.size()) {
+            return false;
+        }
+        for (int i = 0; i < OFFICIAL_CSV_HEADER.size(); i++) {
+            if (!OFFICIAL_CSV_HEADER.get(i).equals(record.get(i).trim())) {
+                return false;
+            }
+        }
+        return true;
+    }
 
     private MarketCandle toCandle(CSVRecord record, String symbol, KlineInterval interval) {
         try {

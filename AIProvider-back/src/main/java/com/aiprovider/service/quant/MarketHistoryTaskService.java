@@ -8,6 +8,7 @@ import com.aiprovider.quant.market.history.model.MarketDatasetStatus;
 import com.aiprovider.quant.market.history.model.MarketSyncTask;
 import com.aiprovider.quant.market.history.model.MarketSyncTaskStatus;
 import com.aiprovider.quant.market.history.port.MarketDatasetRepository;
+import com.aiprovider.quant.market.history.port.HistoricalMarketDataProvider;
 import com.aiprovider.quant.market.history.port.MarketSyncTaskRepository;
 import com.aiprovider.quant.market.history.service.ArchiveImportService;
 import com.aiprovider.quant.market.history.service.MarketHistorySyncService;
@@ -64,6 +65,7 @@ public class MarketHistoryTaskService {
     private final QuantMarketHistoryProperties properties;
     private final ThreadPoolTaskExecutor executor;
     private final PublicMarketQueryService publicMarketQueryService;
+    private final HistoricalMarketDataProvider historicalMarketDataProvider;
 
     public MarketHistoryTaskService(MarketHistorySyncService syncService,
                                      ArchiveImportService archiveImportService,
@@ -71,7 +73,8 @@ public class MarketHistoryTaskService {
                                      MarketDatasetRepository datasetRepository,
                                      QuantMarketHistoryProperties properties,
                                      @Qualifier("quantHistorySyncExecutor") ThreadPoolTaskExecutor executor,
-                                     PublicMarketQueryService publicMarketQueryService) {
+                                     PublicMarketQueryService publicMarketQueryService,
+                                     HistoricalMarketDataProvider historicalMarketDataProvider) {
         this.syncService = syncService;
         this.archiveImportService = archiveImportService;
         this.taskRepository = taskRepository;
@@ -79,6 +82,7 @@ public class MarketHistoryTaskService {
         this.properties = properties;
         this.executor = executor;
         this.publicMarketQueryService = publicMarketQueryService;
+        this.historicalMarketDataProvider = historicalMarketDataProvider;
     }
 
     // ---- 任务创建 ----
@@ -106,13 +110,25 @@ public class MarketHistoryTaskService {
      * @return 任务 ID（UUID）
      * @throws MarketHistoryTaskException 参数校验失败、合约不存在或数据集正在同步
      */
-    public String createTask(String symbol, String intervalCode,
+    public String createTask(String provider, String marketType, String symbol, String intervalCode,
                               Instant startTime, Instant endTime, String sourceMode) {
+        if (!MarketProviderId.BINANCE_USDM.name().equals(provider)) {
+            throw new MarketHistoryTaskException("INVALID_PROVIDER", "不支持的行情提供方: " + provider);
+        }
+        if (!MarketType.USDM_PERPETUAL.name().equals(marketType)) {
+            throw new MarketHistoryTaskException("INVALID_MARKET_TYPE", "不支持的市场类型: " + marketType);
+        }
         // 校验并归一化 sourceMode（ArchiveImportMode 枚举保证取值合法）
         ArchiveImportMode mode = parseSourceMode(sourceMode);
         MarketSyncTask task = prepareTask(symbol, intervalCode, startTime, endTime, mode);
         Runnable execution = selectExecution(mode, task);
         return submitTask(task, execution, "sync-" + mode.name());
+    }
+
+    @Deprecated
+    public String createTask(String symbol, String intervalCode, Instant startTime, Instant endTime, String sourceMode) {
+        return createTask(MarketProviderId.BINANCE_USDM.name(), MarketType.USDM_PERPETUAL.name(),
+                symbol, intervalCode, startTime, endTime, sourceMode);
     }
 
     private ArchiveImportMode parseSourceMode(String sourceMode) {
@@ -187,7 +203,8 @@ public class MarketHistoryTaskService {
         long normalizedEndMs = interval.alignOpenTime(endTime).toEpochMilli();
 
         // 6. 钳制结束时间到当前周期（排除未闭合 K 线）
-        long nowAlignedMs = interval.alignOpenTime(Instant.now()).toEpochMilli();
+        long referenceServerTimeMs = historicalMarketDataProvider.serverTime().toEpochMilli();
+        long nowAlignedMs = interval.alignOpenTime(Instant.ofEpochMilli(referenceServerTimeMs)).toEpochMilli();
         if (normalizedEndMs > nowAlignedMs) {
             normalizedEndMs = nowAlignedMs;
         }

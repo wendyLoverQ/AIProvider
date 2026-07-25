@@ -40,6 +40,13 @@ public interface HistoricalMarketDataProvider {
     List<MarketCandle> fetchClosedKlines(String symbol, KlineInterval interval,
                                           long startInclusive, long endExclusive, int limit);
 
+    /** Same request with the already acquired upstream clock reference. */
+    default List<MarketCandle> fetchClosedKlines(String symbol, KlineInterval interval,
+                                                  long startInclusive, long endExclusive, int limit,
+                                                  long referenceServerTimeMs) {
+        return fetchClosedKlines(symbol, interval, startInclusive, endExclusive, limit);
+    }
+
     /**
      * 获取上游服务器当前时间，用于判断 K 线是否已闭合。
      *

@@ -123,8 +123,9 @@ public interface MarketSyncTaskMapper {
                       @Param("gapCount") long gapCount, @Param("gapSegmentCount") int gapSegmentCount);
 
     @Update("UPDATE q_market_sync_task SET Status=#{status}," +
-            "SourceMode=#{sourceMode},CurrentSourceFile=#{currentSourceFile}," +
-            "PlannedFileCount=#{plannedFileCount},CompletedFileCount=#{completedFileCount}," +
+            "CurrentSourceFile=#{currentSourceFile}," +
+            "PlannedFileCount=COALESCE(#{plannedFileCount},PlannedFileCount)," +
+            "CompletedFileCount=GREATEST(CompletedFileCount,#{completedFileCount})," +
             "FetchedCount=#{fetchedCount},InsertedCount=#{insertedCount}," +
             "ExistingCount=#{existingCount},ConflictCount=#{conflictCount}," +
             "BatchCount=#{batchCount},ProgressPercent=#{progressPercent}," +

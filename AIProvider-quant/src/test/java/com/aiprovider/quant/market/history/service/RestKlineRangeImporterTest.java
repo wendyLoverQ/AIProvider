@@ -50,7 +50,7 @@ class RestKlineRangeImporterTest {
 
         // 一批 3 根 K 线，openTime: 0, 60000, 120000
         List<MarketCandle> batch1 = candles(0, 60000, 120000);
-        when(provider.fetchClosedKlines(eq(SYMBOL), eq(INTERVAL), anyLong(), anyLong(), anyInt()))
+        when(provider.fetchClosedKlines(eq(SYMBOL), eq(INTERVAL), anyLong(), anyLong(), anyInt(), eq(SERVER_TIME)))
                 .thenReturn(batch1)
                 .thenReturn(Collections.emptyList());
 
@@ -82,7 +82,7 @@ class RestKlineRangeImporterTest {
         List<MarketCandle> batch1 = candles(0, 60000, 120000);
         // 第二批：openTime 180000, 240000
         List<MarketCandle> batch2 = candles(180000, 240000);
-        when(provider.fetchClosedKlines(eq(SYMBOL), eq(INTERVAL), anyLong(), anyLong(), anyInt()))
+        when(provider.fetchClosedKlines(eq(SYMBOL), eq(INTERVAL), anyLong(), anyLong(), anyInt(), eq(SERVER_TIME)))
                 .thenReturn(batch1)
                 .thenReturn(batch2)
                 .thenReturn(Collections.emptyList());
@@ -122,7 +122,7 @@ class RestKlineRangeImporterTest {
         List<MarketCandle> batch1 = candles(0);
         // 批次 2: openTime 60000
         List<MarketCandle> batch2 = candles(60000);
-        when(provider.fetchClosedKlines(eq(SYMBOL), eq(INTERVAL), anyLong(), anyLong(), anyInt()))
+        when(provider.fetchClosedKlines(eq(SYMBOL), eq(INTERVAL), anyLong(), anyLong(), anyInt(), eq(SERVER_TIME)))
                 .thenReturn(batch1)
                 .thenReturn(batch2)
                 .thenReturn(Collections.emptyList());
@@ -137,9 +137,9 @@ class RestKlineRangeImporterTest {
         RestKlineRangeImporter.ImportStats stats = importer.importRange(task, 0, 120000, SERVER_TIME, -1);
 
         // 第一次请求 cursor=0, batchEnd=60000
-        verify(provider).fetchClosedKlines(SYMBOL, INTERVAL, 0L, 60000L, 1);
+        verify(provider).fetchClosedKlines(SYMBOL, INTERVAL, 0L, 60000L, 1, SERVER_TIME);
         // 第二次请求 cursor=60000, batchEnd=120000
-        verify(provider).fetchClosedKlines(SYMBOL, INTERVAL, 60000L, 120000L, 1);
+        verify(provider).fetchClosedKlines(SYMBOL, INTERVAL, 60000L, 120000L, 1, SERVER_TIME);
 
         assertThat(stats.batches).isEqualTo(2);
     }
@@ -154,7 +154,7 @@ class RestKlineRangeImporterTest {
         List<MarketCandle> batch1 = candles(0, 60000, 120000);
         // 第二批返回的 openTime 不超过 120000（游标停滞）
         List<MarketCandle> batch2 = candles(120000);
-        when(provider.fetchClosedKlines(eq(SYMBOL), eq(INTERVAL), anyLong(), anyLong(), anyInt()))
+        when(provider.fetchClosedKlines(eq(SYMBOL), eq(INTERVAL), anyLong(), anyLong(), anyInt(), eq(SERVER_TIME)))
                 .thenReturn(batch1)
                 .thenReturn(batch2);
 
@@ -178,7 +178,7 @@ class RestKlineRangeImporterTest {
         MarketCandleIngestService ingestService = mock(MarketCandleIngestService.class);
         MarketSyncTaskRepository taskRepo = mock(MarketSyncTaskRepository.class);
 
-        when(provider.fetchClosedKlines(eq(SYMBOL), eq(INTERVAL), anyLong(), anyLong(), anyInt()))
+        when(provider.fetchClosedKlines(eq(SYMBOL), eq(INTERVAL), anyLong(), anyLong(), anyInt(), eq(SERVER_TIME)))
                 .thenReturn(Collections.emptyList());
 
         RestKlineRangeImporter importer = new RestKlineRangeImporter(provider, ingestService, taskRepo, 500, 100_000);
@@ -201,7 +201,7 @@ class RestKlineRangeImporterTest {
         // 每批 3 根，maxCandlesPerTask=5 → 第二批后超过
         List<MarketCandle> batch1 = candles(0, 60000, 120000);
         List<MarketCandle> batch2 = candles(180000, 240000, 300000);
-        when(provider.fetchClosedKlines(eq(SYMBOL), eq(INTERVAL), anyLong(), anyLong(), anyInt()))
+        when(provider.fetchClosedKlines(eq(SYMBOL), eq(INTERVAL), anyLong(), anyLong(), anyInt(), eq(SERVER_TIME)))
                 .thenReturn(batch1)
                 .thenReturn(batch2)
                 .thenReturn(Collections.emptyList());

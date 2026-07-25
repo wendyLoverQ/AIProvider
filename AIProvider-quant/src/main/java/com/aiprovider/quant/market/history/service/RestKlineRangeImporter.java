@@ -2,9 +2,7 @@ package com.aiprovider.quant.market.history.service;
 
 import com.aiprovider.quant.exchange.binance.usdm.BinanceUsdmUpstreamException;
 import com.aiprovider.quant.market.history.model.MarketSyncTask;
-import com.aiprovider.quant.market.history.model.MarketSyncTaskStatus;
 import com.aiprovider.quant.market.history.port.HistoricalMarketDataProvider;
-import com.aiprovider.quant.market.history.port.MarketSyncTaskRepository;
 import com.aiprovider.quant.market.model.KlineInterval;
 import com.aiprovider.quant.market.model.MarketCandle;
 import org.slf4j.Logger;
@@ -14,6 +12,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * 可复用 REST K 线范围导入器。
@@ -38,19 +37,25 @@ public class RestKlineRangeImporter {
 
     private final HistoricalMarketDataProvider provider;
     private final MarketCandleIngestService ingestService;
-    private final MarketSyncTaskRepository taskRepository;
     private final int batchSize;
     private final int maxCandlesPerTask;
 
     public RestKlineRangeImporter(HistoricalMarketDataProvider provider,
                                    MarketCandleIngestService ingestService,
-                                   MarketSyncTaskRepository taskRepository,
                                    int batchSize, int maxCandlesPerTask) {
         this.provider = provider;
         this.ingestService = ingestService;
-        this.taskRepository = taskRepository;
         this.batchSize = batchSize;
         this.maxCandlesPerTask = maxCandlesPerTask;
+    }
+
+    /** Compatibility constructor retained for existing callers; the repository is intentionally ignored. */
+    @Deprecated
+    public RestKlineRangeImporter(HistoricalMarketDataProvider provider,
+                                   MarketCandleIngestService ingestService,
+                                   com.aiprovider.quant.market.history.port.MarketSyncTaskRepository ignored,
+                                   int batchSize, int maxCandlesPerTask) {
+        this(provider, ingestService, batchSize, maxCandlesPerTask);
     }
 
     /**
@@ -65,6 +70,13 @@ public class RestKlineRangeImporter {
      */
     public ImportStats importRange(MarketSyncTask task, long rangeStartInclusive, long rangeEndExclusive,
                                     long serverTimeMs, long initialLastOpenTime) {
+        return importRange(task, rangeStartInclusive, rangeEndExclusive, serverTimeMs,
+                initialLastOpenTime, null);
+    }
+
+    public ImportStats importRange(MarketSyncTask task, long rangeStartInclusive, long rangeEndExclusive,
+                                    long serverTimeMs, long initialLastOpenTime,
+                                    Consumer<ImportStats> progressCallback) {
         String taskId = task.getTaskId();
         KlineInterval interval = task.getInterval();
         long durationMs = interval.durationMillis();
@@ -78,7 +90,7 @@ public class RestKlineRangeImporter {
             long batchEnd = Math.min(cursor + (long) batchSize * durationMs, rangeEndExclusive);
 
             List<MarketCandle> fetched = provider.fetchClosedKlines(
-                    task.getSymbol(), interval, cursor, batchEnd, batchSize);
+                    task.getSymbol(), interval, cursor, batchEnd, batchSize, serverTimeMs);
 
             if (fetched == null || fetched.isEmpty()) {
                 log.info("operation=rest-import-batch taskId={} msg=空页结束 cursor={} batchEnd={}",
@@ -118,31 +130,19 @@ public class RestKlineRangeImporter {
 
             // 推进游标
             cursor = currentBatchLastOpenTime + durationMs;
+            if (progressCallback != null) {
+                progressCallback.accept(stats);
+            }
 
-            // 更新任务进度
-            BigDecimal progress = calculateProgress(cursor, rangeStartInclusive, rangeEndExclusive);
-            taskRepository.updateProgress(taskId, MarketSyncTaskStatus.WRITING,
-                    stats.fetched, stats.inserted, stats.existing, stats.conflict, 0,
-                    stats.batches, progress, null);
-
-            log.debug("operation=rest-import-batch taskId={} batch={} fetched={} inserted={} existing={} conflict={} cursor={} lastOpenTime={} progress={}",
+            log.debug("operation=rest-import-batch taskId={} batch={} fetched={} inserted={} existing={} conflict={} cursor={} lastOpenTime={}",
                     taskId, stats.batches, fetched.size(), batchResult.inserted, batchResult.existing,
-                    batchResult.conflict, cursor, stats.lastOpenTime, progress);
+                    batchResult.conflict, cursor, stats.lastOpenTime);
         }
 
         return stats;
     }
 
     // ---- 辅助方法 ----
-
-    private BigDecimal calculateProgress(long cursor, long start, long end) {
-        if (end <= start) return BigDecimal.valueOf(100);
-        long total = end - start;
-        long done = Math.min(cursor - start, total);
-        return BigDecimal.valueOf(done)
-                .multiply(BigDecimal.valueOf(100))
-                .divide(BigDecimal.valueOf(total), 4, RoundingMode.HALF_UP);
-    }
 
     // ---- 内部类型 ----
 

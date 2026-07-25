@@ -104,7 +104,10 @@ public class MarketHistorySyncService {
             // 委托 RestKlineRangeImporter 执行分页下载 + 校验 + 写入
             // （含游标推进校验、previousLastOpenTime 语义、进度更新和已获取数量上限校验）
             RestKlineRangeImporter.ImportStats stats = restImporter.importRange(
-                    task, normalizedStart, normalizedEnd, serverTimeMs, -1);
+                    task, normalizedStart, normalizedEnd, serverTimeMs, -1,
+                    current -> taskRepository.updateProgress(taskId, MarketSyncTaskStatus.WRITING,
+                            current.fetched, current.inserted, current.existing, current.conflict, 0,
+                            current.batches, BigDecimal.valueOf(100), null));
 
             // 校验阶段
             taskRepository.updateProgress(taskId, MarketSyncTaskStatus.VALIDATING,

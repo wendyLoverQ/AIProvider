@@ -3,6 +3,7 @@ package com.aiprovider.config.quant;
 import javax.validation.constraints.Max;
 import javax.validation.constraints.Min;
 import javax.validation.constraints.NotBlank;
+import javax.validation.Valid;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
@@ -46,6 +47,7 @@ public class QuantMarketHistoryProperties {
     private String executorThreadNamePrefix = "quant-history-sync-";
 
     /** Binance 官方归档下载配置。 */
+    @Valid
     private Archive archive = new Archive();
 
     public int getBatchSize() { return batchSize; }

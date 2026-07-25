@@ -6,6 +6,7 @@ import com.aiprovider.quant.market.history.model.MarketDataset;
 import com.aiprovider.quant.market.history.model.MarketDatasetStatus;
 import com.aiprovider.quant.market.history.model.MarketSyncTask;
 import com.aiprovider.quant.market.history.port.MarketDatasetRepository;
+import com.aiprovider.quant.market.history.port.HistoricalMarketDataProvider;
 import com.aiprovider.quant.market.history.port.MarketSyncTaskRepository;
 import com.aiprovider.quant.market.history.service.ArchiveImportService;
 import com.aiprovider.quant.market.history.service.MarketHistorySyncService;
@@ -52,6 +53,7 @@ class MarketHistoryTaskServiceTest {
     private QuantMarketHistoryProperties properties;
     private ThreadPoolTaskExecutor executor;
     private PublicMarketQueryService publicMarketQueryService;
+    private HistoricalMarketDataProvider historicalMarketDataProvider;
 
     private MarketHistoryTaskService service;
 
@@ -64,6 +66,8 @@ class MarketHistoryTaskServiceTest {
         properties = new QuantMarketHistoryProperties();
         executor = mock(ThreadPoolTaskExecutor.class);
         publicMarketQueryService = mock(PublicMarketQueryService.class);
+        historicalMarketDataProvider = mock(HistoricalMarketDataProvider.class);
+        when(historicalMarketDataProvider.serverTime()).thenReturn(Instant.parse("2025-02-01T00:00:00Z"));
 
         // executor.execute(runnable) 立即执行传入的 Runnable，用于验证路由
         doAnswer(invocation -> {
@@ -73,7 +77,8 @@ class MarketHistoryTaskServiceTest {
         }).when(executor).execute(any(Runnable.class));
 
         service = new MarketHistoryTaskService(syncService, archiveImportService,
-                taskRepository, datasetRepository, properties, executor, publicMarketQueryService);
+                taskRepository, datasetRepository, properties, executor, publicMarketQueryService,
+                historicalMarketDataProvider);
     }
 
     // ---- 合约校验 ----

@@ -38,7 +38,7 @@ class QuantMarketDataControllerTest {
     void createSyncTaskDelegatesToTaskService() {
         MarketHistoryTaskService taskService = mock(MarketHistoryTaskService.class);
         MarketHistoryQueryService queryService = mock(MarketHistoryQueryService.class);
-        when(taskService.createTask(eq("BTCUSDT"), eq("1m"), any(), any(), eq("AUTO")))
+        when(taskService.createTask(eq("BINANCE_USDM"), eq("USDM_PERPETUAL"), eq("BTCUSDT"), eq("1m"), any(), any(), eq("AUTO")))
                 .thenReturn("task-uuid-123");
 
         QuantMarketDataController controller = new QuantMarketDataController(taskService, queryService);
@@ -49,12 +49,14 @@ class QuantMarketDataControllerTest {
         req.setStartTime(Instant.parse("2025-01-01T00:00:00Z"));
         req.setEndTime(Instant.parse("2025-01-01T00:01:00Z"));
         req.setSourceMode("AUTO");
+        req.setProvider("BINANCE_USDM");
+        req.setMarketType("USDM_PERPETUAL");
 
         Result<Map<String, String>> result = controller.createSyncTask(req);
 
         assertThat(result.getCode()).isEqualTo(200);
         assertThat(result.getData().get("taskId")).isEqualTo("task-uuid-123");
-        verify(taskService).createTask("BTCUSDT", "1m",
+        verify(taskService).createTask("BINANCE_USDM", "USDM_PERPETUAL", "BTCUSDT", "1m",
                 Instant.parse("2025-01-01T00:00:00Z"),
                 Instant.parse("2025-01-01T00:01:00Z"),
                 "AUTO");

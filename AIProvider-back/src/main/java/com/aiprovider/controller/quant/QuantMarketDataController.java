@@ -9,6 +9,7 @@ import com.aiprovider.quant.market.history.model.MarketSyncTask;
 import com.aiprovider.quant.market.history.service.MarketHistoryQueryService;
 import com.aiprovider.service.quant.MarketHistoryTaskService;
 import org.springframework.web.bind.annotation.*;
+import javax.validation.Valid;
 
 import java.util.Collections;
 import java.util.List;
@@ -50,8 +51,9 @@ public class QuantMarketDataController {
      * 后端异步执行，返回任务 ID。
      */
     @PostMapping("/sync-tasks")
-    public Result<Map<String, String>> createSyncTask(@RequestBody SyncTaskCreateRequest request) {
+    public Result<Map<String, String>> createSyncTask(@Valid @RequestBody SyncTaskCreateRequest request) {
         String taskId = taskService.createTask(
+                request.getProvider(), request.getMarketType(),
                 request.getSymbol(),
                 request.getInterval(),
                 request.getStartTime(),

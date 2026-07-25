@@ -1,5 +1,6 @@
 package com.aiprovider.controller.quant.dto;
 
+import javax.validation.constraints.NotBlank;
 import java.time.Instant;
 
 /**
@@ -19,9 +20,11 @@ import java.time.Instant;
 public class SyncTaskCreateRequest {
 
     /** 合约符号，如 BTCUSDT。 */
+    @NotBlank
     private String symbol;
 
     /** K 线周期代码，如 1m、5m、15m、1h、4h、1d。 */
+    @NotBlank
     private String interval;
 
     /** 请求起始时间（ISO 8601）。 */
@@ -31,12 +34,15 @@ public class SyncTaskCreateRequest {
     private Instant endTime;
 
     /** 行情提供方，当前固定 BINANCE_USDM。 */
+    @NotBlank
     private String provider;
 
     /** 市场类型，当前固定 USDM_PERPETUAL。 */
+    @NotBlank
     private String marketType;
 
     /** 数据来源模式，决定使用哪条导入管线。 */
+    @NotBlank
     private String sourceMode;
 
     public String getSymbol() { return symbol; }

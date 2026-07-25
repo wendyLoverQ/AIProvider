@@ -218,6 +218,14 @@ public class BinanceUsdmPublicMarketClient implements PublicMarketDataProvider, 
     @Override
     public List<MarketCandle> fetchClosedKlines(String symbol, KlineInterval interval,
                                                  long startInclusive, long endExclusive, int limit) {
+        return fetchClosedKlines(symbol, interval, startInclusive, endExclusive, limit,
+                serverTime().toEpochMilli());
+    }
+
+    @Override
+    public List<MarketCandle> fetchClosedKlines(String symbol, KlineInterval interval,
+                                                 long startInclusive, long endExclusive, int limit,
+                                                 long referenceServerTimeMs) {
         String sym = requireSymbol(symbol);
         if (interval == null) {
             throw new IllegalArgumentException("K 线周期不能为空");
@@ -242,8 +250,8 @@ public class BinanceUsdmPublicMarketClient implements PublicMarketDataProvider, 
         long start = System.nanoTime();
         JsonNode body = fetch(path, op, sym, "/fapi/v1/klines");
 
-        Instant serverTime = serverTime();
-        long serverTimeMs = serverTime.toEpochMilli();
+        Instant serverTime = Instant.ofEpochMilli(referenceServerTimeMs);
+        long serverTimeMs = referenceServerTimeMs;
 
         List<MarketCandle> all = mapper.mapKlines(sym, interval, body, serverTime);
 

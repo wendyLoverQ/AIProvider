@@ -7,6 +7,7 @@ import com.aiprovider.quant.market.model.KlineInterval;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * {@link ArchivePlanner} 单元测试。
@@ -106,5 +107,41 @@ class ArchivePlannerTest {
     void planModeIsAlwaysAuto() {
         ArchiveImportPlan plan = planner.planArchiveImport(SYMBOL, INTERVAL, JAN_01, FEB_01, FEB_04);
         assertThat(plan.getMode()).isEqualTo(ArchiveImportMode.AUTO);
+    }
+
+    @Test
+    void monthlyModeOnlyProducesMonthlyFiles() {
+        ArchiveImportPlan plan = planner.plan(SYMBOL, INTERVAL, JAN_01, FEB_01, FEB_04,
+                ArchiveImportMode.ARCHIVE_MONTHLY);
+        assertThat(plan.getMode()).isEqualTo(ArchiveImportMode.ARCHIVE_MONTHLY);
+        assertThat(plan.getFiles()).allMatch(file -> file.getSourceMode() == ArchiveImportMode.ARCHIVE_MONTHLY);
+        assertThat(plan.getDailyFileCount()).isZero();
+        assertThat(plan.isHasRestTail()).isFalse();
+    }
+
+    @Test
+    void monthlyModeRejectsPartialMonth() {
+        assertThatThrownBy(() -> planner.plan(SYMBOL, INTERVAL, JAN_01 + 60_000, FEB_01, FEB_04,
+                ArchiveImportMode.ARCHIVE_MONTHLY))
+                .isInstanceOf(ArchiveDataException.class)
+                .hasMessageContaining("完整 UTC 月");
+    }
+
+    @Test
+    void dailyModeOnlyProducesDailyFiles() {
+        ArchiveImportPlan plan = planner.plan(SYMBOL, INTERVAL, FEB_01, FEB_04, FEB_05,
+                ArchiveImportMode.ARCHIVE_DAILY);
+        assertThat(plan.getMode()).isEqualTo(ArchiveImportMode.ARCHIVE_DAILY);
+        assertThat(plan.getFiles()).allMatch(file -> file.getSourceMode() == ArchiveImportMode.ARCHIVE_DAILY);
+        assertThat(plan.getMonthlyFileCount()).isZero();
+        assertThat(plan.isHasRestTail()).isFalse();
+    }
+
+    @Test
+    void dailyModeRejectsCurrentDay() {
+        assertThatThrownBy(() -> planner.plan(SYMBOL, INTERVAL, FEB_04, FEB_05, FEB_04 + 12 * 60 * 60 * 1000L,
+                ArchiveImportMode.ARCHIVE_DAILY))
+                .isInstanceOf(ArchiveDataException.class)
+                .hasMessageContaining("当前 UTC 日期");
     }
 }

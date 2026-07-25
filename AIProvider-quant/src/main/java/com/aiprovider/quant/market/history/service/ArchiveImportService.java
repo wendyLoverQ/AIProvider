@@ -94,22 +94,24 @@ public class ArchiveImportService {
         KlineInterval interval = task.getInterval();
         long normalizedStart = task.getNormalizedStartTime().toEpochMilli();
         long normalizedEnd = task.getNormalizedEndTime().toEpochMilli();
-        long serverTimeMs = Instant.now().toEpochMilli();
+        long serverTimeMs;
 
         try {
+            serverTimeMs = marketDataProvider.serverTime().toEpochMilli();
             // 1. 规划归档文件
-            ArchiveImportPlan plan = planner.planArchiveImport(
-                    task.getSymbol(), interval, normalizedStart, normalizedEnd, serverTimeMs);
+            ArchiveImportMode requestedMode = ArchiveImportMode.valueOf(task.getSourceMode());
+            ArchiveImportPlan plan = planner.plan(task.getSymbol(), interval, normalizedStart, normalizedEnd,
+                    serverTimeMs, requestedMode);
 
             int plannedFileCount = plan.totalFileCount();
+            ImportStats stats = new ImportStats();
+            stats.plannedFileCount = plannedFileCount;
 
             log.info("operation=archive-import-start taskId={} datasetId={} symbol={} interval={} plannedFiles={} monthly={} daily={} hasRestTail={}",
                     taskId, task.getDatasetId(), task.getSymbol(), interval.code(),
                     plannedFileCount, plan.getMonthlyFileCount(), plan.getDailyFileCount(), plan.isHasRestTail());
 
             // 2. 逐文件下载 + 解析 + 写入（归档部分）
-            ImportStats stats = new ImportStats();
-
             for (int i = 0; i < plan.getFiles().size(); i++) {
                 ArchiveKlineFile file = plan.getFiles().get(i);
 
@@ -162,6 +164,7 @@ public class ArchiveImportService {
                         plannedFileCount, i + 1,
                         stats.fetched, stats.inserted, stats.existing, stats.conflict,
                         stats.batches, progress);
+                stats.completedFileCount = i + 1;
 
                 log.info("operation=archive-import-file-complete taskId={} file={} completed={} fetched={} inserted={} existing={} progress={}",
                         taskId, file.getZipFileName(), i + 1, stats.fetched, stats.inserted, stats.existing, progress);
@@ -177,10 +180,14 @@ public class ArchiveImportService {
                         taskId, restTailStart, restTailEnd, stats.lastOpenTime);
 
                 // 获取上游服务器时间，用于闭合校验（排除未闭合 K 线）
-                long restServerTimeMs = marketDataProvider.serverTime().toEpochMilli();
-
                 RestKlineRangeImporter.ImportStats restStats = restImporter.importRange(
-                        task, restTailStart, restTailEnd, restServerTimeMs, stats.lastOpenTime);
+                        task, restTailStart, restTailEnd, serverTimeMs, stats.lastOpenTime,
+                        current -> taskRepository.updateArchiveProgress(taskId,
+                                MarketSyncTaskStatus.WRITING.name(), task.getSourceMode(), null,
+                                stats.plannedFileCount, stats.completedFileCount,
+                                stats.fetched + current.fetched, stats.inserted + current.inserted,
+                                stats.existing + current.existing, stats.conflict + current.conflict,
+                                stats.batches + current.batches, BigDecimal.valueOf(100)));
 
                 stats.fetched += restStats.fetched;
                 stats.inserted += restStats.inserted;
@@ -248,7 +255,7 @@ public class ArchiveImportService {
         String taskId = task.getTaskId();
 
         taskRepository.updateArchiveProgress(taskId, MarketSyncTaskStatus.VALIDATING.name(),
-                ArchiveImportMode.AUTO.name(), null, null, 0,
+                task.getSourceMode(), null, stats.plannedFileCount, stats.completedFileCount,
                 stats.fetched, stats.inserted, stats.existing, stats.conflict,
                 stats.batches, BigDecimal.valueOf(100));
 
@@ -292,5 +299,7 @@ public class ArchiveImportService {
         long conflict = 0;
         int batches = 0;
         long lastOpenTime = -1;
+        int plannedFileCount = 0;
+        int completedFileCount = 0;
     }
 }

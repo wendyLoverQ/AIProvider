@@ -77,11 +77,10 @@ public class QuantMarketHistoryConfiguration {
     public RestKlineRangeImporter restKlineRangeImporter(
             HistoricalMarketDataProvider provider,
             MarketCandleIngestService ingestService,
-            MarketSyncTaskRepository taskRepository,
             QuantMarketHistoryProperties properties) {
         log.info("operation=rest-importer-init batchSize={} maxCandlesPerTask={}",
                 properties.getBatchSize(), properties.getMaxCandlesPerTask());
-        return new RestKlineRangeImporter(provider, ingestService, taskRepository,
+        return new RestKlineRangeImporter(provider, ingestService,
                 properties.getBatchSize(), properties.getMaxCandlesPerTask());
     }
 

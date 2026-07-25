@@ -69,6 +69,34 @@ public class ArchivePlanner {
                                                long normalizedStartMs,
                                                long normalizedEndMs,
                                                long serverTimeMs) {
+        return plan(symbol, interval, normalizedStartMs, normalizedEndMs, serverTimeMs,
+                ArchiveImportMode.AUTO);
+    }
+
+    /** Plans strictly according to the requested source mode. */
+    public ArchiveImportPlan plan(String symbol, KlineInterval interval,
+                                  long normalizedStartMs, long normalizedEndMs,
+                                  long serverTimeMs, ArchiveImportMode mode) {
+        if (mode == null || mode == ArchiveImportMode.REST_GAP_REPAIR) {
+            throw new ArchiveDataException("INVALID_ARCHIVE_MODE", "归档规划不支持 REST_GAP_REPAIR");
+        }
+        if (normalizedEndMs <= normalizedStartMs) {
+            throw new ArchiveDataException("INVALID_TIME_RANGE", "归档范围必须为正数");
+        }
+        if (mode == ArchiveImportMode.AUTO) {
+            return planAuto(symbol, interval, normalizedStartMs, normalizedEndMs, serverTimeMs);
+        }
+        if (mode == ArchiveImportMode.ARCHIVE_MONTHLY) {
+            return planMonthlyOnly(symbol, interval, normalizedStartMs, normalizedEndMs, serverTimeMs);
+        }
+        return planDailyOnly(symbol, interval, normalizedStartMs, normalizedEndMs, serverTimeMs);
+    }
+
+    private ArchiveImportPlan planAuto(String symbol,
+                                       KlineInterval interval,
+                                       long normalizedStartMs,
+                                       long normalizedEndMs,
+                                       long serverTimeMs) {
         // 1. 归档截止时间 archiveCutoffMs = 今天 00:00 UTC（= 昨天 00:00 UTC + 1 天）。
         //    日包 T+1 发布：昨天数据今天可下载；今天数据尚无归档。归档文件只覆盖到昨天结束。
         LocalDate todayUtc = Instant.ofEpochMilli(serverTimeMs)
@@ -167,6 +195,46 @@ public class ArchivePlanner {
                 restTailStart, restTailEnd);
 
         return plan;
+    }
+
+    private ArchiveImportPlan planMonthlyOnly(String symbol, KlineInterval interval,
+                                               long startMs, long endMs, long serverTimeMs) {
+        if (startMs != monthStartMs(startMs) || endMs != monthStartMs(endMs)) {
+            throw new ArchiveDataException("ARCHIVE_MONTHLY_REQUIRES_FULL_MONTH", "ARCHIVE_MONTHLY 要求完整 UTC 月范围");
+        }
+        List<ArchiveKlineFile> files = new ArrayList<>();
+        for (long cursor = startMs; cursor < endMs; cursor = nextMonthStartMs(cursor)) {
+            if (serverTimeMs < firstMondayOfNextMonthMs(cursor)) {
+                throw new ArchiveDataException("ARCHIVE_MONTHLY_NOT_AVAILABLE", "月包尚未发布: " + formatYearMonth(cursor));
+            }
+            String name = symbol + "-" + interval.code() + "-" + formatYearMonth(cursor) + ".zip";
+            files.add(new ArchiveKlineFile(ArchiveImportMode.ARCHIVE_MONTHLY,
+                    "data/futures/um/monthly/klines/" + symbol + "/" + interval.code() + "/" + name,
+                    name, name + ".CHECKSUM", cursor, nextMonthStartMs(cursor)));
+        }
+        return new ArchiveImportPlan(files, ArchiveImportMode.ARCHIVE_MONTHLY, startMs, endMs,
+                files.size(), 0, false, null, null);
+    }
+
+    private ArchiveImportPlan planDailyOnly(String symbol, KlineInterval interval,
+                                             long startMs, long endMs, long serverTimeMs) {
+        if (startMs != dayStartMs(startMs) || endMs != dayStartMs(endMs)) {
+            throw new ArchiveDataException("ARCHIVE_DAILY_REQUIRES_FULL_DAY", "ARCHIVE_DAILY 要求完整 UTC 自然日范围");
+        }
+        LocalDate today = Instant.ofEpochMilli(serverTimeMs).atZone(ZoneOffset.UTC).toLocalDate();
+        long todayMs = today.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli();
+        if (endMs > todayMs) {
+            throw new ArchiveDataException("ARCHIVE_DAILY_NOT_AVAILABLE", "当前 UTC 日期及未来日期没有日包");
+        }
+        List<ArchiveKlineFile> files = new ArrayList<>();
+        for (long cursor = startMs; cursor < endMs; cursor = nextDayStartMs(cursor)) {
+            String name = symbol + "-" + interval.code() + "-" + formatYearMonthDay(cursor) + ".zip";
+            files.add(new ArchiveKlineFile(ArchiveImportMode.ARCHIVE_DAILY,
+                    "data/futures/um/daily/klines/" + symbol + "/" + interval.code() + "/" + name,
+                    name, name + ".CHECKSUM", cursor, nextDayStartMs(cursor)));
+        }
+        return new ArchiveImportPlan(files, ArchiveImportMode.ARCHIVE_DAILY, startMs, endMs,
+                0, files.size(), false, null, null);
     }
 
     /**

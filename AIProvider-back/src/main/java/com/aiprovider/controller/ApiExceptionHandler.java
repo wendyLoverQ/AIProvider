@@ -15,6 +15,7 @@ import com.aiprovider.quant.exchange.binance.usdm.BinanceUsdmUpstreamException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -41,6 +42,12 @@ public class ApiExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Result<Void> badRequest(IllegalArgumentException exception) { return Result.error(400, exception.getMessage()); }
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<Void> validation(MethodArgumentNotValidException exception) {
+        return Result.error(400, "请求参数校验失败");
+    }
 
     @ExceptionHandler(ResourceNotFoundException.class)
     @ResponseStatus(HttpStatus.NOT_FOUND)
