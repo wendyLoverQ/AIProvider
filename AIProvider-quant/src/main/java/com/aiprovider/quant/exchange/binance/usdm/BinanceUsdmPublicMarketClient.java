@@ -1,5 +1,6 @@
 package com.aiprovider.quant.exchange.binance.usdm;
 
+import com.aiprovider.quant.market.history.port.HistoricalMarketDataProvider;
 import com.aiprovider.quant.market.model.KlineInterval;
 import com.aiprovider.quant.market.model.MarketCandle;
 import com.aiprovider.quant.market.model.MarketProviderId;
@@ -40,7 +41,7 @@ import java.util.regex.Pattern;
  * snapshot 一次调用并行请求 4 个端点（24hr ticker、premiumIndex、bookTicker、openInterest），
  * 任一失败整体失败。
  */
-public class BinanceUsdmPublicMarketClient implements PublicMarketDataProvider {
+public class BinanceUsdmPublicMarketClient implements PublicMarketDataProvider, HistoricalMarketDataProvider {
 
     private static final Logger log = LoggerFactory.getLogger(BinanceUsdmPublicMarketClient.class);
     private static final Pattern SYMBOL_PATTERN = Pattern.compile("^[A-Z0-9]{1,32}$");
@@ -201,19 +202,74 @@ public class BinanceUsdmPublicMarketClient implements PublicMarketDataProvider {
         return candles;
     }
 
+    // ---- HistoricalMarketDataProvider ----
+
+    @Override
+    public Instant serverTime() {
+        String op = "serverTime";
+        JsonNode body = fetch("/fapi/v1/time", op, null, "/fapi/v1/time");
+        JsonNode serverTimeNode = body.get("serverTime");
+        if (serverTimeNode == null || !serverTimeNode.canConvertToLong()) {
+            throw new BinanceUsdmUpstreamException(0, 0, "Binance USDM /fapi/v1/time 缺少 serverTime", null, null);
+        }
+        return Instant.ofEpochMilli(serverTimeNode.asLong());
+    }
+
+    @Override
+    public List<MarketCandle> fetchClosedKlines(String symbol, KlineInterval interval,
+                                                 long startInclusive, long endExclusive, int limit) {
+        String sym = requireSymbol(symbol);
+        if (interval == null) {
+            throw new IllegalArgumentException("K 线周期不能为空");
+        }
+        if (!KlineInterval.SYNC_SUPPORTED.contains(interval)) {
+            throw new IllegalArgumentException("不支持同步的 K 线周期: " + interval.code());
+        }
+        if (limit < 1 || limit > 1500) {
+            throw new IllegalArgumentException("limit 必须在 1 到 1500 之间");
+        }
+        if (endExclusive <= startInclusive) {
+            throw new IllegalArgumentException("endExclusive 必须大于 startInclusive");
+        }
+
+        String op = "fetchClosedKlines";
+        String path = "/fapi/v1/klines?symbol=" + sym
+                + "&interval=" + interval.code()
+                + "&startTime=" + startInclusive
+                + "&endTime=" + endExclusive
+                + "&limit=" + limit;
+
+        long start = System.nanoTime();
+        JsonNode body = fetch(path, op, sym, "/fapi/v1/klines");
+
+        Instant serverTime = serverTime();
+        long serverTimeMs = serverTime.toEpochMilli();
+
+        List<MarketCandle> all = mapper.mapKlines(sym, interval, body, serverTime);
+
+        // 只返回已闭合 K 线（closeTime < serverTime）
+        List<MarketCandle> closed = new ArrayList<>(all.size());
+        for (MarketCandle c : all) {
+            if (c.getCloseTime() != null && c.getCloseTime().toEpochMilli() < serverTimeMs) {
+                closed.add(c);
+            }
+        }
+
+        long latencyMs = (System.nanoTime() - start) / 1_000_000L;
+        log.debug("operation={} provider=BINANCE_USDM symbol={} interval={} start={} end={} limit={} success=true fetched={} closed={} latencyMs={}",
+                op, sym, interval.code(), startInclusive, endExclusive, limit, all.size(), closed.size(), latencyMs);
+        return closed;
+    }
+
     /** 获取上游服务器时间用于 K 线闭合判断。失败时不影响 K 线返回（closed 置为 false 表示未知）。 */
     private Instant currentServerTime(String op, String symbol) {
         try {
-            JsonNode time = fetch("/fapi/v1/time", op + "/time", symbol, "/fapi/v1/time");
-            JsonNode node = time.get("serverTime");
-            if (node != null && node.canConvertToLong()) {
-                return Instant.ofEpochMilli(node.asLong());
-            }
+            return serverTime();
         } catch (BinanceUsdmUpstreamException e) {
             log.warn("operation={} provider=BINANCE_USDM symbol={} upstreamPath=/fapi/v1/time success=false httpStatus={} errorCode={} msg=服务器时间获取失败，K线闭合状态未知",
                     op, symbol, e.getHttpStatus(), e.getErrorCode());
+            return null;
         }
-        return null;
     }
 
     // ---- HTTP 请求 ----
