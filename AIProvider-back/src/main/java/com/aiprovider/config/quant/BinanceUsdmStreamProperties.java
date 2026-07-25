@@ -11,8 +11,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "quant.binance-usdm-stream")
 public class BinanceUsdmStreamProperties {
 
-    /** Binance fstream WebSocket 基础地址。 */
-    private String wsBaseUrl = "wss://fstream.binance.com";
+    /** Binance fstream WebSocket 基础地址。默认使用 binancefuture.com，fstream.binance.com 对部分云 IP 存在静默 geo-block。 */
+    private String wsBaseUrl = "wss://fstream.binancefuture.com";
     /** 连接超时（毫秒）。 */
     private int connectTimeoutMs = 5000;
     /** 最大重连次数。 */

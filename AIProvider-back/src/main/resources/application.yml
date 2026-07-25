@@ -136,7 +136,7 @@ quant:
     request-timeout-ms: ${BINANCE_USDM_REQUEST_TIMEOUT_MS:10000}
     contract-cache-seconds: ${BINANCE_USDM_CONTRACT_CACHE_SECONDS:300}
   binance-usdm-stream:
-    ws-base-url: ${BINANCE_USDM_WS_BASE_URL:wss://fstream.binance.com}
+    ws-base-url: ${BINANCE_USDM_WS_BASE_URL:wss://fstream.binancefuture.com}
     connect-timeout-ms: ${BINANCE_USDM_WS_CONNECT_TIMEOUT_MS:5000}
     max-reconnect-attempts: ${BINANCE_USDM_WS_MAX_RECONNECT_ATTEMPTS:6}
     initial-reconnect-delay-ms: ${BINANCE_USDM_WS_INITIAL_RECONNECT_DELAY_MS:1000}
