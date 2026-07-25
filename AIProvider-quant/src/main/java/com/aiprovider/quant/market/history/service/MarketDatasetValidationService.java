@@ -10,7 +10,6 @@ import com.aiprovider.quant.market.history.port.SyncUnitOfWork;
 import com.aiprovider.quant.market.model.KlineInterval;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -25,7 +24,6 @@ import java.util.List;
  * 数据集级状态只校验 earliestOpenTime ～ latestOpenTime 区间，
  * 不代表 Binance 上线以来所有数据都已下载。
  */
-@Service
 public class MarketDatasetValidationService {
 
     private static final Logger log = LoggerFactory.getLogger(MarketDatasetValidationService.class);
@@ -109,13 +107,19 @@ public class MarketDatasetValidationService {
                 gapRepository.insertBatch(gaps);
             }
 
+            // 计算缺失 K 线总根数（gapCount = Σ gap.missingCount，不是区段数量）
+            long totalMissingCount = 0;
+            for (MarketDataGap gap : gaps) {
+                totalMissingCount += gap.getMissingCount();
+            }
+
             // 更新数据集统计信息
             MarketDataset dataset = datasetRepository.findById(datasetId);
             if (dataset == null) {
                 throw new IllegalStateException("数据集不存在: " + datasetId);
             }
             dataset.setCandleCount(candleCount);
-            dataset.setGapCount(gaps.size());
+            dataset.setGapCount(totalMissingCount);
             dataset.setEarliestOpenTime(earliest != null ? Instant.ofEpochMilli(earliest) : null);
             dataset.setLatestOpenTime(latest != null ? Instant.ofEpochMilli(latest) : null);
             dataset.setLastValidatedAt(Instant.now());
@@ -138,25 +142,35 @@ public class MarketDatasetValidationService {
 
             datasetRepository.updateStats(dataset);
 
-            log.info("operation=validate-dataset datasetId={} candleCount={} gapCount={} status={} taskId={}",
-                    datasetId, candleCount, gaps.size(), dataset.getStatus(), taskId);
+            log.info("operation=validate-dataset datasetId={} candleCount={} gapCount={} gapSegments={} status={} taskId={}",
+                    datasetId, candleCount, totalMissingCount, gaps.size(), dataset.getStatus(), taskId);
 
             ValidationResult result = new ValidationResult();
             result.earliestOpenTimeMs = earliest;
             result.latestOpenTimeMs = latest;
             result.candleCount = candleCount;
-            result.gapCount = gaps.size();
+            result.gapCount = totalMissingCount;
+            result.gapSegmentCount = gaps.size();
+            result.gaps = gaps;
             result.status = dataset.getStatus();
             return result;
         });
     }
 
-    /** 校验结果。 */
+    /**
+     * 校验结果。
+     *
+     * gapCount = 缺失 K 线根数（Σ gap.missingCount）
+     * gapSegmentCount = 缺口区段数量（gaps.size()）
+     * gaps = 缺口列表，供调用方计算任务级缺口
+     */
     public static class ValidationResult {
         public Long earliestOpenTimeMs;
         public Long latestOpenTimeMs;
         public long candleCount;
         public long gapCount;
+        public int gapSegmentCount;
+        public List<MarketDataGap> gaps;
         public MarketDatasetStatus status;
     }
 }

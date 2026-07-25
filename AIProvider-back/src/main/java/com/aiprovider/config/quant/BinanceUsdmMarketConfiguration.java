@@ -2,11 +2,15 @@ package com.aiprovider.config.quant;
 
 import com.aiprovider.quant.exchange.binance.usdm.BinanceUsdmPublicMarketClient;
 import com.aiprovider.quant.market.port.PublicMarketDataProvider;
+import com.aiprovider.quant.market.service.PublicMarketProviderRegistry;
+import com.aiprovider.quant.market.service.PublicMarketQueryService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import java.util.List;
 
 /**
  * Binance USDⓈ-M Futures 公共行情 Spring 配置。
@@ -34,5 +38,17 @@ public class BinanceUsdmMarketConfiguration {
                 properties.getConnectTimeoutMs(),
                 properties.getRequestTimeoutMs(),
                 properties.getContractCacheSeconds());
+    }
+
+    @Bean
+    public PublicMarketProviderRegistry publicMarketProviderRegistry(List<PublicMarketDataProvider> providers) {
+        log.info("operation=public-market-registry-init providerCount={}", providers.size());
+        return new PublicMarketProviderRegistry(providers);
+    }
+
+    @Bean
+    public PublicMarketQueryService publicMarketQueryService(PublicMarketProviderRegistry registry) {
+        log.info("operation=public-market-query-service-init");
+        return new PublicMarketQueryService(registry);
     }
 }

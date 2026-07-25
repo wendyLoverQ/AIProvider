@@ -1,0 +1,265 @@
+package com.aiprovider.quant.market.history.service;
+
+import com.aiprovider.quant.market.history.model.ArchiveImportMode;
+import com.aiprovider.quant.market.history.model.ArchiveImportPlan;
+import com.aiprovider.quant.market.history.model.ArchiveKlineFile;
+import com.aiprovider.quant.market.history.model.MarketDataGap;
+import com.aiprovider.quant.market.history.model.MarketSyncTask;
+import com.aiprovider.quant.market.history.model.MarketSyncTaskStatus;
+import com.aiprovider.quant.market.history.port.HistoricalArchiveProvider;
+import com.aiprovider.quant.market.history.port.MarketDatasetRepository;
+import com.aiprovider.quant.market.history.port.MarketSyncTaskRepository;
+import com.aiprovider.quant.market.model.KlineInterval;
+import com.aiprovider.quant.market.model.MarketCandle;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Consumer;
+
+/**
+ * Binance 官方 ZIP 归档导入服务。
+ *
+ * 编排 {@link ArchivePlanner}（计划下载文件）、{@link HistoricalArchiveProvider}（下载+解析）
+ * 和 {@link MarketCandleIngestService}（校验+写入），完成历史 K 线的批量导入。
+ *
+ * <p>不使用 @Service 注解，由 AIProvider-back 通过 @Bean 创建。
+ * 与 {@link MarketHistorySyncService} 共用 {@link MarketCandleIngestService} 写入管线，
+ * 保证 REST 和归档两条数据来源走同一套校验和冲突检测逻辑。</p>
+ *
+ * <p>核心设计：</p>
+ * <ul>
+ *   <li>归档数据天然闭合，serverTimeMs 传 0 跳过闭合校验</li>
+ *   <li>每个 ZIP 文件覆盖 [rangeStart, rangeEndExclusive)，CSV 可能包含范围外 K 线，需过滤</li>
+ *   <li>lastOpenTime 跨文件累加，保证全局升序校验</li>
+ *   <li>进度通过 updateArchiveProgress 跟踪，含 sourceMode/currentSourceFile/fileCount</li>
+ *   <li>归档截止（昨天 00:00 UTC）之后的数据不在此服务范围内，hasRestTail 标记后由前端另行创建 REST 同步任务</li>
+ *   <li>冲突不自动覆盖，任务失败并记录错误码</li>
+ * </ul>
+ */
+public class ArchiveImportService {
+
+    private static final Logger log = LoggerFactory.getLogger(ArchiveImportService.class);
+    private static final String SOURCE = "BINANCE_ARCHIVE";
+    private static final String ERR_UNKNOWN = "ARCHIVE_IMPORT_ERROR";
+
+    private final ArchivePlanner planner;
+    private final HistoricalArchiveProvider archiveProvider;
+    private final MarketCandleIngestService ingestService;
+    private final MarketDatasetRepository datasetRepository;
+    private final MarketSyncTaskRepository taskRepository;
+    private final MarketDatasetValidationService validationService;
+
+    public ArchiveImportService(ArchivePlanner planner,
+                                HistoricalArchiveProvider archiveProvider,
+                                MarketCandleIngestService ingestService,
+                                MarketDatasetRepository datasetRepository,
+                                MarketSyncTaskRepository taskRepository,
+                                MarketDatasetValidationService validationService) {
+        this.planner = planner;
+        this.archiveProvider = archiveProvider;
+        this.ingestService = ingestService;
+        this.datasetRepository = datasetRepository;
+        this.taskRepository = taskRepository;
+        this.validationService = validationService;
+    }
+
+    /**
+     * 执行归档导入任务。
+     *
+     * 该方法在执行器线程中调用，不在 HTTP 请求线程中执行。
+     * 中途失败时已写入的 K 线保留，任务标记为 FAILED。
+     *
+     * @param task 已持久化的同步任务（datasetId、symbol、interval、normalizedRange 已就绪）
+     */
+    public void executeArchiveImport(MarketSyncTask task) {
+        String taskId = task.getTaskId();
+        KlineInterval interval = task.getInterval();
+        long normalizedStart = task.getNormalizedStartTime().toEpochMilli();
+        long normalizedEnd = task.getNormalizedEndTime().toEpochMilli();
+        long serverTimeMs = Instant.now().toEpochMilli();
+
+        try {
+            // 1. 规划归档文件
+            ArchiveImportPlan plan = planner.planArchiveImport(
+                    task.getSymbol(), interval, normalizedStart, normalizedEnd, serverTimeMs);
+
+            int plannedFileCount = plan.totalFileCount();
+
+            log.info("operation=archive-import-start taskId={} datasetId={} symbol={} interval={} plannedFiles={} monthly={} daily={} hasRestTail={}",
+                    taskId, task.getDatasetId(), task.getSymbol(), interval.code(),
+                    plannedFileCount, plan.getMonthlyFileCount(), plan.getDailyFileCount(), plan.isHasRestTail());
+
+            // 2. 逐文件下载 + 解析 + 写入
+            ImportStats stats = new ImportStats();
+
+            for (int i = 0; i < plan.getFiles().size(); i++) {
+                ArchiveKlineFile file = plan.getFiles().get(i);
+
+                // 更新进度：DOWNLOADING
+                BigDecimal progress = calculateFileProgress(i, plannedFileCount);
+                taskRepository.updateArchiveProgress(taskId, MarketSyncTaskStatus.DOWNLOADING.name(),
+                        plan.getMode().name(), file.getZipFileName(),
+                        plannedFileCount, i,
+                        stats.fetched, stats.inserted, stats.existing, stats.conflict,
+                        stats.batches, progress);
+
+                // 下载 + 解析 + 写入（回调内过滤范围并调用 IngestService）
+                final long fileRangeStart = file.getRangeStart();
+                final long fileRangeEnd = file.getRangeEndExclusive();
+
+                archiveProvider.downloadAndParse(file, task.getSymbol(), interval, new Consumer<List<MarketCandle>>() {
+                    @Override
+                    public void accept(List<MarketCandle> batch) {
+                        // 过滤到文件目标范围（日包可能只覆盖部分天数）
+                        List<MarketCandle> filtered = new ArrayList<>(batch.size());
+                        for (MarketCandle c : batch) {
+                            long openTimeMs = c.getOpenTime().toEpochMilli();
+                            if (openTimeMs >= fileRangeStart && openTimeMs < fileRangeEnd) {
+                                filtered.add(c);
+                            }
+                        }
+                        if (filtered.isEmpty()) {
+                            return;
+                        }
+
+                        // 委托 IngestService 校验 + 事务写入
+                        MarketCandleIngestService.BatchResult result = ingestService.ingestBatch(
+                                task.getDatasetId(), filtered, interval, task.getSymbol(),
+                                fileRangeStart, fileRangeEnd, 0, stats.lastOpenTime, SOURCE);
+
+                        // 累加统计
+                        stats.fetched += filtered.size();
+                        stats.inserted += result.inserted;
+                        stats.existing += result.existing;
+                        stats.conflict += result.conflict;
+                        stats.batches++;
+                        stats.lastOpenTime = filtered.get(filtered.size() - 1).getOpenTime().toEpochMilli();
+                    }
+                });
+
+                // 文件完成，更新进度：WRITING
+                progress = calculateFileProgress(i + 1, plannedFileCount);
+                taskRepository.updateArchiveProgress(taskId, MarketSyncTaskStatus.WRITING.name(),
+                        plan.getMode().name(), file.getZipFileName(),
+                        plannedFileCount, i + 1,
+                        stats.fetched, stats.inserted, stats.existing, stats.conflict,
+                        stats.batches, progress);
+
+                log.info("operation=archive-import-file-complete taskId={} file={} completed={} fetched={} inserted={} existing={} progress={}",
+                        taskId, file.getZipFileName(), i + 1, stats.fetched, stats.inserted, stats.existing, progress);
+            }
+
+            // 3. 校验 + 完成
+            completeWithValidation(task, interval, normalizedStart, normalizedEnd, stats);
+
+        } catch (MarketCandleIngestService.IngestException e) {
+            taskRepository.markFailed(taskId, e.errorCode, truncateMsg(e.getMessage()), null, null);
+            taskRepository.clearActiveLock(taskId);
+            log.warn("operation=archive-import-failed taskId={} errorCode={} msg={}",
+                    taskId, e.errorCode, e.getMessage());
+
+        } catch (Exception e) {
+            taskRepository.markFailed(taskId, ERR_UNKNOWN, truncateMsg(e.getMessage()), null, null);
+            taskRepository.clearActiveLock(taskId);
+            log.error("operation=archive-import-failed taskId={} msg={}", taskId, e.getMessage(), e);
+        }
+    }
+
+    // ---- 校验与完成 ----
+
+    private void completeWithValidation(MarketSyncTask task, KlineInterval interval,
+                                        long normalizedStart, long normalizedEnd,
+                                        ImportStats stats) {
+        String taskId = task.getTaskId();
+
+        taskRepository.updateArchiveProgress(taskId, MarketSyncTaskStatus.VALIDATING.name(),
+                ArchiveImportMode.AUTO.name(), null, null, 0,
+                stats.fetched, stats.inserted, stats.existing, stats.conflict,
+                stats.batches, BigDecimal.valueOf(100));
+
+        MarketDatasetValidationService.ValidationResult vr =
+                validationService.validateDataset(task.getDatasetId(), interval, taskId);
+
+        long taskGapCount = calculateTaskGaps(interval, normalizedStart, normalizedEnd,
+                vr.earliestOpenTimeMs, vr.latestOpenTimeMs, vr.gaps);
+
+        taskRepository.markCompleted(taskId, stats.fetched, stats.inserted, stats.existing,
+                taskGapCount, vr.gapSegmentCount);
+
+        datasetRepository.updateLastSync(task.getDatasetId(), taskId, Instant.now());
+
+        log.info("operation=archive-import-complete taskId={} datasetId={} fetched={} inserted={} existing={} conflict={} gaps={} gapSegments={} batches={}",
+                taskId, task.getDatasetId(), stats.fetched, stats.inserted, stats.existing,
+                stats.conflict, taskGapCount, vr.gapSegmentCount, stats.batches);
+    }
+
+    // ---- 辅助方法 ----
+
+    private BigDecimal calculateFileProgress(int completedFiles, int totalFiles) {
+        if (totalFiles <= 0) return BigDecimal.valueOf(100);
+        return BigDecimal.valueOf(completedFiles)
+                .multiply(BigDecimal.valueOf(100))
+                .divide(BigDecimal.valueOf(totalFiles), 4, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * 计算任务请求范围内的缺口 K 线总根数。
+     * 逻辑与 {@link MarketHistorySyncService#calculateTaskGaps} 一致。
+     */
+    private long calculateTaskGaps(KlineInterval interval,
+                                    long normalizedStart, long normalizedEnd,
+                                    Long earliestMs, Long latestMs,
+                                    List<MarketDataGap> internalGaps) {
+        long durationMs = interval.durationMillis();
+
+        if (earliestMs == null || latestMs == null) {
+            return (normalizedEnd - normalizedStart) / durationMs;
+        }
+
+        long gaps = 0;
+
+        long frontEnd = Math.min(earliestMs, normalizedEnd);
+        if (frontEnd > normalizedStart) {
+            gaps += (frontEnd - normalizedStart) / durationMs;
+        }
+
+        for (MarketDataGap gap : internalGaps) {
+            long gapStart = gap.getStartOpenTime().toEpochMilli();
+            long gapEndExclusive = gap.getEndOpenTimeExclusive().toEpochMilli();
+            long intersectStart = Math.max(gapStart, normalizedStart);
+            long intersectEnd = Math.min(gapEndExclusive, normalizedEnd);
+            if (intersectEnd > intersectStart) {
+                gaps += (intersectEnd - intersectStart) / durationMs;
+            }
+        }
+
+        long backStart = Math.max(latestMs + durationMs, normalizedStart);
+        if (normalizedEnd > backStart) {
+            gaps += (normalizedEnd - backStart) / durationMs;
+        }
+
+        return gaps;
+    }
+
+    private static String truncateMsg(String msg) {
+        if (msg == null) return null;
+        return msg.length() > 500 ? msg.substring(0, 500) : msg;
+    }
+
+    // ---- 内部类型 ----
+
+    /** 跨文件累加的导入统计。 */
+    private static class ImportStats {
+        long fetched = 0;
+        long inserted = 0;
+        long existing = 0;
+        long conflict = 0;
+        int batches = 0;
+        long lastOpenTime = -1;
+    }
+}

@@ -26,6 +26,7 @@ public class MarketDataset {
     private long candleCount;
     private long expectedInsideRange;
     private long gapCount;
+    private int gapSegmentCount;
     private MarketDatasetStatus status;
     private Instant lastSuccessfulSyncAt;
     private Instant lastValidatedAt;
@@ -65,6 +66,9 @@ public class MarketDataset {
 
     public long getGapCount() { return gapCount; }
     public void setGapCount(long gapCount) { this.gapCount = gapCount; }
+
+    public int getGapSegmentCount() { return gapSegmentCount; }
+    public void setGapSegmentCount(int gapSegmentCount) { this.gapSegmentCount = gapSegmentCount; }
 
     public MarketDatasetStatus getStatus() { return status; }
     public void setStatus(MarketDatasetStatus status) { this.status = status; }

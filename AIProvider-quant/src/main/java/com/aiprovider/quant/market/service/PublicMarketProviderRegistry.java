@@ -2,7 +2,6 @@ package com.aiprovider.quant.market.service;
 
 import com.aiprovider.quant.market.model.MarketProviderId;
 import com.aiprovider.quant.market.port.PublicMarketDataProvider;
-import org.springframework.stereotype.Service;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -16,7 +15,6 @@ import java.util.Objects;
  * 在 Spring 容器启动时收集所有 {@link PublicMarketDataProvider} Bean，按 {@link MarketProviderId}
  * 建立查找表。查找失败抛出 {@link IllegalArgumentException}，禁止返回 null 或默认值。
  */
-@Service
 public class PublicMarketProviderRegistry {
 
     private final Map<MarketProviderId, PublicMarketDataProvider> providers;

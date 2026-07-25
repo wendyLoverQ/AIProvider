@@ -8,7 +8,6 @@ import com.aiprovider.quant.market.history.port.MarketCandleRepository;
 import com.aiprovider.quant.market.history.port.MarketDataGapRepository;
 import com.aiprovider.quant.market.history.port.MarketDatasetRepository;
 import com.aiprovider.quant.market.model.MarketProviderId;
-import org.springframework.stereotype.Service;
 
 import java.util.List;
 
@@ -18,7 +17,6 @@ import java.util.List;
  * 提供数据集列表、数据集详情、缺口列表和 K 线预览的查询能力。
  * 只读操作，不修改数据。
  */
-@Service
 public class MarketHistoryQueryService {
 
     private static final int MAX_PREVIEW_PAGE_SIZE = 500;

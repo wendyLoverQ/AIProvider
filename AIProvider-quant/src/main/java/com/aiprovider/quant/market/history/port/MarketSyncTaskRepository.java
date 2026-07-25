@@ -85,9 +85,37 @@ public interface MarketSyncTaskRepository {
      * @param insertedCount 已新增数量
      * @param existingCount 已存在数量
      * @param gapCount 缺口数量
+     * @param gapSegmentCount 缺口区段数量
      * @return 影响行数
      */
-    int markCompleted(String taskId, long fetchedCount, long insertedCount, long existingCount, long gapCount);
+    int markCompleted(String taskId, long fetchedCount, long insertedCount, long existingCount,
+                      long gapCount, int gapSegmentCount);
+
+    /**
+     * 更新归档导入任务的进度。
+     *
+     * 用于 Binance 官方 ZIP 归档导入，记录来源模式、当前文件、计划/已完成文件数。
+     *
+     * @param taskId 任务 UUID
+     * @param status 新状态
+     * @param sourceMode 来源模式（ARCHIVE_MONTHLY / ARCHIVE_DAILY / AUTO）
+     * @param currentSourceFile 当前正在处理的文件名
+     * @param plannedFileCount 计划文件总数
+     * @param completedFileCount 已完成文件数
+     * @param fetchedCount 已获取 K 线数
+     * @param insertedCount 已新增 K 线数
+     * @param existingCount 已存在 K 线数
+     * @param conflictCount 冲突 K 线数
+     * @param batchCount 批次数
+     * @param progressPercent 进度百分比
+     * @return 影响行数
+     */
+    int updateArchiveProgress(String taskId, String status,
+                               String sourceMode, String currentSourceFile,
+                               Integer plannedFileCount, int completedFileCount,
+                               long fetchedCount, long insertedCount, long existingCount,
+                               long conflictCount, int batchCount,
+                               java.math.BigDecimal progressPercent);
 
     /**
      * 清除活动数据集锁。

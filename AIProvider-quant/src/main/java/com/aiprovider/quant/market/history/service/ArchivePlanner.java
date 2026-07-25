@@ -1,0 +1,251 @@
+package com.aiprovider.quant.market.history.service;
+
+import com.aiprovider.quant.market.history.model.ArchiveImportMode;
+import com.aiprovider.quant.market.history.model.ArchiveImportPlan;
+import com.aiprovider.quant.market.history.model.ArchiveKlineFile;
+import com.aiprovider.quant.market.model.KlineInterval;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.YearMonth;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Binance 官方历史数据包导入计划规划器。
+ *
+ * <p>纯 Java 逻辑类，不使用 {@code @Service} 注解，不依赖任何 Spring API，
+ * 由 {@code AIProvider-back} 通过 {@code @Bean} 创建。</p>
+ *
+ * <p>给定一个已对齐到 K 线周期的时间范围 {@code [normalizedStartMs, normalizedEndMs)}，
+ * 规划器根据 Binance 官方归档数据包的发布规则计算需要下载哪些 ZIP 包：</p>
+ * <ul>
+ *   <li>整月覆盖的范围使用月包；</li>
+ *   <li>月首或月末部分覆盖的范围使用日包；</li>
+ *   <li>今天及以后的数据尚无归档，由调用方通过 REST 接口修补尾部。</li>
+ * </ul>
+ *
+ * <p>路径规则来源：binance/binance-public-data (MIT License)</p>
+ * <ul>
+ *   <li>月包：{@code data/futures/um/monthly/klines/{SYMBOL}/{INTERVAL}/{SYMBOL}-{INTERVAL}-{YYYY-MM}.zip}</li>
+ *   <li>日包：{@code data/futures/um/daily/klines/{SYMBOL}/{INTERVAL}/{SYMBOL}-{INTERVAL}-{YYYY-MM-DD}.zip}</li>
+ *   <li>校验文件：在 zip 文件名后加 {@code .CHECKSUM}</li>
+ * </ul>
+ *
+ * <p>本规划器只生成相对路径，基础下载 URL 由 {@code AIProvider-back} 的 adapter 负责。</p>
+ *
+ * <p>Binance 归档发布规则：</p>
+ * <ul>
+ *   <li>月包在次月 2-3 天后发布；</li>
+ *   <li>日包 T+1 发布（昨天数据今天可下载）；</li>
+ *   <li>今天的数据尚无归档，需要 REST 尾部修补。</li>
+ * </ul>
+ */
+public class ArchivePlanner {
+
+    private static final Logger log = LoggerFactory.getLogger(ArchivePlanner.class);
+
+    public ArchivePlanner() {
+    }
+
+    /**
+     * 规划一次归档导入任务。
+     *
+     * <p>输入的时间范围已被调用方对齐到 K 线周期边界（normalized），本方法只负责
+     * 拆分月包、日包和判定 REST 尾部，不做周期对齐。</p>
+     *
+     * @param symbol            交易对，例如 "BTCUSDT"
+     * @param interval          K 线周期，仅用到 {@link KlineInterval#code()} 拼接路径
+     * @param normalizedStartMs 已对齐的起始 openTime，epoch 毫秒
+     * @param normalizedEndMs   已对齐的独占结束 openTime，epoch 毫秒
+     * @param serverTimeMs      服务器当前时间，epoch 毫秒，用于推算归档截止
+     * @return 归档导入计划，模式固定为 {@link ArchiveImportMode#AUTO}
+     */
+    public ArchiveImportPlan planArchiveImport(String symbol,
+                                               KlineInterval interval,
+                                               long normalizedStartMs,
+                                               long normalizedEndMs,
+                                               long serverTimeMs) {
+        // 1. 归档截止时间 archiveCutoffMs = 今天 00:00 UTC（= 昨天 00:00 UTC + 1 天）。
+        //    日包 T+1 发布：昨天数据今天可下载；今天数据尚无归档。归档文件只覆盖到昨天结束。
+        LocalDate yesterdayUtc = Instant.ofEpochMilli(serverTimeMs)
+                .atZone(ZoneOffset.UTC)
+                .toLocalDate()
+                .minusDays(1);
+        long archiveCutoffMs = yesterdayUtc.plusDays(1)
+                .atStartOfDay(ZoneOffset.UTC)
+                .toInstant()
+                .toEpochMilli();
+
+        // 2. 有效结束 = min(请求结束, 归档截止)
+        long effectiveEndMs = Math.min(normalizedEndMs, archiveCutoffMs);
+
+        List<ArchiveKlineFile> files = new ArrayList<>();
+        int monthlyFileCount = 0;
+        int dailyFileCount = 0;
+        boolean hasRestTail;
+
+        if (effectiveEndMs <= normalizedStartMs) {
+            // 请求范围全在今天或之后，无归档可用，整段交由 REST 尾部修补。
+            hasRestTail = true;
+        } else {
+            // 3. 遍历从 normalizedStartMs 所在月到 effectiveEndMs 所在月的每个月。
+            long cursorMonthStart = monthStartMs(normalizedStartMs);
+            while (cursorMonthStart < effectiveEndMs) {
+                long nextMonthStart = nextMonthStartMs(cursorMonthStart);
+
+                if (cursorMonthStart >= normalizedStartMs && nextMonthStart <= effectiveEndMs) {
+                    // 整月都在范围内 → 使用月包
+                    String ym = formatYearMonth(cursorMonthStart);
+                    String zipFileName = symbol + "-" + interval.code() + "-" + ym + ".zip";
+                    String checksumFileName = zipFileName + ".CHECKSUM";
+                    String relativePath = "data/futures/um/monthly/klines/"
+                            + symbol + "/" + interval.code() + "/" + zipFileName;
+                    files.add(new ArchiveKlineFile(
+                            ArchiveImportMode.ARCHIVE_MONTHLY,
+                            relativePath,
+                            zipFileName,
+                            checksumFileName,
+                            cursorMonthStart,
+                            nextMonthStart));
+                    monthlyFileCount++;
+                } else {
+                    // 该月部分覆盖 → 遍历该月内每一天，与 [normalizedStartMs, effectiveEndMs) 取交集
+                    long dayCursor = cursorMonthStart;
+                    while (dayCursor < nextMonthStart && dayCursor < effectiveEndMs) {
+                        long dayEnd = nextDayStartMs(dayCursor);
+                        long rangeStart = Math.max(dayCursor, normalizedStartMs);
+                        long rangeEndExclusive = Math.min(dayEnd, effectiveEndMs);
+                        if (rangeStart < rangeEndExclusive) {
+                            // 该天与请求范围有交集（完全或部分），创建日包
+                            String ymd = formatYearMonthDay(dayCursor);
+                            String zipFileName = symbol + "-" + interval.code() + "-" + ymd + ".zip";
+                            String checksumFileName = zipFileName + ".CHECKSUM";
+                            String relativePath = "data/futures/um/daily/klines/"
+                                    + symbol + "/" + interval.code() + "/" + zipFileName;
+                            files.add(new ArchiveKlineFile(
+                                    ArchiveImportMode.ARCHIVE_DAILY,
+                                    relativePath,
+                                    zipFileName,
+                                    checksumFileName,
+                                    rangeStart,
+                                    rangeEndExclusive));
+                            dailyFileCount++;
+                        }
+                        dayCursor = dayEnd;
+                    }
+                }
+
+                cursorMonthStart = nextMonthStart;
+            }
+
+            // 4. 是否需要 REST 尾部修补：请求结束超过归档截止即需要
+            hasRestTail = normalizedEndMs > effectiveEndMs;
+        }
+
+        // 5/6. 汇总返回，整体模式固定 AUTO，计划覆盖范围为完整请求范围
+        ArchiveImportPlan plan = new ArchiveImportPlan(
+                files,
+                ArchiveImportMode.AUTO,
+                normalizedStartMs,
+                normalizedEndMs,
+                monthlyFileCount,
+                dailyFileCount,
+                hasRestTail);
+
+        log.info("operation=archive-plan symbol={} interval={} start={} end={} serverTime={} archiveCutoff={} fileCount={} monthly={} daily={} hasRestTail={}",
+                symbol, interval.code(), normalizedStartMs, normalizedEndMs, serverTimeMs,
+                archiveCutoffMs, files.size(), monthlyFileCount, dailyFileCount, hasRestTail);
+
+        return plan;
+    }
+
+    // ---- 辅助方法 ----
+
+    /**
+     * 将 epoch 毫秒格式化为 {@code YYYY-MM}。
+     *
+     * @param epochMs epoch 毫秒
+     * @return 形如 "2025-01" 的字符串
+     */
+    private String formatYearMonth(long epochMs) {
+        return YearMonth.from(Instant.ofEpochMilli(epochMs).atZone(ZoneOffset.UTC)).toString();
+    }
+
+    /**
+     * 将 epoch 毫秒格式化为 {@code YYYY-MM-DD}。
+     *
+     * @param epochMs epoch 毫秒
+     * @return 形如 "2025-01-15" 的字符串
+     */
+    private String formatYearMonthDay(long epochMs) {
+        return Instant.ofEpochMilli(epochMs).atZone(ZoneOffset.UTC).toLocalDate().toString();
+    }
+
+    /**
+     * 返回 epoch 毫秒所在月份的 1 号 00:00 UTC 的 epoch 毫秒。
+     *
+     * @param epochMs epoch 毫秒
+     * @return 当月 1 号 00:00 UTC 的 epoch 毫秒
+     */
+    private long monthStartMs(long epochMs) {
+        return Instant.ofEpochMilli(epochMs)
+                .atZone(ZoneOffset.UTC)
+                .toLocalDate()
+                .withDayOfMonth(1)
+                .atStartOfDay(ZoneOffset.UTC)
+                .toInstant()
+                .toEpochMilli();
+    }
+
+    /**
+     * 返回 epoch 毫秒所在月份的下一月 1 号 00:00 UTC 的 epoch 毫秒。
+     *
+     * @param epochMs epoch 毫秒
+     * @return 下月 1 号 00:00 UTC 的 epoch 毫秒
+     */
+    private long nextMonthStartMs(long epochMs) {
+        return Instant.ofEpochMilli(epochMs)
+                .atZone(ZoneOffset.UTC)
+                .toLocalDate()
+                .withDayOfMonth(1)
+                .plusMonths(1)
+                .atStartOfDay(ZoneOffset.UTC)
+                .toInstant()
+                .toEpochMilli();
+    }
+
+    /**
+     * 返回 epoch 毫秒所在天的 00:00 UTC 的 epoch 毫秒。
+     *
+     * @param epochMs epoch 毫秒
+     * @return 当天 00:00 UTC 的 epoch 毫秒
+     */
+    private long dayStartMs(long epochMs) {
+        return Instant.ofEpochMilli(epochMs)
+                .atZone(ZoneOffset.UTC)
+                .toLocalDate()
+                .atStartOfDay(ZoneOffset.UTC)
+                .toInstant()
+                .toEpochMilli();
+    }
+
+    /**
+     * 返回 epoch 毫秒所在天的下一日 00:00 UTC 的 epoch 毫秒。
+     *
+     * @param epochMs epoch 毫秒
+     * @return 明天 00:00 UTC 的 epoch 毫秒
+     */
+    private long nextDayStartMs(long epochMs) {
+        return Instant.ofEpochMilli(epochMs)
+                .atZone(ZoneOffset.UTC)
+                .toLocalDate()
+                .plusDays(1)
+                .atStartOfDay(ZoneOffset.UTC)
+                .toInstant()
+                .toEpochMilli();
+    }
+}

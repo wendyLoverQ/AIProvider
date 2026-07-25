@@ -34,9 +34,14 @@ public class MarketSyncTask {
     private long existingCount;
     private long conflictCount;
     private long gapCount;
+    private int gapSegmentCount;
     private int batchCount;
     private BigDecimal progressPercent;
     private MarketSyncTaskStatus status;
+    private String sourceMode;
+    private String currentSourceFile;
+    private Integer plannedFileCount;
+    private int completedFileCount;
     private String errorCode;
     private String errorMessage;
     private Integer usedWeight1m;
@@ -103,6 +108,9 @@ public class MarketSyncTask {
     public long getGapCount() { return gapCount; }
     public void setGapCount(long gapCount) { this.gapCount = gapCount; }
 
+    public int getGapSegmentCount() { return gapSegmentCount; }
+    public void setGapSegmentCount(int gapSegmentCount) { this.gapSegmentCount = gapSegmentCount; }
+
     public int getBatchCount() { return batchCount; }
     public void setBatchCount(int batchCount) { this.batchCount = batchCount; }
 
@@ -111,6 +119,18 @@ public class MarketSyncTask {
 
     public MarketSyncTaskStatus getStatus() { return status; }
     public void setStatus(MarketSyncTaskStatus status) { this.status = status; }
+
+    public String getSourceMode() { return sourceMode; }
+    public void setSourceMode(String sourceMode) { this.sourceMode = sourceMode; }
+
+    public String getCurrentSourceFile() { return currentSourceFile; }
+    public void setCurrentSourceFile(String currentSourceFile) { this.currentSourceFile = currentSourceFile; }
+
+    public Integer getPlannedFileCount() { return plannedFileCount; }
+    public void setPlannedFileCount(Integer plannedFileCount) { this.plannedFileCount = plannedFileCount; }
+
+    public int getCompletedFileCount() { return completedFileCount; }
+    public void setCompletedFileCount(int completedFileCount) { this.completedFileCount = completedFileCount; }
 
     public String getErrorCode() { return errorCode; }
     public void setErrorCode(String errorCode) { this.errorCode = errorCode; }

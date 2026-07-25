@@ -9,6 +9,7 @@ import com.aiprovider.service.ContentAiException;
 import com.aiprovider.service.ContentSourceException;
 import com.aiprovider.service.XiaohongshuAutomationException;
 import com.aiprovider.service.PromptTranslationException;
+import com.aiprovider.service.quant.MarketHistoryTaskException;
 import com.aiprovider.quant.exchange.binance.usdm.BinanceUsdmUpstreamException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -105,6 +106,26 @@ public class ApiExceptionHandler {
         StateError error=STATE_ERRORS.get(exception.getMessage());
         if(error==null)error=new StateError(500,"服务器状态异常，请稍后重试");
         return ResponseEntity.status(error.status).body(Result.error(error.status,error.message));
+    }
+
+    @ExceptionHandler(MarketHistoryTaskException.class)
+    public ResponseEntity<Result<Void>> marketHistoryTask(MarketHistoryTaskException exception) {
+        int status;
+        switch (exception.getErrorCode()) {
+            case "DATASET_ALREADY_SYNCING":
+                status = 409;
+                break;
+            case "EXECUTOR_QUEUE_FULL":
+                status = 503;
+                break;
+            case "DATASET_CREATE_FAILED":
+                status = 500;
+                break;
+            default:
+                status = 400;
+                break;
+        }
+        return ResponseEntity.status(status).body(Result.error(status, exception.getMessage()));
     }
 
     private static final class StateError {

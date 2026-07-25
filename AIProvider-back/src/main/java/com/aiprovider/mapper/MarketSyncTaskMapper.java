@@ -22,8 +22,9 @@ public interface MarketSyncTaskMapper {
     String COLUMNS = "Id, TaskId, DatasetId, ActiveDatasetKey, Provider, MarketType, DataType, " +
             "Symbol, IntervalCode, RequestedStartTimeMs, RequestedEndTimeMs, " +
             "NormalizedStartTimeMs, NormalizedEndTimeMs, ExpectedCount, FetchedCount, " +
-            "InsertedCount, ExistingCount, ConflictCount, GapCount, BatchCount, " +
-            "ProgressPercent, Status, ErrorCode, ErrorMessage, UsedWeight1m, " +
+            "InsertedCount, ExistingCount, ConflictCount, GapCount, GapSegmentCount, " +
+            "BatchCount, ProgressPercent, Status, SourceMode, CurrentSourceFile, " +
+            "PlannedFileCount, CompletedFileCount, ErrorCode, ErrorMessage, UsedWeight1m, " +
             "RetryAfterSeconds, QueuedAt, StartedAt, FinishedAt, UpdatedAt";
 
     @Results(id = "taskResult", value = {
@@ -46,9 +47,14 @@ public interface MarketSyncTaskMapper {
             @Result(column = "ExistingCount", property = "existingCount"),
             @Result(column = "ConflictCount", property = "conflictCount"),
             @Result(column = "GapCount", property = "gapCount"),
+            @Result(column = "GapSegmentCount", property = "gapSegmentCount"),
             @Result(column = "BatchCount", property = "batchCount"),
             @Result(column = "ProgressPercent", property = "progressPercent"),
             @Result(column = "Status", property = "status"),
+            @Result(column = "SourceMode", property = "sourceMode"),
+            @Result(column = "CurrentSourceFile", property = "currentSourceFile"),
+            @Result(column = "PlannedFileCount", property = "plannedFileCount"),
+            @Result(column = "CompletedFileCount", property = "completedFileCount"),
             @Result(column = "ErrorCode", property = "errorCode"),
             @Result(column = "ErrorMessage", property = "errorMessage"),
             @Result(column = "UsedWeight1m", property = "usedWeight1m"),
@@ -109,11 +115,32 @@ public interface MarketSyncTaskMapper {
     @Update("UPDATE q_market_sync_task SET Status='COMPLETED'," +
             "FetchedCount=#{fetchedCount},InsertedCount=#{insertedCount}," +
             "ExistingCount=#{existingCount},GapCount=#{gapCount}," +
+            "GapSegmentCount=#{gapSegmentCount}," +
             "ProgressPercent=100.0000,ActiveDatasetKey=NULL," +
             "FinishedAt=CURRENT_TIMESTAMP(6) WHERE TaskId=#{taskId}")
     int markCompleted(@Param("taskId") String taskId, @Param("fetchedCount") long fetchedCount,
                       @Param("insertedCount") long insertedCount, @Param("existingCount") long existingCount,
-                      @Param("gapCount") long gapCount);
+                      @Param("gapCount") long gapCount, @Param("gapSegmentCount") int gapSegmentCount);
+
+    @Update("UPDATE q_market_sync_task SET Status=#{status}," +
+            "SourceMode=#{sourceMode},CurrentSourceFile=#{currentSourceFile}," +
+            "PlannedFileCount=#{plannedFileCount},CompletedFileCount=#{completedFileCount}," +
+            "FetchedCount=#{fetchedCount},InsertedCount=#{insertedCount}," +
+            "ExistingCount=#{existingCount},ConflictCount=#{conflictCount}," +
+            "BatchCount=#{batchCount},ProgressPercent=#{progressPercent}," +
+            "StartedAt=COALESCE(StartedAt,CURRENT_TIMESTAMP(6)) " +
+            "WHERE TaskId=#{taskId}")
+    int updateArchiveProgress(@Param("taskId") String taskId, @Param("status") String status,
+                               @Param("sourceMode") String sourceMode,
+                               @Param("currentSourceFile") String currentSourceFile,
+                               @Param("plannedFileCount") Integer plannedFileCount,
+                               @Param("completedFileCount") int completedFileCount,
+                               @Param("fetchedCount") long fetchedCount,
+                               @Param("insertedCount") long insertedCount,
+                               @Param("existingCount") long existingCount,
+                               @Param("conflictCount") long conflictCount,
+                               @Param("batchCount") int batchCount,
+                               @Param("progressPercent") BigDecimal progressPercent);
 
     @Update("UPDATE q_market_sync_task SET ActiveDatasetKey=NULL WHERE TaskId=#{taskId}")
     int clearActiveLock(@Param("taskId") String taskId);

@@ -15,7 +15,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.DisposableBean;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -52,7 +51,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * 组合流订阅 4 个频道：kline、ticker、markPrice@1s、bookTicker。
  * 消息格式：{@code {"stream":"btcusdt@kline_15m","data":{...}}}
  */
-public class BinanceUsdmMarketStreamClient implements MarketStreamClient, DisposableBean {
+public class BinanceUsdmMarketStreamClient implements MarketStreamClient {
 
     private static final Logger log = LoggerFactory.getLogger(BinanceUsdmMarketStreamClient.class);
 
@@ -279,10 +278,9 @@ public class BinanceUsdmMarketStreamClient implements MarketStreamClient, Dispos
         }
     }
 
-    // ---- DisposableBean ----
+    // ---- 关闭清理 ----
 
-    @Override
-    public void destroy() {
+    public void close() {
         shutdown.set(true);
         log.info("operation=stream-shutdown msg=正在关闭所有上游连接 connections={}", connections.size());
         for (ConnectionHolder holder : connections.values()) {

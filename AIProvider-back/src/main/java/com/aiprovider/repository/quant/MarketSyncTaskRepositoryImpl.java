@@ -71,8 +71,20 @@ public class MarketSyncTaskRepositoryImpl implements MarketSyncTaskRepository {
 
     @Override
     public int markCompleted(String taskId, long fetchedCount, long insertedCount,
-                              long existingCount, long gapCount) {
-        return mapper.markCompleted(taskId, fetchedCount, insertedCount, existingCount, gapCount);
+                              long existingCount, long gapCount, int gapSegmentCount) {
+        return mapper.markCompleted(taskId, fetchedCount, insertedCount, existingCount, gapCount, gapSegmentCount);
+    }
+
+    @Override
+    public int updateArchiveProgress(String taskId, String status,
+                                      String sourceMode, String currentSourceFile,
+                                      Integer plannedFileCount, int completedFileCount,
+                                      long fetchedCount, long insertedCount, long existingCount,
+                                      long conflictCount, int batchCount,
+                                      BigDecimal progressPercent) {
+        return mapper.updateArchiveProgress(taskId, status, sourceMode, currentSourceFile,
+                plannedFileCount, completedFileCount, fetchedCount, insertedCount,
+                existingCount, conflictCount, batchCount, progressPercent);
     }
 
     @Override

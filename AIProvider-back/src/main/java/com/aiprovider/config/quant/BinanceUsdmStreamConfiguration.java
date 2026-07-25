@@ -21,7 +21,7 @@ public class BinanceUsdmStreamConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(BinanceUsdmStreamConfiguration.class);
 
-    @Bean
+    @Bean(destroyMethod = "close")
     public MarketStreamClient binanceUsdmMarketStreamClient(BinanceUsdmStreamProperties properties) {
         log.info("operation=stream-config-init wsBaseUrl={} connectTimeoutMs={} maxReconnectAttempts={} initialDelayMs={} maxDelayMs={}",
                 properties.getWsBaseUrl(), properties.getConnectTimeoutMs(),

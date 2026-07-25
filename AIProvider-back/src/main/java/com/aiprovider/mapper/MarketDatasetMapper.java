@@ -21,7 +21,7 @@ public interface MarketDatasetMapper {
 
     String COLUMNS = "Id, Provider, MarketType, DataType, Symbol, IntervalCode, " +
             "EarliestOpenTimeMs, LatestOpenTimeMs, CandleCount, ExpectedInsideRange, " +
-            "GapCount, Status, LastSuccessfulSyncAt, LastValidatedAt, LastSyncTaskId, " +
+            "GapCount, GapSegmentCount, Status, LastSuccessfulSyncAt, LastValidatedAt, LastSyncTaskId, " +
             "CreatedAt, UpdatedAt";
 
     @Results(id = "datasetResult", value = {
@@ -36,6 +36,7 @@ public interface MarketDatasetMapper {
             @Result(column = "CandleCount", property = "candleCount"),
             @Result(column = "ExpectedInsideRange", property = "expectedInsideRange"),
             @Result(column = "GapCount", property = "gapCount"),
+            @Result(column = "GapSegmentCount", property = "gapSegmentCount"),
             @Result(column = "Status", property = "status"),
             @Result(column = "LastSuccessfulSyncAt", property = "lastSuccessfulSyncAt"),
             @Result(column = "LastValidatedAt", property = "lastValidatedAt"),
@@ -90,6 +91,7 @@ public interface MarketDatasetMapper {
             "CandleCount=#{candleCount}," +
             "ExpectedInsideRange=#{expectedInsideRange}," +
             "GapCount=#{gapCount}," +
+            "GapSegmentCount=#{gapSegmentCount}," +
             "Status=#{status}," +
             "LastValidatedAt=#{lastValidatedAt} " +
             "WHERE Id=#{id}")
@@ -100,4 +102,10 @@ public interface MarketDatasetMapper {
     int updateLastSync(@Param("datasetId") long datasetId,
                        @Param("lastSyncTaskId") String lastSyncTaskId,
                        @Param("lastSuccessfulSyncAt") java.time.Instant lastSuccessfulSyncAt);
+
+    @Select("SELECT COUNT(*) FROM q_market_dataset")
+    long countAll();
+
+    @Select("SELECT COUNT(*) FROM q_market_dataset WHERE GapCount > 0")
+    long countWithGaps();
 }

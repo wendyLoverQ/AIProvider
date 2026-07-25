@@ -7,7 +7,6 @@ import com.aiprovider.quant.market.model.MarketType;
 import com.aiprovider.quant.market.model.PerpetualContract;
 import com.aiprovider.quant.market.model.PublicMarketHealth;
 import com.aiprovider.quant.market.port.PublicMarketDataProvider;
-import org.springframework.stereotype.Service;
 
 import java.util.List;
 
@@ -17,7 +16,6 @@ import java.util.List;
  * 向上层提供统一入口，按提供方标识委托给具体适配器。不直接访问上游，不做缓存或重试，
  * 不吞异常。所有上游失败由适配器抛出，由上层异常处理器统一处理。
  */
-@Service
 public class PublicMarketQueryService {
 
     private final PublicMarketProviderRegistry registry;

@@ -1,8 +1,8 @@
 package com.aiprovider.quant.management;
 
+import com.aiprovider.quant.market.history.port.MarketStorageStatePort;
 import com.aiprovider.quant.model.vo.QuantModuleVO;
 import com.aiprovider.quant.model.vo.QuantOverviewVO;
-import org.springframework.stereotype.Service;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -15,11 +15,13 @@ import java.util.List;
  * 不启动线程、定时任务或 WebSocket，不读取密钥和环境变量。
  *
  * 当前阶段为 PUBLIC_MARKET：Binance USDⓈ-M Futures 公共行情已接通，
- * 实盘交易未启用，私有账户 API 未接入，数据存储未创建。
+ * 实盘交易未启用，私有账户 API 未接入。
  * market 模块状态为 PUBLIC_MARKET_CONNECTED，exchange 模块状态为 PUBLIC_MARKET_ONLY，
  * 其余模块状态为 SKELETON。
+ *
+ * 存储状态由 {@link MarketStorageStatePort} 实时查询 q_market_dataset 表得出，
+ * 不再硬编码为 NOT_CREATED。
  */
-@Service
 public class QuantOverviewService {
 
     private static final String PHASE = "PUBLIC_MARKET";
@@ -27,7 +29,6 @@ public class QuantOverviewService {
     private static final String STATUS_MARKET_CONNECTED = "PUBLIC_MARKET_CONNECTED";
     private static final String STATUS_MARKET_ONLY = "PUBLIC_MARKET_ONLY";
     private static final String EXCHANGE_STATE = "PUBLIC_MARKET_ONLY";
-    private static final String STORAGE_STATE = "NOT_CREATED";
 
     /** 研究链路模块分组。 */
     private static final String GROUP_RESEARCH = "research";
@@ -36,12 +37,18 @@ public class QuantOverviewService {
     /** 运行管理模块分组。 */
     private static final String GROUP_OPERATIONS = "operations";
 
+    private final MarketStorageStatePort storageStatePort;
+
+    public QuantOverviewService(MarketStorageStatePort storageStatePort) {
+        this.storageStatePort = storageStatePort;
+    }
+
     public QuantOverviewVO overview() {
         QuantOverviewVO vo = new QuantOverviewVO();
         vo.setPhase(PHASE);
         vo.setLiveTradingEnabled(false);
         vo.setExchangeState(EXCHANGE_STATE);
-        vo.setStorageState(STORAGE_STATE);
+        vo.setStorageState(storageStatePort.getStorageState());
         vo.setModules(buildModules());
         return vo;
     }

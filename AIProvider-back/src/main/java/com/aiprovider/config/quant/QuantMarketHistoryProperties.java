@@ -1,31 +1,48 @@
 package com.aiprovider.config.quant;
 
+import javax.validation.constraints.Max;
+import javax.validation.constraints.Min;
+import javax.validation.constraints.NotBlank;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.validation.annotation.Validated;
 
 /**
  * 历史行情同步配置属性。
  *
  * 控制分页下载的批次大小、单任务最大 K 线数量，以及同步执行器的并发控制。
+ * 使用 {@link Validated} + Bean Validation 在应用启动时校验配置。
+ *
+ * 执行器核心/最大线程数锁定为 1，不允许通过环境变量调多为多个后破坏串行约束。
  */
 @ConfigurationProperties(prefix = "quant.market-history")
+@Validated
 public class QuantMarketHistoryProperties {
 
     /** 每次从 Binance 拉取的 K 线数量上限（1～1500）。 */
+    @Min(1)
+    @Max(1500)
     private int batchSize = 500;
 
     /** 单个同步任务允许的最大 K 线数量，超过则拒绝。 */
+    @Min(1)
     private int maxCandlesPerTask = 100_000;
 
-    /** 同步执行器核心线程数（单 worker 保证任务串行执行）。 */
+    /** 同步执行器核心线程数（必须为 1，单 worker 保证任务串行执行）。 */
+    @Min(1)
+    @Max(1)
     private int executorCorePoolSize = 1;
 
-    /** 同步执行器最大线程数。 */
+    /** 同步执行器最大线程数（必须为 1）。 */
+    @Min(1)
+    @Max(1)
     private int executorMaxPoolSize = 1;
 
     /** 同步执行器队列容量，超出则拒绝新任务。 */
+    @Min(1)
     private int executorQueueCapacity = 16;
 
     /** 同步执行器线程名前缀。 */
+    @NotBlank
     private String executorThreadNamePrefix = "quant-history-sync-";
 
     public int getBatchSize() { return batchSize; }
