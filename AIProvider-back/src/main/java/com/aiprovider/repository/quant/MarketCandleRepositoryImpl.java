@@ -52,6 +52,18 @@ public class MarketCandleRepositoryImpl implements MarketCandleRepository {
     }
 
     @Override
+    public List<HistoricalCandle> findRangeAscending(long datasetId, long startOpenTimeMsInclusive,
+                                                       long endOpenTimeMsExclusive, int limit) {
+        return mapper.findRangeAscending(datasetId, startOpenTimeMsInclusive, endOpenTimeMsExclusive, limit);
+    }
+
+    @Override
+    public long countRangeExclusive(long datasetId, long startOpenTimeMsInclusive,
+                                    long endOpenTimeMsExclusive) {
+        return mapper.countRangeExclusive(datasetId, startOpenTimeMsInclusive, endOpenTimeMsExclusive);
+    }
+
+    @Override
     public List<Long> streamOpenTimesAscending(long datasetId, int batchSize, long afterOpenTimeMs) {
         return mapper.streamOpenTimesAscending(datasetId, batchSize, afterOpenTimeMs);
     }

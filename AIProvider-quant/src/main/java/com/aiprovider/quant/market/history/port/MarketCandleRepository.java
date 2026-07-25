@@ -64,6 +64,14 @@ public interface MarketCandleRepository {
      */
     long countByDatasetAndRange(long datasetId, Long startOpenTimeMs, Long endOpenTimeMs);
 
+    /** Loads a fixed range in ascending order using an exclusive end boundary. */
+    List<HistoricalCandle> findRangeAscending(long datasetId, long startOpenTimeMsInclusive,
+                                               long endOpenTimeMsExclusive, int limit);
+
+    /** Counts a fixed range using an exclusive end boundary. */
+    long countRangeExclusive(long datasetId, long startOpenTimeMsInclusive,
+                             long endOpenTimeMsExclusive);
+
     /**
      * 按 openTime 升序流式遍历数据集 K 线的 openTime 列表。
      *

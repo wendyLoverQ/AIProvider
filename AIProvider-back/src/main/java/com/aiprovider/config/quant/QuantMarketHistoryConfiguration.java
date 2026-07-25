@@ -17,6 +17,7 @@ import com.aiprovider.quant.market.history.service.MarketCandleIngestService;
 import com.aiprovider.quant.market.history.service.MarketDatasetValidationService;
 import com.aiprovider.quant.market.history.service.MarketHistoryQueryService;
 import com.aiprovider.quant.market.history.service.MarketHistorySyncService;
+import com.aiprovider.quant.market.history.service.MarketDataSnapshotService;
 import com.aiprovider.quant.market.history.service.MarketTaskGapCalculator;
 import com.aiprovider.quant.market.history.service.RestKlineRangeImporter;
 import com.aiprovider.quant.management.QuantOverviewService;
@@ -125,6 +126,17 @@ public class QuantMarketHistoryConfiguration {
             SyncUnitOfWork unitOfWork) {
         log.info("operation=dataset-validation-service-init");
         return new MarketDatasetValidationService(candleRepository, datasetRepository, gapRepository, unitOfWork);
+    }
+
+    @Bean
+    public MarketDataSnapshotService marketDataSnapshotService(
+            MarketDatasetRepository datasetRepository,
+            MarketCandleRepository candleRepository,
+            QuantMarketHistoryProperties properties) {
+        log.info("operation=market-data-snapshot-service-init maxSnapshotCandles={}",
+                properties.getBacktestSnapshotMaxCandles());
+        return new MarketDataSnapshotService(datasetRepository, candleRepository,
+                properties.getBacktestSnapshotMaxCandles());
     }
 
     // ---- 同步服务 ----

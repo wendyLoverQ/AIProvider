@@ -28,6 +28,11 @@ public class QuantMarketHistoryProperties {
     @Min(1)
     private int maxCandlesPerTask = 100_000;
 
+    /** Maximum number of candles allowed in one immutable backtest snapshot. */
+    @Min(1000)
+    @Max(2_000_000)
+    private int backtestSnapshotMaxCandles = 200_000;
+
     /** 同步执行器核心线程数（必须为 1，单 worker 保证任务串行执行）。 */
     @Min(1)
     @Max(1)
@@ -55,6 +60,11 @@ public class QuantMarketHistoryProperties {
 
     public int getMaxCandlesPerTask() { return maxCandlesPerTask; }
     public void setMaxCandlesPerTask(int maxCandlesPerTask) { this.maxCandlesPerTask = maxCandlesPerTask; }
+
+    public int getBacktestSnapshotMaxCandles() { return backtestSnapshotMaxCandles; }
+    public void setBacktestSnapshotMaxCandles(int backtestSnapshotMaxCandles) {
+        this.backtestSnapshotMaxCandles = backtestSnapshotMaxCandles;
+    }
 
     public int getExecutorCorePoolSize() { return executorCorePoolSize; }
     public void setExecutorCorePoolSize(int executorCorePoolSize) { this.executorCorePoolSize = executorCorePoolSize; }

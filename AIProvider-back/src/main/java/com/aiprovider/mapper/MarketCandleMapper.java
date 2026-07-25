@@ -93,6 +93,26 @@ public interface MarketCandleMapper {
                                 @Param("startOpenTimeMs") Long startOpenTimeMs,
                                 @Param("endOpenTimeMs") Long endOpenTimeMs);
 
+    @ResultMap("candleResult")
+    @Select("SELECT Id, DatasetId, Provider, MarketType, Symbol, IntervalCode, " +
+            "OpenTimeMs, CloseTimeMs, OpenPrice, HighPrice, LowPrice, ClosePrice, " +
+            "Volume, QuoteVolume, TradeCount, TakerBuyBaseVolume, TakerBuyQuoteVolume, " +
+            "Source, CreatedAt FROM q_market_candle " +
+            "WHERE DatasetId=#{datasetId} AND OpenTimeMs >= #{startOpenTimeMsInclusive} " +
+            "AND OpenTimeMs < #{endOpenTimeMsExclusive} " +
+            "ORDER BY OpenTimeMs ASC LIMIT #{limit}")
+    List<HistoricalCandle> findRangeAscending(@Param("datasetId") long datasetId,
+                                                @Param("startOpenTimeMsInclusive") long startOpenTimeMsInclusive,
+                                                @Param("endOpenTimeMsExclusive") long endOpenTimeMsExclusive,
+                                                @Param("limit") int limit);
+
+    @Select("SELECT COUNT(*) FROM q_market_candle " +
+            "WHERE DatasetId=#{datasetId} AND OpenTimeMs >= #{startOpenTimeMsInclusive} " +
+            "AND OpenTimeMs < #{endOpenTimeMsExclusive}")
+    long countRangeExclusive(@Param("datasetId") long datasetId,
+                             @Param("startOpenTimeMsInclusive") long startOpenTimeMsInclusive,
+                             @Param("endOpenTimeMsExclusive") long endOpenTimeMsExclusive);
+
     @Select("SELECT OpenTimeMs FROM q_market_candle " +
             "WHERE DatasetId=#{datasetId} AND OpenTimeMs > #{afterOpenTimeMs} " +
             "ORDER BY OpenTimeMs ASC LIMIT #{batchSize}")
