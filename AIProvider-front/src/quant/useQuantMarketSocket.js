@@ -44,6 +44,10 @@ export function useQuantMarketSocket({ provider, symbol, interval, enabled = tru
   const [bookTickerEvent, setBookTickerEvent] = useState(null);
   const [error, setError] = useState("");
   const [lastEventTime, setLastEventTime] = useState(null);
+  // KLINE 专用新鲜度：记录最后一次收到 KLINE 事件的时间，用于陈旧检测。
+  const [lastKlineTime, setLastKlineTime] = useState(null);
+  // LIVE 状态下长时间无 KLINE 增量时标记为陈旧。
+  const [klineStale, setKlineStale] = useState(false);
 
   const wsRef = useRef(null);
   const socketIdRef = useRef(0);
@@ -90,9 +94,16 @@ export function useQuantMarketSocket({ provider, symbol, interval, enabled = tru
     // STATUS/ERROR 为全局消息，不按 symbol 过滤。
     if (type === "STATUS") {
       if (eventTime) setLastEventTime(eventTime);
-      if (data && data.status === "LIVE") {
-        setStatus(SOCKET_STATUS.LIVE);
+      const upstreamStatus = data && data.status;
+      // 后端 StreamStatus 枚举名与前端 SOCKET_STATUS 键完全对应，直接映射。
+      if (upstreamStatus && SOCKET_STATUS[upstreamStatus]) {
+        setStatus(SOCKET_STATUS[upstreamStatus]);
+      }
+      // LIVE 时清除错误；其他状态保留 message 作为错误信息。
+      if (upstreamStatus === SOCKET_STATUS.LIVE) {
         setError("");
+      } else if (data && data.message) {
+        setError(data.message);
       }
       return;
     }
@@ -109,6 +120,8 @@ export function useQuantMarketSocket({ provider, symbol, interval, enabled = tru
     switch (type) {
       case "KLINE":
         setKlineEvent(msg);
+        setLastKlineTime(eventTime || new Date().toISOString());
+        setKlineStale(false);
         break;
       case "TICKER":
         setTickerEvent(msg);
@@ -157,7 +170,9 @@ export function useQuantMarketSocket({ provider, symbol, interval, enabled = tru
     ws.onopen = () => {
       if (wsRef.current !== ws) return;
       attemptRef.current = 0;
-      setStatus(SOCKET_STATUS.LIVE);
+      // 浏览器到后端传输已建立，但上游 Binance 连接状态未知。
+      // 设为 CONNECTING，等待后端 STATUS 消息告知真实上游状态。
+      setStatus(SOCKET_STATUS.CONNECTING);
       setError("");
       subscribe();
     };
@@ -236,12 +251,35 @@ export function useQuantMarketSocket({ provider, symbol, interval, enabled = tru
     setMarkPriceEvent(null);
     setBookTickerEvent(null);
     setError("");
+    setLastKlineTime(null);
+    setKlineStale(false);
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       unsubscribe();
       subscribe();
     }
   }, [provider, symbol, interval, subscribe, unsubscribe]);
+
+  // KLINE 陈旧检测：LIVE 状态下持续检查最后 KLINE 事件是否超时。
+  // Binance 加密期货 24/7 交易，正常情况下每 1-2 秒推送一次 KLINE 增量。
+  // 15 秒内无更新视为陈旧，提示用户数据流可能中断。
+  useEffect(() => {
+    if (status !== SOCKET_STATUS.LIVE) {
+      setKlineStale(false);
+      return undefined;
+    }
+    const STALE_THRESHOLD_MS = 15_000;
+    const CHECK_INTERVAL_MS = 5_000;
+    const timer = window.setInterval(() => {
+      if (!lastKlineTime) {
+        setKlineStale(true);
+        return;
+      }
+      const elapsed = Date.now() - new Date(lastKlineTime).getTime();
+      setKlineStale(elapsed > STALE_THRESHOLD_MS);
+    }, CHECK_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [status, lastKlineTime]);
 
   return {
     status,
@@ -251,6 +289,8 @@ export function useQuantMarketSocket({ provider, symbol, interval, enabled = tru
     bookTickerEvent,
     error,
     lastEventTime,
+    lastKlineTime,
+    klineStale,
     reconnect,
   };
 }

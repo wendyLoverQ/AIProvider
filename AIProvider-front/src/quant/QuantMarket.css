@@ -282,6 +282,10 @@
 .quant-market-ws-status .ws-error{
   color:var(--accent-red);
 }
+.quant-market-ws-status .ws-stale{
+  color:var(--accent-yellow, #f0c674);
+  font-weight:600;
+}
 .quant-market-ws-status .ws-reconnect{
   display:inline-flex;
   align-items:center;

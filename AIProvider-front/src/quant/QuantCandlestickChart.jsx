@@ -75,7 +75,7 @@ function toVolumeBar(c, upColor, downColor) {
   };
 }
 
-export default function QuantCandlestickChart({ candles, update }) {
+export default function QuantCandlestickChart({ candles, update, onUpdateError }) {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
@@ -210,20 +210,40 @@ export default function QuantCandlestickChart({ candles, update }) {
     const bar = toCandleBar(update);
     if (!bar) return;
     const colors = readThemeColors();
+    let updateFailed = false;
     try {
       series.update(bar);
-    } catch {
-      // 时间乱序等异常时忽略本次单根更新，下一次 setData 会纠正。
+    } catch (e) {
+      updateFailed = true;
+      // 不吞异常：上报给父组件展示，便于定位时间乱序等问题。
+      if (onUpdateError) {
+        onUpdateError({
+          openTime: update.openTime,
+          barTime: bar.time,
+          error: e.message,
+        });
+      }
     }
     const vbar = toVolumeBar(update, colors.up, colors.down);
     if (vbar) {
       try {
         volSeries.update(vbar);
-      } catch {
-        // 同上，忽略异常更新。
+      } catch (e) {
+        updateFailed = true;
+        if (onUpdateError) {
+          onUpdateError({
+            openTime: update.openTime,
+            barTime: vbar.time,
+            error: e.message,
+          });
+        }
       }
     }
-  }, [update]);
+    // 本次更新成功时清除上一次的错误报告。
+    if (!updateFailed && onUpdateError) {
+      onUpdateError(null);
+    }
+  }, [update, onUpdateError]);
 
   return (
     <div

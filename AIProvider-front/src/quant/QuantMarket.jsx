@@ -124,6 +124,8 @@ export default function QuantMarket() {
   const [error, setError] = useState("");
   const [snapshotError, setSnapshotError] = useState("");
   const [reconnectKey, setReconnectKey] = useState(0);
+  // 图表 series.update 异常上报（来自 QuantCandlestickChart）。
+  const [chartUpdateError, setChartUpdateError] = useState(null);
   const snapshotSeq = useRef(0);
   const klineSeq = useRef(0);
 
@@ -199,6 +201,7 @@ export default function QuantMarket() {
     setRestKlines([]);
     setKlines([]);
     setLastKlineUpdate(null);
+    setChartUpdateError(null);
     Promise.all([loadSnapshot(symbol), loadKlines(symbol, interval)])
       .then(([snap, ks]) => {
         if (snapshotSeq.current !== mySeq) return;
@@ -275,6 +278,10 @@ export default function QuantMarket() {
       })
       .catch((e) => setSnapshotError(e.message || "K 线刷新失败"));
   };
+  // QuantCandlestickChart series.update 异常回调：null 表示清除上次错误。
+  const handleChartUpdateError = useCallback((err) => {
+    setChartUpdateError(err);
+  }, []);
 
   if (phase === "initial-loading") {
     return (
@@ -308,6 +315,9 @@ export default function QuantMarket() {
   const recentCandles = klines.slice(-10).reverse();
   const wsLive = ws.status === SOCKET_STATUS.LIVE;
   const wsLabel = wsLive ? "实时行情" : SOCKET_STATUS_LABELS[ws.status];
+  const showReconnect = ws.status === SOCKET_STATUS.FAILED
+    || ws.status === SOCKET_STATUS.DISCONNECTED
+    || ws.status === SOCKET_STATUS.RECONNECTING;
 
   return (
     <QuantPageScaffold pageClass="quant-market-page" title="合约行情">
@@ -325,6 +335,12 @@ export default function QuantMarket() {
       {snapshotError && (
         <div className="quant-market-notice" role="alert">
           <Warning weight="fill" />{snapshotError}
+        </div>
+      )}
+
+      {chartUpdateError && (
+        <div className="quant-market-notice" role="alert">
+          <Warning weight="fill" />K 线更新异常 · {chartUpdateError.error} · 开盘时间 {fmtTime(chartUpdateError.openTime)}
         </div>
       )}
 
@@ -431,9 +447,10 @@ export default function QuantMarket() {
           <div className="quant-market-ws-status" role="status" aria-live="polite">
             <span className={`ws-dot ws-${ws.status.toLowerCase()}`} aria-hidden="true" />
             <span className="ws-label">{wsLabel}</span>
-            {ws.lastEventTime && <span className="ws-time">最后更新 · {fmtTime(ws.lastEventTime)}</span>}
-            {ws.error && !wsLive && <span className="ws-error">{ws.error}</span>}
-            {(ws.status === SOCKET_STATUS.FAILED || ws.status === SOCKET_STATUS.DISCONNECTED) && (
+            {ws.lastKlineTime && <span className="ws-time">最后 K 线 · {fmtTime(ws.lastKlineTime)}</span>}
+            {ws.klineStale && wsLive && <span className="ws-stale">K 线流无更新</span>}
+            {ws.error && <span className="ws-error">{ws.error}</span>}
+            {showReconnect && (
               <button type="button" className="ws-reconnect" onClick={ws.reconnect}>
                 <ArrowsClockwise />重连行情
               </button>
@@ -446,6 +463,7 @@ export default function QuantMarket() {
                 key={`${symbol}-${interval}`}
                 candles={restKlines}
                 update={lastKlineUpdate}
+                onUpdateError={handleChartUpdateError}
               />
             ) : (
               <div className="quant-market-chart-empty"><ChartLineUp /><span>{snapshotError ? "K 线加载失败" : "加载 K 线…"}</span></div>
