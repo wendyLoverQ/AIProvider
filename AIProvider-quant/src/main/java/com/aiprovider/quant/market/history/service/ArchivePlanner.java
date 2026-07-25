@@ -39,7 +39,7 @@ import java.util.List;
  *
  * <p>Binance 归档发布规则：</p>
  * <ul>
- *   <li>月包在次月 2-3 天后发布；</li>
+ *   <li>月包在次月首个星期一发布（月包发布检查阈值 = 该月结束后下一月第一个星期一 00:00 UTC）；</li>
  *   <li>日包 T+1 发布（昨天数据今天可下载）；</li>
  *   <li>今天的数据尚无归档，需要 REST 尾部修补。</li>
  * </ul>
@@ -71,11 +71,11 @@ public class ArchivePlanner {
                                                long serverTimeMs) {
         // 1. 归档截止时间 archiveCutoffMs = 今天 00:00 UTC（= 昨天 00:00 UTC + 1 天）。
         //    日包 T+1 发布：昨天数据今天可下载；今天数据尚无归档。归档文件只覆盖到昨天结束。
-        LocalDate yesterdayUtc = Instant.ofEpochMilli(serverTimeMs)
+        LocalDate todayUtc = Instant.ofEpochMilli(serverTimeMs)
                 .atZone(ZoneOffset.UTC)
-                .toLocalDate()
-                .minusDays(1);
-        long archiveCutoffMs = yesterdayUtc.plusDays(1)
+                .toLocalDate();
+        LocalDate yesterdayUtc = todayUtc.minusDays(1);
+        long archiveCutoffMs = todayUtc
                 .atStartOfDay(ZoneOffset.UTC)
                 .toInstant()
                 .toEpochMilli();
@@ -87,10 +87,14 @@ public class ArchivePlanner {
         int monthlyFileCount = 0;
         int dailyFileCount = 0;
         boolean hasRestTail;
+        long restTailStartInclusive = 0;
+        long restTailEndExclusive = 0;
 
         if (effectiveEndMs <= normalizedStartMs) {
             // 请求范围全在今天或之后，无归档可用，整段交由 REST 尾部修补。
             hasRestTail = true;
+            restTailStartInclusive = normalizedStartMs;
+            restTailEndExclusive = normalizedEndMs;
         } else {
             // 3. 遍历从 normalizedStartMs 所在月到 effectiveEndMs 所在月的每个月。
             long cursorMonthStart = monthStartMs(normalizedStartMs);
@@ -98,45 +102,37 @@ public class ArchivePlanner {
                 long nextMonthStart = nextMonthStartMs(cursorMonthStart);
 
                 if (cursorMonthStart >= normalizedStartMs && nextMonthStart <= effectiveEndMs) {
-                    // 整月都在范围内 → 使用月包
-                    String ym = formatYearMonth(cursorMonthStart);
-                    String zipFileName = symbol + "-" + interval.code() + "-" + ym + ".zip";
-                    String checksumFileName = zipFileName + ".CHECKSUM";
-                    String relativePath = "data/futures/um/monthly/klines/"
-                            + symbol + "/" + interval.code() + "/" + zipFileName;
-                    files.add(new ArchiveKlineFile(
-                            ArchiveImportMode.ARCHIVE_MONTHLY,
-                            relativePath,
-                            zipFileName,
-                            checksumFileName,
-                            cursorMonthStart,
-                            nextMonthStart));
-                    monthlyFileCount++;
+                    // 整月都在有效范围内 → 检查月包是否已发布
+                    // 月包在次月首个星期一发布
+                    long monthlyAvailableMs = firstMondayOfNextMonthMs(cursorMonthStart);
+                    if (serverTimeMs >= monthlyAvailableMs) {
+                        // 月包已发布 → 使用月包
+                        String ym = formatYearMonth(cursorMonthStart);
+                        String zipFileName = symbol + "-" + interval.code() + "-" + ym + ".zip";
+                        String checksumFileName = zipFileName + ".CHECKSUM";
+                        String relativePath = "data/futures/um/monthly/klines/"
+                                + symbol + "/" + interval.code() + "/" + zipFileName;
+                        files.add(new ArchiveKlineFile(
+                                ArchiveImportMode.ARCHIVE_MONTHLY,
+                                relativePath,
+                                zipFileName,
+                                checksumFileName,
+                                cursorMonthStart,
+                                nextMonthStart));
+                        monthlyFileCount++;
+                    } else {
+                        // 月包尚未发布 → 该月使用日包
+                        dailyFileCount += addDailyFiles(files, symbol, interval,
+                                cursorMonthStart, nextMonthStart,
+                                Math.max(cursorMonthStart, normalizedStartMs),
+                                Math.min(nextMonthStart, effectiveEndMs));
+                    }
                 } else {
                     // 该月部分覆盖 → 遍历该月内每一天，与 [normalizedStartMs, effectiveEndMs) 取交集
-                    long dayCursor = cursorMonthStart;
-                    while (dayCursor < nextMonthStart && dayCursor < effectiveEndMs) {
-                        long dayEnd = nextDayStartMs(dayCursor);
-                        long rangeStart = Math.max(dayCursor, normalizedStartMs);
-                        long rangeEndExclusive = Math.min(dayEnd, effectiveEndMs);
-                        if (rangeStart < rangeEndExclusive) {
-                            // 该天与请求范围有交集（完全或部分），创建日包
-                            String ymd = formatYearMonthDay(dayCursor);
-                            String zipFileName = symbol + "-" + interval.code() + "-" + ymd + ".zip";
-                            String checksumFileName = zipFileName + ".CHECKSUM";
-                            String relativePath = "data/futures/um/daily/klines/"
-                                    + symbol + "/" + interval.code() + "/" + zipFileName;
-                            files.add(new ArchiveKlineFile(
-                                    ArchiveImportMode.ARCHIVE_DAILY,
-                                    relativePath,
-                                    zipFileName,
-                                    checksumFileName,
-                                    rangeStart,
-                                    rangeEndExclusive));
-                            dailyFileCount++;
-                        }
-                        dayCursor = dayEnd;
-                    }
+                    dailyFileCount += addDailyFiles(files, symbol, interval,
+                            cursorMonthStart, nextMonthStart,
+                            Math.max(cursorMonthStart, normalizedStartMs),
+                            Math.min(nextMonthStart, effectiveEndMs));
                 }
 
                 cursorMonthStart = nextMonthStart;
@@ -144,9 +140,16 @@ public class ArchivePlanner {
 
             // 4. 是否需要 REST 尾部修补：请求结束超过归档截止即需要
             hasRestTail = normalizedEndMs > effectiveEndMs;
+            if (hasRestTail) {
+                restTailStartInclusive = effectiveEndMs;
+                restTailEndExclusive = normalizedEndMs;
+            }
         }
 
-        // 5/6. 汇总返回，整体模式固定 AUTO，计划覆盖范围为完整请求范围
+        // 5/6. 汇总返回
+        Long restTailStart = hasRestTail ? restTailStartInclusive : null;
+        Long restTailEnd = hasRestTail ? restTailEndExclusive : null;
+
         ArchiveImportPlan plan = new ArchiveImportPlan(
                 files,
                 ArchiveImportMode.AUTO,
@@ -154,13 +157,82 @@ public class ArchivePlanner {
                 normalizedEndMs,
                 monthlyFileCount,
                 dailyFileCount,
-                hasRestTail);
+                hasRestTail,
+                restTailStart,
+                restTailEnd);
 
-        log.info("operation=archive-plan symbol={} interval={} start={} end={} serverTime={} archiveCutoff={} fileCount={} monthly={} daily={} hasRestTail={}",
+        log.info("operation=archive-plan symbol={} interval={} start={} end={} serverTime={} archiveCutoff={} fileCount={} monthly={} daily={} hasRestTail={} restTailStart={} restTailEnd={}",
                 symbol, interval.code(), normalizedStartMs, normalizedEndMs, serverTimeMs,
-                archiveCutoffMs, files.size(), monthlyFileCount, dailyFileCount, hasRestTail);
+                archiveCutoffMs, files.size(), monthlyFileCount, dailyFileCount, hasRestTail,
+                restTailStart, restTailEnd);
 
         return plan;
+    }
+
+    /**
+     * 为指定月内的每一天创建日包（与请求范围取交集）。
+     *
+     * @param files        目标文件列表
+     * @param symbol       合约符号
+     * @param interval     K 线周期
+     * @param monthStart   该月起始 epoch 毫秒
+     * @param monthEnd     该月结束 epoch 毫秒（独占）
+     * @param rangeStart   请求范围起始（包含）
+     * @param rangeEnd     请求范围结束（独占）
+     * @return 新增的日包数量
+     */
+    private int addDailyFiles(List<ArchiveKlineFile> files, String symbol, KlineInterval interval,
+                               long monthStart, long monthEnd,
+                               long rangeStart, long rangeEnd) {
+        int count = 0;
+        long dayCursor = monthStart;
+        while (dayCursor < monthEnd && dayCursor < rangeEnd) {
+            long dayEnd = nextDayStartMs(dayCursor);
+            long intersectStart = Math.max(dayCursor, rangeStart);
+            long intersectEnd = Math.min(dayEnd, rangeEnd);
+            if (intersectStart < intersectEnd) {
+                String ymd = formatYearMonthDay(dayCursor);
+                String zipFileName = symbol + "-" + interval.code() + "-" + ymd + ".zip";
+                String checksumFileName = zipFileName + ".CHECKSUM";
+                String relativePath = "data/futures/um/daily/klines/"
+                        + symbol + "/" + interval.code() + "/" + zipFileName;
+                files.add(new ArchiveKlineFile(
+                        ArchiveImportMode.ARCHIVE_DAILY,
+                        relativePath,
+                        zipFileName,
+                        checksumFileName,
+                        intersectStart,
+                        intersectEnd));
+                count++;
+            }
+            dayCursor = dayEnd;
+        }
+        return count;
+    }
+
+    /**
+     * 计算月包发布时间：该月结束后下一月的第一个星期一 00:00 UTC。
+     *
+     * Binance 官方月包在次月首个星期一发布。只有 serverTime >= 此时间才允许使用月包。
+     *
+     * @param monthStartMs 该月 1 号 00:00 UTC 的 epoch 毫秒
+     * @return 月包发布时间的 epoch 毫秒
+     */
+    private long firstMondayOfNextMonthMs(long monthStartMs) {
+        LocalDate monthStart = Instant.ofEpochMilli(monthStartMs)
+                .atZone(ZoneOffset.UTC)
+                .toLocalDate()
+                .withDayOfMonth(1);
+        LocalDate nextMonthStart = monthStart.plusMonths(1);
+        // 找到下月第一个星期一
+        LocalDate firstMonday = nextMonthStart;
+        while (firstMonday.getDayOfWeek() != java.time.DayOfWeek.MONDAY) {
+            firstMonday = firstMonday.plusDays(1);
+        }
+        return firstMonday
+                .atStartOfDay(ZoneOffset.UTC)
+                .toInstant()
+                .toEpochMilli();
     }
 
     // ---- 辅助方法 ----

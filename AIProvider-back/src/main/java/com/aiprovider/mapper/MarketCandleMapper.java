@@ -84,6 +84,15 @@ public interface MarketCandleMapper {
     @Select("SELECT COUNT(*) FROM q_market_candle WHERE DatasetId=#{datasetId}")
     long countByDataset(@Param("datasetId") long datasetId);
 
+    @Select("<script>" +
+            "SELECT COUNT(*) FROM q_market_candle WHERE DatasetId=#{datasetId} " +
+            "<if test='startOpenTimeMs != null'>AND OpenTimeMs &gt;= #{startOpenTimeMs} </if>" +
+            "<if test='endOpenTimeMs != null'>AND OpenTimeMs &lt;= #{endOpenTimeMs} </if>" +
+            "</script>")
+    long countByDatasetAndRange(@Param("datasetId") long datasetId,
+                                @Param("startOpenTimeMs") Long startOpenTimeMs,
+                                @Param("endOpenTimeMs") Long endOpenTimeMs);
+
     @Select("SELECT OpenTimeMs FROM q_market_candle " +
             "WHERE DatasetId=#{datasetId} AND OpenTimeMs > #{afterOpenTimeMs} " +
             "ORDER BY OpenTimeMs ASC LIMIT #{batchSize}")

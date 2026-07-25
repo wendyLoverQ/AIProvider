@@ -47,6 +47,11 @@ public class MarketCandleRepositoryImpl implements MarketCandleRepository {
     }
 
     @Override
+    public long countByDatasetAndRange(long datasetId, Long startOpenTimeMs, Long endOpenTimeMs) {
+        return mapper.countByDatasetAndRange(datasetId, startOpenTimeMs, endOpenTimeMs);
+    }
+
+    @Override
     public List<Long> streamOpenTimesAscending(long datasetId, int batchSize, long afterOpenTimeMs) {
         return mapper.streamOpenTimesAscending(datasetId, batchSize, afterOpenTimeMs);
     }

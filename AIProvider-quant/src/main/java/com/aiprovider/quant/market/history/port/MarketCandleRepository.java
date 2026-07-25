@@ -53,6 +53,18 @@ public interface MarketCandleRepository {
     long countByDataset(long datasetId);
 
     /**
+     * 统计数据集在指定 openTime 范围内的 K 线数量。
+     *
+     * 与 {@link #findPage} 使用完全相同的筛选范围，保证 total 与 records 一致。
+     *
+     * @param datasetId       数据集 ID
+     * @param startOpenTimeMs 起始 openTime（包含），null 表示不限制
+     * @param endOpenTimeMs   结束 openTime（包含），null 表示不限制
+     * @return 范围内 K 线数量
+     */
+    long countByDatasetAndRange(long datasetId, Long startOpenTimeMs, Long endOpenTimeMs);
+
+    /**
      * 按 openTime 升序流式遍历数据集 K 线的 openTime 列表。
      *
      * 用于缺口校验，不一次加载全部数据。

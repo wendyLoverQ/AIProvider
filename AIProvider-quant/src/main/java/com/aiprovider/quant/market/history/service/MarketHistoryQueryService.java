@@ -72,7 +72,8 @@ public class MarketHistoryQueryService {
         int effectivePageSize = pageSize <= 0 ? DEFAULT_PREVIEW_PAGE_SIZE : Math.min(pageSize, MAX_PREVIEW_PAGE_SIZE);
         int offset = Math.max(0, (page - 1) * effectivePageSize);
 
-        long total = candleRepository.countByDataset(datasetId);
+        // total 与 records 使用完全相同的筛选范围
+        long total = candleRepository.countByDatasetAndRange(datasetId, startOpenTimeMs, endOpenTimeMs);
         List<HistoricalCandle> candles = candleRepository.findPage(datasetId, startOpenTimeMs, endOpenTimeMs,
                 effectivePageSize, offset);
 

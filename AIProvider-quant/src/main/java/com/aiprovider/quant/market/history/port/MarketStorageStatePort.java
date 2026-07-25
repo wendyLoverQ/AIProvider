@@ -11,9 +11,9 @@ public interface MarketStorageStatePort {
      * 获取当前行情存储状态。
      *
      * @return 存储状态：
-     *         "MARKET_DATA_READY_EMPTY" - 表和 Repository 已就绪但没有 dataset
-     *         "MARKET_DATA_AVAILABLE" - 存在 dataset 且所有 gapCount = 0
-     *         "MARKET_DATA_GAPPED" - 任一 dataset gapCount > 0
+     *         "MARKET_DATA_READY_EMPTY" - 无 dataset 或所有 dataset 的 CandleCount=0
+     *         "MARKET_DATA_AVAILABLE" - 存在 CandleCount>0 的 dataset 且全部为 CONTIGUOUS
+     *         "MARKET_DATA_GAPPED" - 存在 CandleCount>0 的 dataset 且其中存在非 CONTIGUOUS 状态
      */
     String getStorageState();
 }

@@ -1,6 +1,7 @@
 package com.aiprovider.service.quant;
 
 import com.aiprovider.config.quant.QuantMarketHistoryProperties;
+import com.aiprovider.quant.market.history.model.ArchiveImportMode;
 import com.aiprovider.quant.market.history.model.MarketDataType;
 import com.aiprovider.quant.market.history.model.MarketDataset;
 import com.aiprovider.quant.market.history.model.MarketDatasetStatus;
@@ -13,6 +14,8 @@ import com.aiprovider.quant.market.history.service.MarketHistorySyncService;
 import com.aiprovider.quant.market.model.KlineInterval;
 import com.aiprovider.quant.market.model.MarketProviderId;
 import com.aiprovider.quant.market.model.MarketType;
+import com.aiprovider.quant.market.model.PerpetualContract;
+import com.aiprovider.quant.market.service.PublicMarketQueryService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -60,57 +63,83 @@ public class MarketHistoryTaskService {
     private final MarketDatasetRepository datasetRepository;
     private final QuantMarketHistoryProperties properties;
     private final ThreadPoolTaskExecutor executor;
+    private final PublicMarketQueryService publicMarketQueryService;
 
     public MarketHistoryTaskService(MarketHistorySyncService syncService,
                                      ArchiveImportService archiveImportService,
                                      MarketSyncTaskRepository taskRepository,
                                      MarketDatasetRepository datasetRepository,
                                      QuantMarketHistoryProperties properties,
-                                     @Qualifier("quantHistorySyncExecutor") ThreadPoolTaskExecutor executor) {
+                                     @Qualifier("quantHistorySyncExecutor") ThreadPoolTaskExecutor executor,
+                                     PublicMarketQueryService publicMarketQueryService) {
         this.syncService = syncService;
         this.archiveImportService = archiveImportService;
         this.taskRepository = taskRepository;
         this.datasetRepository = datasetRepository;
         this.properties = properties;
         this.executor = executor;
+        this.publicMarketQueryService = publicMarketQueryService;
     }
 
     // ---- 任务创建 ----
 
     /**
-     * 创建历史行情同步任务（REST 数据源）。
+     * 统一创建历史行情同步任务，按 sourceMode 路由到对应导入管线。
+     *
+     * <p>支持的数据来源模式：</p>
+     * <ul>
+     *   <li>{@code AUTO} — 自动选择月包、日包和 REST 尾部，单任务完成全范围回填</li>
+     *   <li>{@code REST_GAP_REPAIR} — 只用 /fapi/v1/klines 修补指定范围</li>
+     *   <li>{@code ARCHIVE_MONTHLY} — 只导入完整月包</li>
+     *   <li>{@code ARCHIVE_DAILY} — 只导入指定日包</li>
+     * </ul>
+     *
+     * <p>无论哪种模式，都会先校验真实合约（symbol/contractType/status/quoteAsset/
+     * supportedIntervals），复用 {@link PublicMarketQueryService} 已拉取的合约目录，
+     * 不重新请求第二套 exchangeInfo。上游目录请求失败时不会创建 dataset 或 task。</p>
      *
      * @param symbol       合约符号（如 BTCUSDT）
      * @param intervalCode K 线周期代码（如 1m、5m、15m、1h、4h、1d）
      * @param startTime    请求起始时间
      * @param endTime      请求结束时间
+     * @param sourceMode   数据来源模式（AUTO/REST_GAP_REPAIR/ARCHIVE_MONTHLY/ARCHIVE_DAILY）
      * @return 任务 ID（UUID）
-     * @throws MarketHistoryTaskException 参数校验失败或数据集正在同步
+     * @throws MarketHistoryTaskException 参数校验失败、合约不存在或数据集正在同步
      */
-    public String createSyncTask(String symbol, String intervalCode,
-                                  Instant startTime, Instant endTime) {
-        MarketSyncTask task = prepareTask(symbol, intervalCode, startTime, endTime);
-        return submitTask(task, () -> syncService.executeSync(task), "sync");
+    public String createTask(String symbol, String intervalCode,
+                              Instant startTime, Instant endTime, String sourceMode) {
+        // 校验并归一化 sourceMode（ArchiveImportMode 枚举保证取值合法）
+        ArchiveImportMode mode = parseSourceMode(sourceMode);
+        MarketSyncTask task = prepareTask(symbol, intervalCode, startTime, endTime, mode);
+        Runnable execution = selectExecution(mode, task);
+        return submitTask(task, execution, "sync-" + mode.name());
     }
 
-    /**
-     * 创建历史行情归档导入任务（Binance 官方 ZIP 数据源）。
-     *
-     * 使用 Binance 官方 data.binance.vision 的月包和日包下载历史 K 线，
-     * 适用于大范围历史数据回填。归档截止（昨天 00:00 UTC）之后的数据
-     * 需要另行创建 REST 同步任务修补。
-     *
-     * @param symbol       合约符号（如 BTCUSDT）
-     * @param intervalCode K 线周期代码
-     * @param startTime    请求起始时间
-     * @param endTime      请求结束时间
-     * @return 任务 ID（UUID）
-     * @throws MarketHistoryTaskException 参数校验失败或数据集正在同步
-     */
-    public String createArchiveImportTask(String symbol, String intervalCode,
-                                           Instant startTime, Instant endTime) {
-        MarketSyncTask task = prepareTask(symbol, intervalCode, startTime, endTime);
-        return submitTask(task, () -> archiveImportService.executeArchiveImport(task), "archive-import");
+    private ArchiveImportMode parseSourceMode(String sourceMode) {
+        if (sourceMode == null || sourceMode.isBlank()) {
+            throw new MarketHistoryTaskException("INVALID_SOURCE_MODE",
+                    "数据来源模式不能为空，支持: AUTO/REST_GAP_REPAIR/ARCHIVE_MONTHLY/ARCHIVE_DAILY");
+        }
+        try {
+            return ArchiveImportMode.valueOf(sourceMode.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new MarketHistoryTaskException("INVALID_SOURCE_MODE",
+                    "不支持的数据来源模式: " + sourceMode + "，支持: AUTO/REST_GAP_REPAIR/ARCHIVE_MONTHLY/ARCHIVE_DAILY");
+        }
+    }
+
+    private Runnable selectExecution(ArchiveImportMode mode, MarketSyncTask task) {
+        switch (mode) {
+            case REST_GAP_REPAIR:
+                return () -> syncService.executeSync(task);
+            case AUTO:
+            case ARCHIVE_MONTHLY:
+            case ARCHIVE_DAILY:
+                return () -> archiveImportService.executeArchiveImport(task);
+            default:
+                throw new MarketHistoryTaskException("INVALID_SOURCE_MODE",
+                        "不支持的数据来源模式: " + mode);
+        }
     }
 
     // ---- 任务准备 ----
@@ -118,9 +147,13 @@ public class MarketHistoryTaskService {
     /**
      * 校验参数、归一化时间范围、查找或创建数据集，构建待插入任务对象。
      * REST 同步和归档导入共用此方法。
+     *
+     * <p>合约校验复用 {@link PublicMarketQueryService#contracts} 已拉取的合约目录，
+     * 不重新请求第二套 exchangeInfo。校验失败抛 {@code CONTRACT_NOT_FOUND}（映射 404），
+     * 此时不会创建 dataset 或 task。</p>
      */
     private MarketSyncTask prepareTask(String symbol, String intervalCode,
-                                        Instant startTime, Instant endTime) {
+                                        Instant startTime, Instant endTime, ArchiveImportMode mode) {
         // 1. 校验周期
         KlineInterval interval = KlineInterval.fromCode(intervalCode);
         if (!interval.isSyncSupported()) {
@@ -135,7 +168,10 @@ public class MarketHistoryTaskService {
                     "合约符号格式不正确，应为大写英数字: " + symbol);
         }
 
-        // 3. 校验时间范围
+        // 3. 动态合约校验：复用 PublicMarketQueryService 已拉取的合约目录
+        validateContract(sym, interval);
+
+        // 4. 校验时间范围
         if (startTime == null || endTime == null) {
             throw new MarketHistoryTaskException("INVALID_TIME_RANGE",
                     "起止时间不能为空");
@@ -145,24 +181,24 @@ public class MarketHistoryTaskService {
                     "起始时间必须早于结束时间");
         }
 
-        // 4. 归一化到周期边界
+        // 5. 归一化到周期边界
         long durationMs = interval.durationMillis();
         long normalizedStartMs = interval.alignOpenTime(startTime).toEpochMilli();
         long normalizedEndMs = interval.alignOpenTime(endTime).toEpochMilli();
 
-        // 5. 钳制结束时间到当前周期（排除未闭合 K 线）
+        // 6. 钳制结束时间到当前周期（排除未闭合 K 线）
         long nowAlignedMs = interval.alignOpenTime(Instant.now()).toEpochMilli();
         if (normalizedEndMs > nowAlignedMs) {
             normalizedEndMs = nowAlignedMs;
         }
 
-        // 6. 校验归一化后范围
+        // 7. 校验归一化后范围
         if (normalizedEndMs <= normalizedStartMs) {
             throw new MarketHistoryTaskException("INVALID_TIME_RANGE",
                     "归一化后时间范围为空或无效");
         }
 
-        // 7. 计算预期数量并校验上限
+        // 8. 计算预期数量并校验上限
         long expectedCount = (normalizedEndMs - normalizedStartMs) / durationMs;
         if (expectedCount <= 0) {
             throw new MarketHistoryTaskException("INVALID_TIME_RANGE",
@@ -174,10 +210,10 @@ public class MarketHistoryTaskService {
                             + " max=" + properties.getMaxCandlesPerTask());
         }
 
-        // 8. 查找或创建数据集
+        // 9. 查找或创建数据集
         MarketDataset dataset = findOrCreateDataset(sym, interval);
 
-        // 9. 构建任务
+        // 10. 构建任务
         String taskId = UUID.randomUUID().toString();
         String activeKey = dataset.activeDatasetKey();
 
@@ -196,8 +232,37 @@ public class MarketHistoryTaskService {
         task.setNormalizedEndTime(Instant.ofEpochMilli(normalizedEndMs));
         task.setExpectedCount(expectedCount);
         task.setStatus(MarketSyncTaskStatus.QUEUED);
+        task.setSourceMode(mode.name());
 
         return task;
+    }
+
+    // ---- 合约校验 ----
+
+    /**
+     * 动态合约校验。
+     *
+     * 复用 {@link PublicMarketQueryService#contracts} 已拉取的合约目录（来源于
+     * /fapi/v1/exchangeInfo），不重新请求第二套 exchangeInfo。要求合约存在、
+     * {@code status=TRADING}、{@code contractType=PERPETUAL}、且支持请求的 K 线周期。
+     *
+     * @param symbol   已校验的合约符号（大写）
+     * @param interval 已校验的 K 线周期
+     * @throws MarketHistoryTaskException 合约不存在或不支持时抛 {@code CONTRACT_NOT_FOUND}（映射 404）
+     */
+    private void validateContract(String symbol, KlineInterval interval) {
+        List<PerpetualContract> contracts = publicMarketQueryService.contracts(PROVIDER, "USDT");
+        boolean valid = contracts.stream().anyMatch(c ->
+                symbol.equals(c.getSymbol())
+                        && "TRADING".equals(c.getStatus())
+                        && "PERPETUAL".equals(c.getContractType())
+                        && c.getSupportedIntervals() != null
+                        && c.getSupportedIntervals().contains(interval));
+        if (!valid) {
+            throw new MarketHistoryTaskException("CONTRACT_NOT_FOUND",
+                    "合约不存在、非 TRADING、非 PERPETUAL 或不支持该周期: symbol=" + symbol
+                            + " interval=" + interval.code());
+        }
     }
 
     /**

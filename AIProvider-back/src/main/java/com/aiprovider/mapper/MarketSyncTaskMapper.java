@@ -79,12 +79,12 @@ public interface MarketSyncTaskMapper {
 
     @Insert("INSERT INTO q_market_sync_task(TaskId,DatasetId,ActiveDatasetKey,Provider,MarketType,DataType," +
             "Symbol,IntervalCode,RequestedStartTimeMs,RequestedEndTimeMs,NormalizedStartTimeMs,NormalizedEndTimeMs," +
-            "ExpectedCount,Status) VALUES(" +
+            "ExpectedCount,Status,SourceMode) VALUES(" +
             "#{task.taskId},#{task.datasetId},#{task.activeDatasetKey},#{task.provider},#{task.marketType}," +
             "#{task.dataType},#{task.symbol},#{task.interval.code}," +
             "#{task.requestedStartTime.toEpochMilli},#{task.requestedEndTime.toEpochMilli}," +
             "#{task.normalizedStartTime.toEpochMilli},#{task.normalizedEndTime.toEpochMilli}," +
-            "#{task.expectedCount},#{task.status})")
+            "#{task.expectedCount},#{task.status},#{task.sourceMode})")
     @Options(useGeneratedKeys = true, keyProperty = "task.id", keyColumn = "Id")
     int insert(@Param("task") MarketSyncTask task);
 

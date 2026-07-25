@@ -108,4 +108,10 @@ public interface MarketDatasetMapper {
 
     @Select("SELECT COUNT(*) FROM q_market_dataset WHERE GapCount > 0")
     long countWithGaps();
+
+    @Select("SELECT COUNT(*) FROM q_market_dataset WHERE CandleCount > 0")
+    long countWithCandles();
+
+    @Select("SELECT COUNT(*) FROM q_market_dataset WHERE CandleCount > 0 AND Status != 'CONTIGUOUS'")
+    long countWithCandlesNotContiguous();
 }

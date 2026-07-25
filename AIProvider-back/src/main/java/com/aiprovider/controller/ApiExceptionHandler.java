@@ -1,6 +1,7 @@
 package com.aiprovider.controller;
 
 import com.aiprovider.common.Result;
+import com.aiprovider.controller.quant.ResourceNotFoundException;
 import com.aiprovider.service.TwitterAutomationException;
 import com.aiprovider.service.CryptoMarketUpstreamException;
 import com.aiprovider.service.FoundryUnavailableException;
@@ -40,6 +41,10 @@ public class ApiExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Result<Void> badRequest(IllegalArgumentException exception) { return Result.error(400, exception.getMessage()); }
+
+    @ExceptionHandler(ResourceNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public Result<Void> notFound(ResourceNotFoundException exception) { return Result.error(404, exception.getMessage()); }
 
     @ExceptionHandler(TwitterAutomationException.class)
     @ResponseStatus(HttpStatus.BAD_GATEWAY)
@@ -120,6 +125,9 @@ public class ApiExceptionHandler {
                 break;
             case "DATASET_CREATE_FAILED":
                 status = 500;
+                break;
+            case "CONTRACT_NOT_FOUND":
+                status = 404;
                 break;
             default:
                 status = 400;

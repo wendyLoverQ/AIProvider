@@ -19,6 +19,8 @@ public class ArchiveImportPlan {
     private int monthlyFileCount;
     private int dailyFileCount;
     private boolean hasRestTail;
+    private Long restTailStartInclusive;
+    private Long restTailEndExclusive;
 
     /**
      * 构造一个归档导入计划。
@@ -30,10 +32,13 @@ public class ArchiveImportPlan {
      * @param monthlyFileCount   月包数量
      * @param dailyFileCount     日包数量
      * @param hasRestTail        是否需要 REST 尾部修补
+     * @param restTailStartInclusive REST 尾部起始时间（包含），null 表示无 REST 尾部
+     * @param restTailEndExclusive   REST 尾部结束时间（不包含），null 表示无 REST 尾部
      */
     public ArchiveImportPlan(List<ArchiveKlineFile> files, ArchiveImportMode mode, long totalRangeStart,
                              long totalRangeEndExclusive, int monthlyFileCount, int dailyFileCount,
-                             boolean hasRestTail) {
+                             boolean hasRestTail,
+                             Long restTailStartInclusive, Long restTailEndExclusive) {
         this.files = files;
         this.mode = mode;
         this.totalRangeStart = totalRangeStart;
@@ -41,6 +46,8 @@ public class ArchiveImportPlan {
         this.monthlyFileCount = monthlyFileCount;
         this.dailyFileCount = dailyFileCount;
         this.hasRestTail = hasRestTail;
+        this.restTailStartInclusive = restTailStartInclusive;
+        this.restTailEndExclusive = restTailEndExclusive;
     }
 
     public List<ArchiveKlineFile> getFiles() { return files; }
@@ -63,6 +70,12 @@ public class ArchiveImportPlan {
 
     public boolean isHasRestTail() { return hasRestTail; }
     public void setHasRestTail(boolean hasRestTail) { this.hasRestTail = hasRestTail; }
+
+    public Long getRestTailStartInclusive() { return restTailStartInclusive; }
+    public void setRestTailStartInclusive(Long restTailStartInclusive) { this.restTailStartInclusive = restTailStartInclusive; }
+
+    public Long getRestTailEndExclusive() { return restTailEndExclusive; }
+    public void setRestTailEndExclusive(Long restTailEndExclusive) { this.restTailEndExclusive = restTailEndExclusive; }
 
     /**
      * 返回待下载文件总数。

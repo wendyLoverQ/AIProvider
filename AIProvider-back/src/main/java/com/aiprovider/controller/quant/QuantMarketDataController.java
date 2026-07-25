@@ -38,34 +38,25 @@ public class QuantMarketDataController {
     // ---- 同步任务 ----
 
     /**
-     * 创建历史行情同步任务。
+     * 创建历史行情同步任务（统一入口）。
      *
-     * 请求体包含合约符号、K 线周期和起止时间。
-     * 后端校验后异步执行，返回任务 ID。
+     * 请求体包含合约符号、K 线周期、起止时间和数据来源模式（sourceMode）。
+     * 后端复用 PublicMarketQueryService 校验真实合约，按 sourceMode 路由到对应导入管线：
+     * <ul>
+     *   <li>{@code AUTO} — 单任务完成归档月包/日包 + REST 尾部</li>
+     *   <li>{@code REST_GAP_REPAIR} — 只用 REST 修补指定范围</li>
+     *   <li>{@code ARCHIVE_MONTHLY} / {@code ARCHIVE_DAILY} — 只导入归档包</li>
+     * </ul>
+     * 后端异步执行，返回任务 ID。
      */
-    @PostMapping("/sync")
+    @PostMapping("/sync-tasks")
     public Result<Map<String, String>> createSyncTask(@RequestBody SyncTaskCreateRequest request) {
-        String taskId = taskService.createSyncTask(
+        String taskId = taskService.createTask(
                 request.getSymbol(),
                 request.getInterval(),
                 request.getStartTime(),
-                request.getEndTime());
-        return Result.success(Collections.singletonMap("taskId", taskId));
-    }
-
-    /**
-     * 创建历史行情归档导入任务（Binance 官方 ZIP 数据源）。
-     *
-     * 使用 data.binance.vision 官方月包和日包下载历史 K 线，
-     * 适用于大范围历史数据回填。归档截止之后的数据需要另行创建 REST 同步任务。
-     */
-    @PostMapping("/archive-import")
-    public Result<Map<String, String>> createArchiveImportTask(@RequestBody SyncTaskCreateRequest request) {
-        String taskId = taskService.createArchiveImportTask(
-                request.getSymbol(),
-                request.getInterval(),
-                request.getStartTime(),
-                request.getEndTime());
+                request.getEndTime(),
+                request.getSourceMode());
         return Result.success(Collections.singletonMap("taskId", taskId));
     }
 
@@ -76,9 +67,7 @@ public class QuantMarketDataController {
     public Result<List<MarketSyncTask>> listTasks(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int pageSize) {
-        if (pageSize < 1 || pageSize > 100) {
-            pageSize = 20;
-        }
+        validatePaging(page, pageSize, 100);
         return Result.success(taskService.listTasks(page, pageSize));
     }
 
@@ -97,7 +86,7 @@ public class QuantMarketDataController {
     public Result<MarketSyncTask> getTask(@PathVariable String taskId) {
         MarketSyncTask task = taskService.getTask(taskId);
         if (task == null) {
-            throw new IllegalArgumentException("任务不存在: " + taskId);
+            throw new ResourceNotFoundException("任务", taskId);
         }
         return Result.success(task);
     }
@@ -114,9 +103,7 @@ public class QuantMarketDataController {
             @RequestParam(required = false) String status,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int pageSize) {
-        if (pageSize < 1 || pageSize > 100) {
-            pageSize = 20;
-        }
+        validatePaging(page, pageSize, 100);
         return Result.success(queryService.listDatasets(null, symbol, interval, status, page, pageSize));
     }
 
@@ -127,21 +114,26 @@ public class QuantMarketDataController {
     public Result<MarketDataset> getDataset(@PathVariable long datasetId) {
         MarketDataset dataset = queryService.getDataset(datasetId);
         if (dataset == null) {
-            throw new IllegalArgumentException("数据集不存在: " + datasetId);
+            throw new ResourceNotFoundException("数据集", String.valueOf(datasetId));
         }
         return Result.success(dataset);
     }
 
     /**
      * 查询数据集缺口列表。
+     *
+     * 数据集不存在时返回 404。
      */
     @GetMapping("/datasets/{datasetId}/gaps")
     public Result<List<MarketDataGap>> getGaps(@PathVariable long datasetId) {
+        requireDatasetExists(datasetId);
         return Result.success(queryService.getGaps(datasetId));
     }
 
     /**
      * 分页预览数据集 K 线，按 openTime 倒序。
+     *
+     * 数据集不存在时返回 404，非法分页返回 400。
      */
     @GetMapping("/datasets/{datasetId}/candles")
     public Result<HistoricalKlinePage> getCandles(
@@ -150,6 +142,31 @@ public class QuantMarketDataController {
             @RequestParam(required = false) Long endOpenTime,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "100") int pageSize) {
+        requireDatasetExists(datasetId);
+        validatePaging(page, pageSize, 500);
         return Result.success(queryService.getCandles(datasetId, startOpenTime, endOpenTime, page, pageSize));
+    }
+
+    // ---- 校验辅助 ----
+
+    /**
+     * 分页参数校验。page 必须 >=1，pageSize 必须 1..maxPageSize，否则抛 IllegalArgumentException（映射 400）。
+     */
+    private void validatePaging(int page, int pageSize, int maxPageSize) {
+        if (page < 1) {
+            throw new IllegalArgumentException("page 必须 >= 1: " + page);
+        }
+        if (pageSize < 1 || pageSize > maxPageSize) {
+            throw new IllegalArgumentException("pageSize 必须在 1.." + maxPageSize + " 之间: " + pageSize);
+        }
+    }
+
+    /**
+     * 校验数据集存在，不存在抛 ResourceNotFoundException（映射 404）。
+     */
+    private void requireDatasetExists(long datasetId) {
+        if (queryService.getDataset(datasetId) == null) {
+            throw new ResourceNotFoundException("数据集", String.valueOf(datasetId));
+        }
     }
 }

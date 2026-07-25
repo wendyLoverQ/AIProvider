@@ -120,6 +120,7 @@ public class MarketDatasetValidationService {
             }
             dataset.setCandleCount(candleCount);
             dataset.setGapCount(totalMissingCount);
+            dataset.setGapSegmentCount(gaps.size());
             dataset.setEarliestOpenTime(earliest != null ? Instant.ofEpochMilli(earliest) : null);
             dataset.setLatestOpenTime(latest != null ? Instant.ofEpochMilli(latest) : null);
             dataset.setLastValidatedAt(Instant.now());

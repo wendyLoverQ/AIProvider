@@ -8,12 +8,15 @@ import org.slf4j.LoggerFactory;
 /**
  * 行情存储状态端口后端实现。
  *
- * 直接查询 q_market_dataset 表，根据 dataset 数量和缺口数量计算存储状态：
+ * 直接查询 q_market_dataset 表，根据 CandleCount 和 Status 计算存储状态：
  * <ul>
- *   <li>无 dataset → MARKET_DATA_READY_EMPTY（表就绪但无数据）</li>
- *   <li>有 dataset 且全部 GapCount=0 → MARKET_DATA_AVAILABLE</li>
- *   <li>任一 dataset GapCount>0 → MARKET_DATA_GAPPED</li>
+ *   <li>无 dataset 或所有 dataset 的 CandleCount=0 → MARKET_DATA_READY_EMPTY</li>
+ *   <li>存在 CandleCount>0 的 dataset，且其中存在非 CONTIGUOUS 状态 → MARKET_DATA_GAPPED</li>
+ *   <li>存在 CandleCount>0 的 dataset，且全部为 CONTIGUOUS 状态 → MARKET_DATA_AVAILABLE</li>
  * </ul>
+ *
+ * <p>不依赖 GapCount 单独判断，避免空数据集（CandleCount=0, GapCount=0, Status=EMPTY）
+ * 被误判为 MARKET_DATA_AVAILABLE。</p>
  */
 public class MarketStorageStatePortImpl implements MarketStorageStatePort {
 
@@ -31,14 +34,14 @@ public class MarketStorageStatePortImpl implements MarketStorageStatePort {
 
     @Override
     public String getStorageState() {
-        long total = datasetMapper.countAll();
-        if (total == 0) {
-            log.debug("operation=get-storage-state total=0 state={}", STATE_EMPTY);
+        long withCandles = datasetMapper.countWithCandles();
+        if (withCandles == 0) {
+            log.debug("operation=get-storage-state withCandles=0 state={}", STATE_EMPTY);
             return STATE_EMPTY;
         }
-        long withGaps = datasetMapper.countWithGaps();
-        String state = withGaps > 0 ? STATE_GAPPED : STATE_AVAILABLE;
-        log.debug("operation=get-storage-state total={} withGaps={} state={}", total, withGaps, state);
+        long notContiguous = datasetMapper.countWithCandlesNotContiguous();
+        String state = notContiguous > 0 ? STATE_GAPPED : STATE_AVAILABLE;
+        log.debug("operation=get-storage-state withCandles={} notContiguous={} state={}", withCandles, notContiguous, state);
         return state;
     }
 }

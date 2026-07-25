@@ -247,10 +247,16 @@ public class BinanceUsdmPublicMarketClient implements PublicMarketDataProvider, 
 
         List<MarketCandle> all = mapper.mapKlines(sym, interval, body, serverTime);
 
-        // 只返回已闭合 K 线（closeTime < serverTime）
+        // 严格过滤：只保留 [startInclusive, endExclusive) 范围内且已闭合的 K 线
+        // Binance 可能返回边界上的 K 线（openTime == endExclusive 或 openTime < startInclusive），
+        // 不过滤会导致后续写入管线报 OUT_OF_RANGE
         List<MarketCandle> closed = new ArrayList<>(all.size());
         for (MarketCandle c : all) {
-            if (c.getCloseTime() != null && c.getCloseTime().toEpochMilli() < serverTimeMs) {
+            long openTimeMs = c.getOpenTime().toEpochMilli();
+            long closeTimeMs = c.getCloseTime() != null ? c.getCloseTime().toEpochMilli() : Long.MAX_VALUE;
+            if (openTimeMs >= startInclusive
+                    && openTimeMs < endExclusive
+                    && closeTimeMs < serverTimeMs) {
                 closed.add(c);
             }
         }

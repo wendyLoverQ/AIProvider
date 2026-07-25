@@ -45,6 +45,9 @@ public class QuantMarketHistoryProperties {
     @NotBlank
     private String executorThreadNamePrefix = "quant-history-sync-";
 
+    /** Binance 官方归档下载配置。 */
+    private Archive archive = new Archive();
+
     public int getBatchSize() { return batchSize; }
     public void setBatchSize(int batchSize) { this.batchSize = batchSize; }
 
@@ -63,5 +66,59 @@ public class QuantMarketHistoryProperties {
     public String getExecutorThreadNamePrefix() { return executorThreadNamePrefix; }
     public void setExecutorThreadNamePrefix(String executorThreadNamePrefix) {
         this.executorThreadNamePrefix = executorThreadNamePrefix;
+    }
+
+    public Archive getArchive() { return archive; }
+    public void setArchive(Archive archive) { this.archive = archive; }
+
+    /**
+     * Binance 官方归档下载配置。
+     *
+     * 控制 base URL、工作目录、超时、最大 ZIP 体积和 CSV 解析批大小。
+     * 所有值可通过 application.yml / 环境变量覆盖。
+     */
+    public static class Archive {
+
+        /** Binance 公共数据下载基址。 */
+        @NotBlank
+        private String baseUrl = "https://data.binance.vision/";
+
+        /** 临时下载工作目录。 */
+        @NotBlank
+        private String workDir = System.getProperty("java.io.tmpdir") + "/aiprovider/quant-history";
+
+        /** HTTP 连接建立超时（毫秒）。 */
+        @Min(1000)
+        private int connectTimeoutMs = 30_000;
+
+        /** 单次 HTTP 请求超时（毫秒），覆盖 CHECKSUM 与 ZIP 下载。 */
+        @Min(1000)
+        private int requestTimeoutMs = 600_000;
+
+        /** 单个 ZIP 文件最大字节数，超过立即中止下载。 */
+        @Min(1)
+        private long maxZipSizeBytes = 536_870_912L;
+
+        /** CSV 解析批大小，每批回调一次 consumer。 */
+        @Min(1)
+        private int parseBatchSize = 1000;
+
+        public String getBaseUrl() { return baseUrl; }
+        public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
+
+        public String getWorkDir() { return workDir; }
+        public void setWorkDir(String workDir) { this.workDir = workDir; }
+
+        public int getConnectTimeoutMs() { return connectTimeoutMs; }
+        public void setConnectTimeoutMs(int connectTimeoutMs) { this.connectTimeoutMs = connectTimeoutMs; }
+
+        public int getRequestTimeoutMs() { return requestTimeoutMs; }
+        public void setRequestTimeoutMs(int requestTimeoutMs) { this.requestTimeoutMs = requestTimeoutMs; }
+
+        public long getMaxZipSizeBytes() { return maxZipSizeBytes; }
+        public void setMaxZipSizeBytes(long maxZipSizeBytes) { this.maxZipSizeBytes = maxZipSizeBytes; }
+
+        public int getParseBatchSize() { return parseBatchSize; }
+        public void setParseBatchSize(int parseBatchSize) { this.parseBatchSize = parseBatchSize; }
     }
 }

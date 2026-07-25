@@ -17,6 +17,8 @@ import com.aiprovider.quant.market.history.service.MarketCandleIngestService;
 import com.aiprovider.quant.market.history.service.MarketDatasetValidationService;
 import com.aiprovider.quant.market.history.service.MarketHistoryQueryService;
 import com.aiprovider.quant.market.history.service.MarketHistorySyncService;
+import com.aiprovider.quant.market.history.service.MarketTaskGapCalculator;
+import com.aiprovider.quant.market.history.service.RestKlineRangeImporter;
 import com.aiprovider.quant.management.QuantOverviewService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -63,6 +65,26 @@ public class QuantMarketHistoryConfiguration {
         return new MarketCandleIngestService(candleRepository, unitOfWork);
     }
 
+    // ---- 共享组件（REST 同步与归档导入共用）----
+
+    @Bean
+    public MarketTaskGapCalculator marketTaskGapCalculator() {
+        log.info("operation=gap-calculator-init");
+        return new MarketTaskGapCalculator();
+    }
+
+    @Bean
+    public RestKlineRangeImporter restKlineRangeImporter(
+            HistoricalMarketDataProvider provider,
+            MarketCandleIngestService ingestService,
+            MarketSyncTaskRepository taskRepository,
+            QuantMarketHistoryProperties properties) {
+        log.info("operation=rest-importer-init batchSize={} maxCandlesPerTask={}",
+                properties.getBatchSize(), properties.getMaxCandlesPerTask());
+        return new RestKlineRangeImporter(provider, ingestService, taskRepository,
+                properties.getBatchSize(), properties.getMaxCandlesPerTask());
+    }
+
     // ---- 归档导入 ----
 
     @Bean
@@ -72,9 +94,9 @@ public class QuantMarketHistoryConfiguration {
     }
 
     @Bean
-    public HistoricalArchiveProvider binancePublicDataArchiveAdapter() {
+    public HistoricalArchiveProvider binancePublicDataArchiveAdapter(QuantMarketHistoryProperties properties) {
         log.info("operation=archive-adapter-init");
-        return new BinancePublicDataArchiveAdapter();
+        return new BinancePublicDataArchiveAdapter(properties);
     }
 
     // ---- 存储状态 ----
@@ -113,31 +135,36 @@ public class QuantMarketHistoryConfiguration {
             ArchivePlanner planner,
             HistoricalArchiveProvider archiveProvider,
             MarketCandleIngestService ingestService,
+            RestKlineRangeImporter restImporter,
+            HistoricalMarketDataProvider marketDataProvider,
             MarketDatasetRepository datasetRepository,
             MarketSyncTaskRepository taskRepository,
-            MarketDatasetValidationService validationService) {
+            MarketDatasetValidationService validationService,
+            MarketTaskGapCalculator gapCalculator) {
         log.info("operation=archive-import-service-init");
         return new ArchiveImportService(planner, archiveProvider, ingestService,
-                datasetRepository, taskRepository, validationService);
+                restImporter, marketDataProvider,
+                datasetRepository, taskRepository, validationService, gapCalculator);
     }
 
     @Bean
     public MarketHistorySyncService marketHistorySyncService(
             HistoricalMarketDataProvider provider,
-            MarketCandleIngestService ingestService,
+            RestKlineRangeImporter restImporter,
+            MarketTaskGapCalculator gapCalculator,
             MarketDatasetRepository datasetRepository,
             MarketSyncTaskRepository taskRepository,
             MarketDatasetValidationService validationService,
             QuantMarketHistoryProperties properties) {
-        log.info("operation=market-history-init batchSize={} maxCandlesPerTask={}",
-                properties.getBatchSize(), properties.getMaxCandlesPerTask());
+        log.info("operation=market-history-init maxCandlesPerTask={}",
+                properties.getMaxCandlesPerTask());
         return new MarketHistorySyncService(
                 provider,
-                ingestService,
+                restImporter,
+                gapCalculator,
                 datasetRepository,
                 taskRepository,
                 validationService,
-                properties.getBatchSize(),
                 properties.getMaxCandlesPerTask());
     }
 

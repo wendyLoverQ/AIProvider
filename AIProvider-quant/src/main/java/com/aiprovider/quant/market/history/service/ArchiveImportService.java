@@ -1,12 +1,13 @@
 package com.aiprovider.quant.market.history.service;
 
+import com.aiprovider.quant.exchange.binance.usdm.BinanceUsdmUpstreamException;
 import com.aiprovider.quant.market.history.model.ArchiveImportMode;
 import com.aiprovider.quant.market.history.model.ArchiveImportPlan;
 import com.aiprovider.quant.market.history.model.ArchiveKlineFile;
-import com.aiprovider.quant.market.history.model.MarketDataGap;
 import com.aiprovider.quant.market.history.model.MarketSyncTask;
 import com.aiprovider.quant.market.history.model.MarketSyncTaskStatus;
 import com.aiprovider.quant.market.history.port.HistoricalArchiveProvider;
+import com.aiprovider.quant.market.history.port.HistoricalMarketDataProvider;
 import com.aiprovider.quant.market.history.port.MarketDatasetRepository;
 import com.aiprovider.quant.market.history.port.MarketSyncTaskRepository;
 import com.aiprovider.quant.market.model.KlineInterval;
@@ -37,7 +38,8 @@ import java.util.function.Consumer;
  *   <li>每个 ZIP 文件覆盖 [rangeStart, rangeEndExclusive)，CSV 可能包含范围外 K 线，需过滤</li>
  *   <li>lastOpenTime 跨文件累加，保证全局升序校验</li>
  *   <li>进度通过 updateArchiveProgress 跟踪，含 sourceMode/currentSourceFile/fileCount</li>
- *   <li>归档截止（昨天 00:00 UTC）之后的数据不在此服务范围内，hasRestTail 标记后由前端另行创建 REST 同步任务</li>
+ *   <li>归档范围完整性校验：plan.hasRestTail=true 时归档无法覆盖请求范围尾部，
+ *       直接标记 FAILED（ARCHIVE_RANGE_NOT_FULLY_AVAILABLE），不下载、不写入、不自动 REST 补齐</li>
  *   <li>冲突不自动覆盖，任务失败并记录错误码</li>
  * </ul>
  */
@@ -50,22 +52,31 @@ public class ArchiveImportService {
     private final ArchivePlanner planner;
     private final HistoricalArchiveProvider archiveProvider;
     private final MarketCandleIngestService ingestService;
+    private final RestKlineRangeImporter restImporter;
+    private final HistoricalMarketDataProvider marketDataProvider;
     private final MarketDatasetRepository datasetRepository;
     private final MarketSyncTaskRepository taskRepository;
     private final MarketDatasetValidationService validationService;
+    private final MarketTaskGapCalculator gapCalculator;
 
     public ArchiveImportService(ArchivePlanner planner,
                                 HistoricalArchiveProvider archiveProvider,
                                 MarketCandleIngestService ingestService,
+                                RestKlineRangeImporter restImporter,
+                                HistoricalMarketDataProvider marketDataProvider,
                                 MarketDatasetRepository datasetRepository,
                                 MarketSyncTaskRepository taskRepository,
-                                MarketDatasetValidationService validationService) {
+                                MarketDatasetValidationService validationService,
+                                MarketTaskGapCalculator gapCalculator) {
         this.planner = planner;
         this.archiveProvider = archiveProvider;
         this.ingestService = ingestService;
+        this.restImporter = restImporter;
+        this.marketDataProvider = marketDataProvider;
         this.datasetRepository = datasetRepository;
         this.taskRepository = taskRepository;
         this.validationService = validationService;
+        this.gapCalculator = gapCalculator;
     }
 
     /**
@@ -94,7 +105,17 @@ public class ArchiveImportService {
                     taskId, task.getDatasetId(), task.getSymbol(), interval.code(),
                     plannedFileCount, plan.getMonthlyFileCount(), plan.getDailyFileCount(), plan.isHasRestTail());
 
-            // 2. 逐文件下载 + 解析 + 写入
+            // 2. 归档范围完整性校验：hasRestTail=true 表示请求范围包含归档尚未覆盖的尾部，
+            //    直接终止任务，不下载 ZIP、不写入数据、不自动 REST 补齐
+            if (plan.isHasRestTail()) {
+                throw new ArchiveDataException(
+                        ArchiveDataException.ERR_ARCHIVE_RANGE_NOT_FULLY_AVAILABLE,
+                        "请求范围包含归档尚未覆盖的数据，请改用 REST 历史同步或缩小归档时间范围。"
+                                + " restTailStart=" + plan.getRestTailStartInclusive()
+                                + " restTailEnd=" + plan.getRestTailEndExclusive());
+            }
+
+            // 3. 逐文件下载 + 解析 + 写入
             ImportStats stats = new ImportStats();
 
             for (int i = 0; i < plan.getFiles().size(); i++) {
@@ -154,7 +175,7 @@ public class ArchiveImportService {
                         taskId, file.getZipFileName(), i + 1, stats.fetched, stats.inserted, stats.existing, progress);
             }
 
-            // 3. 校验 + 完成
+            // 4. 校验 + 完成
             completeWithValidation(task, interval, normalizedStart, normalizedEnd, stats);
 
         } catch (MarketCandleIngestService.IngestException e) {
@@ -162,6 +183,37 @@ public class ArchiveImportService {
             taskRepository.clearActiveLock(taskId);
             log.warn("operation=archive-import-failed taskId={} errorCode={} msg={}",
                     taskId, e.errorCode, e.getMessage());
+
+        } catch (ArchiveDataException e) {
+            taskRepository.markFailed(taskId, e.getErrorCode(), truncateMsg(e.getMessage()), null, null);
+            taskRepository.clearActiveLock(taskId);
+            log.warn("operation=archive-import-failed taskId={} errorCode={} msg={}",
+                    taskId, e.getErrorCode(), e.getMessage());
+
+        } catch (RestKlineRangeImporter.RestImportException e) {
+            taskRepository.markFailed(taskId, e.errorCode, truncateMsg(e.getMessage()), null, null);
+            taskRepository.clearActiveLock(taskId);
+            log.warn("operation=archive-import-failed taskId={} errorCode={} msg={}",
+                    taskId, e.errorCode, e.getMessage());
+
+        } catch (BinanceUsdmUpstreamException e) {
+            String errorCode = "UPSTREAM_ERROR";
+            if (e.getHttpStatus() == 429 || e.getHttpStatus() == 418) {
+                errorCode = "BINANCE_RATE_LIMIT";
+            }
+            String errorMsg = "Binance 上游失败(rest-tail): httpStatus=" + e.getHttpStatus()
+                    + " errorCode=" + e.getErrorCode()
+                    + (e.getErrorMsg() != null ? " msg=" + e.getErrorMsg() : "");
+            Integer usedWeight1m = null;
+            if (e.getUsedWeight1m() != null) {
+                try {
+                    usedWeight1m = Integer.parseInt(e.getUsedWeight1m());
+                } catch (NumberFormatException ignored) {}
+            }
+            taskRepository.markFailed(taskId, errorCode, truncateMsg(errorMsg), usedWeight1m, e.getRetryAfter());
+            taskRepository.clearActiveLock(taskId);
+            log.warn("operation=archive-import-failed taskId={} errorCode={} httpStatus={} retryAfter={}",
+                    taskId, errorCode, e.getHttpStatus(), e.getRetryAfter());
 
         } catch (Exception e) {
             taskRepository.markFailed(taskId, ERR_UNKNOWN, truncateMsg(e.getMessage()), null, null);
@@ -185,7 +237,7 @@ public class ArchiveImportService {
         MarketDatasetValidationService.ValidationResult vr =
                 validationService.validateDataset(task.getDatasetId(), interval, taskId);
 
-        long taskGapCount = calculateTaskGaps(interval, normalizedStart, normalizedEnd,
+        long taskGapCount = gapCalculator.calculateTaskGapCount(interval, normalizedStart, normalizedEnd,
                 vr.earliestOpenTimeMs, vr.latestOpenTimeMs, vr.gaps);
 
         taskRepository.markCompleted(taskId, stats.fetched, stats.inserted, stats.existing,
@@ -205,45 +257,6 @@ public class ArchiveImportService {
         return BigDecimal.valueOf(completedFiles)
                 .multiply(BigDecimal.valueOf(100))
                 .divide(BigDecimal.valueOf(totalFiles), 4, RoundingMode.HALF_UP);
-    }
-
-    /**
-     * 计算任务请求范围内的缺口 K 线总根数。
-     * 逻辑与 {@link MarketHistorySyncService#calculateTaskGaps} 一致。
-     */
-    private long calculateTaskGaps(KlineInterval interval,
-                                    long normalizedStart, long normalizedEnd,
-                                    Long earliestMs, Long latestMs,
-                                    List<MarketDataGap> internalGaps) {
-        long durationMs = interval.durationMillis();
-
-        if (earliestMs == null || latestMs == null) {
-            return (normalizedEnd - normalizedStart) / durationMs;
-        }
-
-        long gaps = 0;
-
-        long frontEnd = Math.min(earliestMs, normalizedEnd);
-        if (frontEnd > normalizedStart) {
-            gaps += (frontEnd - normalizedStart) / durationMs;
-        }
-
-        for (MarketDataGap gap : internalGaps) {
-            long gapStart = gap.getStartOpenTime().toEpochMilli();
-            long gapEndExclusive = gap.getEndOpenTimeExclusive().toEpochMilli();
-            long intersectStart = Math.max(gapStart, normalizedStart);
-            long intersectEnd = Math.min(gapEndExclusive, normalizedEnd);
-            if (intersectEnd > intersectStart) {
-                gaps += (intersectEnd - intersectStart) / durationMs;
-            }
-        }
-
-        long backStart = Math.max(latestMs + durationMs, normalizedStart);
-        if (normalizedEnd > backStart) {
-            gaps += (normalizedEnd - backStart) / durationMs;
-        }
-
-        return gaps;
     }
 
     private static String truncateMsg(String msg) {
