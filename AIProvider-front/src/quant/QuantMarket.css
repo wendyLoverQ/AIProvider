@@ -1,0 +1,350 @@
+/* QuantMarket — Binance USDⓈ-M 永续公共行情页面，只使用语义主题变量。 */
+
+.quant-market-page{gap:14px}
+
+/* ===== 连接状态栏 ===== */
+.quant-market-health{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr));
+  gap:12px;
+}
+.quant-market-health-card{
+  padding:14px 16px;
+  border-radius:var(--card-radius);
+  border:1px solid var(--border-subtle);
+  background:var(--bg-surface);
+  min-width:0;
+}
+.quant-market-health-head,
+.quant-market-health-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:5px 0;
+  min-width:0;
+}
+.quant-market-health-head span,
+.quant-market-health-row span{
+  font-size:11px;
+  color:var(--text-muted);
+  white-space:nowrap;
+}
+.quant-market-health-head strong,
+.quant-market-health-row strong{
+  font-size:12px;
+  color:var(--text-primary);
+  text-align:right;
+  word-break:break-all;
+}
+.quant-market-health-row strong.online,
+.quant-market-health-row strong.offline{
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+}
+.quant-market-health-row .dot{
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background:var(--accent-red);
+  flex:none;
+}
+.quant-market-health-row .dot.online{
+  background:var(--accent-mint);
+  box-shadow:0 0 7px color-mix(in srgb,var(--accent-mint) 70%,transparent);
+}
+
+/* ===== 工具栏 ===== */
+.quant-market-toolbar{
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:12px;
+  padding:12px 14px;
+  border-radius:var(--card-radius);
+  border:1px solid var(--border-subtle);
+  background:var(--bg-surface);
+}
+.quant-market-select-label{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-size:11px;
+  color:var(--text-muted);
+}
+.quant-market-select-label select{
+  min-width:160px;
+  height:32px;
+  padding:0 8px;
+  border:1px solid var(--border-normal);
+  border-radius:var(--control-radius);
+  background:var(--bg-card);
+  color:var(--text-primary);
+  font-size:12px;
+}
+.quant-market-select-label select:focus-visible{
+  outline:2px solid var(--border-focus);
+  outline-offset:1px;
+}
+.quant-market-quote-label{
+  font-size:11px;
+  color:var(--text-muted);
+  white-space:nowrap;
+}
+.quant-market-intervals{
+  display:flex;
+  gap:4px;
+}
+.quant-market-intervals button{
+  min-height:32px;
+  padding:0 10px;
+  border:1px solid transparent;
+  border-radius:var(--control-radius);
+  background:transparent;
+  color:var(--text-muted);
+  font-size:11px;
+  cursor:pointer;
+}
+.quant-market-intervals button:hover{
+  border-color:var(--border-normal);
+  background:var(--bg-card-hover);
+}
+.quant-market-intervals button.active{
+  border-color:color-mix(in srgb,var(--accent-primary) 45%,var(--border-normal));
+  background:color-mix(in srgb,var(--accent-primary) 12%,var(--bg-card));
+  color:var(--accent-primary);
+}
+.quant-market-intervals button:focus-visible{
+  outline:2px solid var(--border-focus);
+  outline-offset:1px;
+}
+.quant-market-refresh-klines{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  height:32px;
+  padding:0 12px;
+  border:1px solid var(--border-normal);
+  border-radius:var(--control-radius);
+  background:var(--bg-card);
+  color:var(--text-primary);
+  font-size:11px;
+  cursor:pointer;
+  margin-left:auto;
+}
+.quant-market-refresh-klines:hover{border-color:var(--border-focus);background:var(--bg-card-hover)}
+.quant-market-refresh-klines:focus-visible{outline:2px solid var(--border-focus);outline-offset:1px}
+
+/* ===== 行情主区 ===== */
+.quant-market-layout{
+  display:grid;
+  grid-template-columns:220px minmax(0,1fr);
+  gap:0;
+  border-radius:var(--card-radius);
+  border:1px solid var(--border-subtle);
+  overflow:hidden;
+  min-height:420px;
+}
+.quant-market-symbols{
+  display:flex;
+  flex-direction:column;
+  min-width:0;
+  border-right:1px solid var(--border-subtle);
+  background:var(--bg-card);
+}
+.quant-market-symbol-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:11px 12px;
+  font-size:11px;
+  color:var(--text-muted);
+  border-bottom:1px solid var(--border-subtle);
+}
+.quant-market-symbol-head b{color:var(--accent-primary);font-weight:600}
+.quant-market-symbol-list{
+  overflow:auto;
+  max-height:520px;
+  flex:1;
+}
+.quant-market-symbol-list button{
+  display:flex;
+  align-items:baseline;
+  width:100%;
+  padding:9px 12px;
+  border:1px solid transparent;
+  border-radius:0;
+  background:transparent;
+  color:var(--text-secondary);
+  text-align:left;
+  cursor:pointer;
+  gap:4px;
+}
+.quant-market-symbol-list button:hover{background:var(--bg-card-hover)}
+.quant-market-symbol-list button.active{
+  border-left:2px solid var(--accent-primary);
+  background:color-mix(in srgb,var(--accent-primary) 8%,var(--bg-card));
+  color:var(--text-primary);
+}
+.quant-market-symbol-list button:focus-visible{
+  outline:2px solid var(--border-focus);
+  outline-offset:-2px;
+}
+.quant-market-symbol-list strong{font-size:12px}
+.quant-market-symbol-list span{font-size:10px;color:var(--text-muted)}
+.quant-market-symbol-list p{padding:20px 12px;color:var(--text-muted);font-size:11px;text-align:center}
+
+.quant-market-main{
+  display:flex;
+  flex-direction:column;
+  min-width:0;
+  background:var(--bg-page);
+}
+.quant-market-ticker{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  flex-wrap:wrap;
+  gap:16px;
+  padding:16px 20px;
+  border-bottom:1px solid var(--border-subtle);
+}
+.quant-market-ticker>div{display:grid;gap:4px}
+.quant-market-ticker>div span{font-size:11px;color:var(--text-muted)}
+.quant-market-ticker>div strong{font-size:22px;font-weight:600;color:var(--text-primary)}
+.quant-market-ticker dl{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(110px,100%),1fr));
+  gap:10px 20px;
+  margin:0;
+  flex:1;
+}
+.quant-market-ticker dl div{display:grid;gap:3px}
+.quant-market-ticker dt{font-size:10px;color:var(--text-muted);margin:0}
+.quant-market-ticker dd{margin:0;font-size:12px;color:var(--text-primary)}
+.quant-market-ticker dd.up{color:var(--accent-mint)}
+.quant-market-ticker dd.down{color:var(--accent-red)}
+.quant-market-chart{
+  min-height:280px;
+  flex:1;
+  padding:6px 4px;
+}
+.quant-market-chart-empty{
+  display:grid;
+  place-items:center;
+  align-content:center;
+  gap:8px;
+  height:100%;
+  color:var(--text-muted);
+  font-size:11px;
+}
+.quant-market-chart-empty svg{width:32px;height:32px;color:var(--accent-primary)}
+
+/* ===== 合约规则 ===== */
+.quant-market-contract-rules{
+  padding:14px 16px;
+  border-radius:var(--card-radius);
+  border:1px solid var(--border-subtle);
+  background:var(--bg-surface);
+}
+.quant-market-rules-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(160px,100%),1fr));
+  gap:8px;
+}
+.quant-market-rules-grid>div{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  padding:8px 10px;
+  border-radius:var(--control-radius);
+  border:1px solid var(--border-normal);
+  background:var(--bg-card);
+  min-width:0;
+}
+.quant-market-rules-grid span{font-size:10px;color:var(--text-muted)}
+.quant-market-rules-grid strong{font-size:12px;color:var(--text-primary);word-break:break-all}
+
+/* ===== K 线表格 ===== */
+.quant-market-klines-table{
+  padding:14px 16px;
+  border-radius:var(--card-radius);
+  border:1px solid var(--border-subtle);
+  background:var(--bg-surface);
+}
+.quant-market-table-wrap{
+  overflow:auto;
+  max-width:100%;
+}
+.quant-market-table-wrap table{
+  width:100%;
+  border-collapse:collapse;
+  font-size:11px;
+  min-width:640px;
+}
+.quant-market-table-wrap th{
+  padding:7px 8px;
+  text-align:right;
+  border-bottom:1px solid var(--border-subtle);
+  color:var(--text-muted);
+  font-weight:500;
+  white-space:nowrap;
+}
+.quant-market-table-wrap th:first-child{text-align:left}
+.quant-market-table-wrap td{
+  padding:6px 8px;
+  text-align:right;
+  border-bottom:1px solid var(--border-subtle);
+  color:var(--text-primary);
+  white-space:nowrap;
+}
+.quant-market-table-wrap td:first-child{text-align:left}
+.quant-market-table-wrap tr:hover td{background:var(--bg-card-hover)}
+
+/* ===== 数据来源说明 ===== */
+.quant-market-source-note{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  padding:14px 16px;
+  border-radius:var(--card-radius);
+  border:1px solid var(--border-subtle);
+  background:color-mix(in srgb,var(--accent-primary) 6%,var(--bg-surface));
+}
+.quant-market-source-note svg{flex:none;font-size:20px;color:var(--accent-primary)}
+.quant-market-source-note strong{display:block;font-size:12px;color:var(--text-primary)}
+.quant-market-source-note p{margin:3px 0 0;font-size:11px;color:var(--text-muted);line-height:1.5}
+
+/* ===== 错误提示 ===== */
+.quant-market-notice{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:9px 14px;
+  border-radius:var(--control-radius);
+  border:1px solid color-mix(in srgb,var(--accent-red) 45%,var(--border-subtle));
+  background:color-mix(in srgb,var(--accent-red) 10%,var(--bg-card));
+  color:var(--accent-red);
+  font-size:11px;
+}
+
+.quant-market-empty{padding:16px;color:var(--text-muted);font-size:11px;text-align:center}
+
+/* ===== 响应式 ===== */
+@media (max-width:900px){
+  .quant-market-layout{grid-template-columns:1fr}
+  .quant-market-symbols{
+    max-height:200px;
+    border-right:0;
+    border-bottom:1px solid var(--border-subtle);
+  }
+  .quant-market-refresh-klines{margin-left:0}
+}
+@media (max-width:600px){
+  .quant-market-ticker{flex-direction:column;align-items:flex-start}
+  .quant-market-ticker dl{grid-template-columns:repeat(2,minmax(0,1fr));width:100%}
+  .quant-market-toolbar{flex-direction:column;align-items:stretch}
+  .quant-market-intervals{overflow:auto;width:100%}
+  .quant-market-refresh-klines{margin-left:0;justify-content:center}
+}

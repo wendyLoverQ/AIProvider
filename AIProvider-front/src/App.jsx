@@ -84,8 +84,8 @@ import CuteHomeBackground from "./CuteHomeBackground";
 import ManualImageEditor from "./ManualImageEditor";
 import VideoEditor from "./VideoEditor";
 import FoundryWorkbench from "./FoundryWorkbench";
-import CryptoMarket from "./CryptoMarket";
 import QuantOverview from "./quant/QuantOverview";
+import QuantMarket from "./quant/QuantMarket";
 import QuantStrategies from "./quant/QuantStrategies";
 import QuantBacktests from "./quant/QuantBacktests";
 import QuantRisk from "./quant/QuantRisk";
@@ -120,7 +120,7 @@ const NAV = [
   { key: "fileTransfer", label: "文件中转", icon: FolderSimple, group: "operate", color: "#60a5fa" },
   { key: "camera", label: "手机监控", icon: VideoCamera, closed: true, hidden: true, group: "operate" },
   { key: "quantOverview", label: "量化总览", icon: ChartBar, group: "quant", color: "#a78bfa" },
-  { key: "market", label: "市场行情", icon: ChartLineUp, group: "quant", color: "#72ddb1" },
+  { key: "market", label: "合约行情", icon: ChartLineUp, group: "quant", color: "#72ddb1" },
   { key: "quantStrategies", label: "策略管理", icon: Stack, group: "quant", color: "#c69cff" },
   { key: "quantBacktests", label: "回测实验", icon: Flask, group: "quant", color: "#f0a860" },
   { key: "quantRisk", label: "风控中心", icon: ShieldCheck, group: "quant", color: "#ff6b6b" },
@@ -144,7 +144,7 @@ const PAGE_DESCRIPTIONS = {
   favorites: "收藏并管理保存在服务器上的媒体原件",
   manualEditor: "本机画布、抠图与 AI 修补",
   videoEditor: "素材、画布与时间线编辑",
-  market: "实时行情、K 线与订单簿",
+  market: "Binance U 本位永续公共只读行情，不经过 CCXT",
   quantOverview: "量化系统阶段、连接状态与模块运行总览",
   quantStrategies: "策略定义、参数版本、启停状态与信号记录",
   quantBacktests: "历史回放、撮合假设、参数实验与结果报告",
@@ -377,7 +377,7 @@ function App() {
         </div>}
         {view === "manualEditor" && <ManualImageEditor />}
         {view === "videoEditor" && <VideoEditor />}
-        {view === "market" && <CryptoMarket />}
+        {view === "market" && <QuantMarket />}
         {view === "quantOverview" && <QuantOverview />}
         {view === "quantStrategies" && <QuantStrategies />}
         {view === "quantBacktests" && <QuantBacktests />}

@@ -22,10 +22,10 @@ async function fetchOverview() {
   return payload.data;
 }
 
-const PHASE_LABELS = { FOUNDATION: "基础骨架" };
-const EXCHANGE_LABELS = { NOT_CONFIGURED: "未配置" };
+const PHASE_LABELS = { FOUNDATION: "基础骨架", PUBLIC_MARKET: "公共行情阶段" };
+const EXCHANGE_LABELS = { NOT_CONFIGURED: "未配置", PUBLIC_MARKET_ONLY: "仅公共行情" };
 const STORAGE_LABELS = { NOT_CREATED: "未创建" };
-const MODULE_STATUS_LABELS = { SKELETON: "骨架已建立" };
+const MODULE_STATUS_LABELS = { SKELETON: "骨架已建立", PUBLIC_MARKET_CONNECTED: "公共行情已接入", PUBLIC_MARKET_ONLY: "仅公共行情" };
 const GROUP_ORDER = ["research", "trading", "operations"];
 const GROUP_LABELS = { research: "研究链路", trading: "交易链路", operations: "运行管理" };
 
@@ -104,9 +104,9 @@ function OverviewBody({ overview, state, error, load, refreshing }) {
     <>
       <div className="quant-workspace-head">
         <div>
-          <span className="eyebrow">QUANT · FOUNDATION SKELETON</span>
-          <h3>骨架总览</h3>
-          <small>当前阶段只展示已建立的骨架结构，不提供具体量化业务</small>
+          <span className="eyebrow">QUANT · PUBLIC MARKET</span>
+          <h3>量化总览</h3>
+          <small>公共行情已接入 Binance USDⓈ-M 永续，实盘交易未启用</small>
         </div>
         <button type="button" className="quant-refresh" onClick={load} disabled={refreshing}>
           <ArrowsClockwise className={refreshing ? "spin" : ""} />

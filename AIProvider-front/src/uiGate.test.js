@@ -264,8 +264,8 @@ describe("UI release gate", () => {
     ["quantOverview", "market", "quantStrategies", "quantBacktests", "quantRisk", "quantPortfolio", "quantOrders", "quantLogs"].forEach((key) => {
       expect(app, `缺少量化菜单项 ${key}`).toContain(`key: "${key}"`);
     });
-    // 市场行情归属量化分组，且不再属于运营与工具。
-    expect(app).toContain('{ key: "market", label: "市场行情", icon: ChartLineUp, group: "quant"');
+    // 合约行情归属量化分组，且不再属于运营与工具。
+    expect(app).toContain('{ key: "market", label: "合约行情", icon: ChartLineUp, group: "quant"');
     // 不再存在旧的单一“量化交易”菜单。
     expect(app).not.toContain('{ key: "quant", label: "量化交易"');
 
@@ -313,8 +313,73 @@ describe("UI release gate", () => {
     expect(app).toContain('const MOBILE_NAV = [{ key: "home"');
     expect(app).toContain('scrollIntoView({ behavior: "smooth"');
 
-    // CryptoMarket 业务代码与 API 路径未被修改。
+    // CryptoMarket 业务代码与 API 路径未被修改（旧文件保留但不再被 /market 挂载）。
     expect(read("CryptoMarket.jsx")).toContain("/api/crypto-market");
+
+    // /market 页面已替换为 QuantMarket，不再挂载 CryptoMarket。
+    expect(app).not.toContain('import CryptoMarket from "./CryptoMarket"');
+    expect(app).not.toContain("<CryptoMarket />");
+    expect(app).toContain('import QuantMarket from "./quant/QuantMarket"');
+    expect(app).toContain('<QuantMarket />');
+    // 菜单标签改为合约行情。
+    expect(app).toContain('{ key: "market", label: "合约行情"');
+    expect(app).not.toContain('{ key: "market", label: "市场行情"');
+  });
+
+  it("keeps QuantMarket on Binance public market without CCXT or API Key", () => {
+    const page = read("quant/QuantMarket.jsx");
+    const css = read("quant/QuantMarket.css");
+    const theme = read("SemanticTheme.css");
+
+    // 只调用 /api/quant/market/**，不调用旧 CCXT 链路。
+    expect(page).toContain("/api/quant/market");
+    expect(page).not.toContain("/api/crypto-market");
+
+    // 复用 UiSearchField 和 readJsonResponse。
+    expect(page).toContain('import UiSearchField from "../UiSearchField"');
+    expect(page).toContain('import { readJsonResponse } from "../apiResponse"');
+
+    // 使用 QuantPageScaffold。
+    expect(page).toContain('import QuantPageScaffold from "./QuantPageScaffold"');
+
+    // 明确标注公共只读和不经过 CCXT。
+    expect(page).toContain("公共只读");
+    expect(page).toContain("不经过 CCXT");
+
+    // BTCUSDT 只作为默认选择逻辑，不是唯一合约数据。
+    expect(page).toContain('DEFAULT_SYMBOL = "BTCUSDT"');
+    expect(page).toContain("contracts.find");
+    expect(page).toContain("cs[0]");
+
+    // 无 API Key 输入框。
+    expect(page).not.toMatch(/api[_-]?key/i);
+
+    // 无下单按钮（允许说明文字"不提供下单"）。
+    expect(page).not.toMatch(/<button[^>]*>[^<]*下单/);
+    expect(page).not.toMatch(/买入|卖出|place.?order/i);
+
+    // 无 clickable div。
+    expect(page).not.toMatch(/<div[^>]+onClick=/);
+
+    // 原生按钮和 select。
+    expect(page).toContain("<button type=\"button\"");
+    expect(page).toContain("<select");
+
+    // CSS 使用语义变量和 :focus-visible。
+    expect(css).toContain("var(--bg-surface)");
+    expect(css).toContain("var(--text-primary)");
+    expect(css).toContain(":focus-visible");
+    expect(css).toContain("var(--border-normal)");
+
+    // 响应式。
+    expect(css).toMatch(/@media \(max-width:\s*900px\)/);
+    expect(css).toMatch(/@media \(max-width:\s*600px\)/);
+
+    // SemanticTheme 接入 quant-market-page。
+    expect(theme).toContain(".quant-market-page");
+
+    // K 线表格允许横向滚动。
+    expect(css).toMatch(/\.quant-market-table-wrap\{[^}]*overflow:auto/);
   });
 
   it("keeps content operation dialogs inside the desktop viewport", () => {

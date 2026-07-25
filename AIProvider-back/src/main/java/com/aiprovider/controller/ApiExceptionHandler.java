@@ -9,6 +9,7 @@ import com.aiprovider.service.ContentAiException;
 import com.aiprovider.service.ContentSourceException;
 import com.aiprovider.service.XiaohongshuAutomationException;
 import com.aiprovider.service.PromptTranslationException;
+import com.aiprovider.quant.exchange.binance.usdm.BinanceUsdmUpstreamException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -49,6 +50,24 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.BAD_GATEWAY)
     public Result<Void> cryptoMarketUpstream(CryptoMarketUpstreamException exception) {
         return Result.error(502, exception.getMessage());
+    }
+
+    @ExceptionHandler(BinanceUsdmUpstreamException.class)
+    public ResponseEntity<Result<Void>> binanceUsdmUpstream(BinanceUsdmUpstreamException exception) {
+        int upstream = exception.getHttpStatus();
+        int status;
+        String message;
+        if (upstream == 429 || upstream == 418) {
+            status = 429;
+            message = "Binance 行情上游限频，请稍后重试";
+        } else if (upstream >= 500) {
+            status = 502;
+            message = "Binance 行情上游暂时不可用，请稍后重试";
+        } else {
+            status = 502;
+            message = "Binance 行情上游请求失败，请稍后重试";
+        }
+        return ResponseEntity.status(status).body(Result.error(status, message));
     }
 
     @ExceptionHandler(FoundryUnavailableException.class)
