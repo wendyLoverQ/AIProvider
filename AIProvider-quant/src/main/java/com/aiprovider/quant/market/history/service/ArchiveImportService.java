@@ -38,8 +38,10 @@ import java.util.function.Consumer;
  *   <li>每个 ZIP 文件覆盖 [rangeStart, rangeEndExclusive)，CSV 可能包含范围外 K 线，需过滤</li>
  *   <li>lastOpenTime 跨文件累加，保证全局升序校验</li>
  *   <li>进度通过 updateArchiveProgress 跟踪，含 sourceMode/currentSourceFile/fileCount</li>
- *   <li>归档范围完整性校验：plan.hasRestTail=true 时归档无法覆盖请求范围尾部，
- *       直接标记 FAILED（ARCHIVE_RANGE_NOT_FULLY_AVAILABLE），不下载、不写入、不自动 REST 补齐</li>
+ *   <li>AUTO 模式在同一任务内完成归档月包/日包 + REST 尾部修补：
+ *       归档文件下载写入后，委托 {@link RestKlineRangeImporter#importRange} 修补
+ *       [restTailStart, restTailEnd) 范围，不要求前端创建第二个任务</li>
+ *   <li>非 AUTO 模式（ARCHIVE_MONTHLY/ARCHIVE_DAILY）只导入归档包，跳过 REST 尾部</li>
  *   <li>冲突不自动覆盖，任务失败并记录错误码</li>
  * </ul>
  */
@@ -105,17 +107,7 @@ public class ArchiveImportService {
                     taskId, task.getDatasetId(), task.getSymbol(), interval.code(),
                     plannedFileCount, plan.getMonthlyFileCount(), plan.getDailyFileCount(), plan.isHasRestTail());
 
-            // 2. 归档范围完整性校验：hasRestTail=true 表示请求范围包含归档尚未覆盖的尾部，
-            //    直接终止任务，不下载 ZIP、不写入数据、不自动 REST 补齐
-            if (plan.isHasRestTail()) {
-                throw new ArchiveDataException(
-                        ArchiveDataException.ERR_ARCHIVE_RANGE_NOT_FULLY_AVAILABLE,
-                        "请求范围包含归档尚未覆盖的数据，请改用 REST 历史同步或缩小归档时间范围。"
-                                + " restTailStart=" + plan.getRestTailStartInclusive()
-                                + " restTailEnd=" + plan.getRestTailEndExclusive());
-            }
-
-            // 3. 逐文件下载 + 解析 + 写入
+            // 2. 逐文件下载 + 解析 + 写入（归档部分）
             ImportStats stats = new ImportStats();
 
             for (int i = 0; i < plan.getFiles().size(); i++) {
@@ -173,6 +165,32 @@ public class ArchiveImportService {
 
                 log.info("operation=archive-import-file-complete taskId={} file={} completed={} fetched={} inserted={} existing={} progress={}",
                         taskId, file.getZipFileName(), i + 1, stats.fetched, stats.inserted, stats.existing, progress);
+            }
+
+            // 3. REST 尾部修补（仅 AUTO 模式，在同一任务内完成归档 + REST 尾部）
+            //    非 AUTO 模式（ARCHIVE_MONTHLY/ARCHIVE_DAILY）只导入归档包，跳过 REST 尾部。
+            if (plan.isHasRestTail() && ArchiveImportMode.AUTO.name().equals(task.getSourceMode())) {
+                long restTailStart = plan.getRestTailStartInclusive();
+                long restTailEnd = plan.getRestTailEndExclusive();
+
+                log.info("operation=archive-import-rest-tail-start taskId={} restTailStart={} restTailEnd={} lastOpenTime={}",
+                        taskId, restTailStart, restTailEnd, stats.lastOpenTime);
+
+                // 获取上游服务器时间，用于闭合校验（排除未闭合 K 线）
+                long restServerTimeMs = marketDataProvider.serverTime().toEpochMilli();
+
+                RestKlineRangeImporter.ImportStats restStats = restImporter.importRange(
+                        task, restTailStart, restTailEnd, restServerTimeMs, stats.lastOpenTime);
+
+                stats.fetched += restStats.fetched;
+                stats.inserted += restStats.inserted;
+                stats.existing += restStats.existing;
+                stats.conflict += restStats.conflict;
+                stats.batches += restStats.batches;
+                stats.lastOpenTime = restStats.lastOpenTime;
+
+                log.info("operation=archive-import-rest-tail-complete taskId={} fetched={} inserted={} existing={} conflict={}",
+                        taskId, restStats.fetched, restStats.inserted, restStats.existing, restStats.conflict);
             }
 
             // 4. 校验 + 完成

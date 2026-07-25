@@ -63,7 +63,7 @@ public class QuantMarketDataController {
     /**
      * 分页查询同步任务列表，按排队时间倒序。
      */
-    @GetMapping("/tasks")
+    @GetMapping("/sync-tasks")
     public Result<List<MarketSyncTask>> listTasks(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int pageSize) {
@@ -74,7 +74,7 @@ public class QuantMarketDataController {
     /**
      * 查询非终态任务（用于前端轮询进度）。
      */
-    @GetMapping("/tasks/non-terminal")
+    @GetMapping("/sync-tasks/non-terminal")
     public Result<List<MarketSyncTask>> listNonTerminalTasks() {
         return Result.success(taskService.listNonTerminalTasks());
     }
@@ -82,7 +82,7 @@ public class QuantMarketDataController {
     /**
      * 查询单个任务详情。
      */
-    @GetMapping("/tasks/{taskId}")
+    @GetMapping("/sync-tasks/{taskId}")
     public Result<MarketSyncTask> getTask(@PathVariable String taskId) {
         MarketSyncTask task = taskService.getTask(taskId);
         if (task == null) {
