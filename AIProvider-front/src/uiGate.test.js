@@ -483,4 +483,61 @@ describe("UI release gate", () => {
     expect(app).toContain('{ key: "contentOperations"');
     expect(app).toContain('{ key: "accounts"');
   });
+
+  it("keeps QuantMarket on candlestick chart with WebSocket and Chinese labels", () => {
+    const page = read("quant/QuantMarket.jsx");
+    const chart = read("quant/QuantCandlestickChart.jsx");
+    const chartCss = read("quant/QuantCandlestickChart.css");
+    const socket = read("quant/useQuantMarketSocket.js");
+    const labels = read("quant/quantMarketLabels.js");
+    const app = read("App.jsx");
+    const pkg = JSON.parse(readFileSync(path.join(srcDir, "..", "package.json"), "utf8"));
+
+    // 不再使用 Recharts AreaChart/Area。
+    expect(page).not.toContain("AreaChart");
+    expect(page).not.toContain("Area");
+    expect(page).not.toMatch(/from\s+["']recharts["']/);
+
+    // 使用 QuantCandlestickChart。
+    expect(page).toContain("QuantCandlestickChart");
+
+    // lightweight-charts 版本精确为 5.2.0。
+    expect(pkg.dependencies["lightweight-charts"]).toBe("5.2.0");
+
+    // 使用本机后端 WebSocket 代理 /ws/quant/market，不直连 fstream.binance.com。
+    expect(socket).toContain("/ws/quant/market");
+    expect(socket).not.toContain("fstream.binance.com");
+
+    // 浏览器代码中不存在 fstream.binance.com。
+    const quantJsFiles = readdirSync(path.join(srcDir, "quant"))
+      .filter((f) => f.endsWith(".js"))
+      .map((f) => `quant/${f}`);
+    const allCheckFiles = [...jsxFiles, ...quantJsFiles];
+    const binanceDirectRefs = allCheckFiles.filter((name) => read(name).includes("fstream.binance.com"));
+    expect(binanceDirectRefs, `浏览器代码不得直连 fstream.binance.com: ${binanceDirectRefs.join(", ")}`).toEqual([]);
+
+    // 包含中文标签。
+    expect(page).toContain("实时行情");
+    expect(labels).toContain("合约类型");
+    expect(labels).toContain("交易状态");
+    expect(labels).toContain("价格最小变动单位");
+
+    // 无 clickable div。
+    expect(page).not.toMatch(/<div[^>]+onClick=/);
+    expect(chart).not.toMatch(/<div[^>]+onClick=/);
+
+    // :focus-visible 存在于 QuantCandlestickChart.css。
+    expect(chartCss).toContain(":focus-visible");
+
+    // manualEditor 和 videoEditor 仍 hidden。
+    const manualEditorLine = app.match(/\{ key: "manualEditor"[^}]*\}/)[0];
+    const videoEditorLine = app.match(/\{ key: "videoEditor"[^}]*\}/)[0];
+    expect(manualEditorLine).toContain("hidden: true");
+    expect(videoEditorLine).toContain("hidden: true");
+
+    // Twitter 前端已删除。
+    expect(app).not.toContain("TwitterPublisher");
+    const staleRefs = jsxFiles.filter((name) => read(name).includes("TwitterPublisher"));
+    expect(staleRefs, `仍存在 TwitterPublisher 引用: ${staleRefs.join(", ")}`).toEqual([]);
+  });
 });

@@ -1,11 +1,24 @@
 package com.aiprovider.config;
+
+import com.aiprovider.config.quant.QuantMarketWebSocketHandler;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.*;
-@Configuration @EnableWebSocket
+
+@Configuration
+@EnableWebSocket
 public class WebSocketConfig implements WebSocketConfigurer {
-    private final SignalHandler handler;
-    public WebSocketConfig(SignalHandler handler) { this.handler = handler; }
-    @Override public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
-        registry.addHandler(handler, "/ws/signal").setAllowedOrigins();
+
+    private final SignalHandler signalHandler;
+    private final QuantMarketWebSocketHandler quantMarketHandler;
+
+    public WebSocketConfig(SignalHandler signalHandler, QuantMarketWebSocketHandler quantMarketHandler) {
+        this.signalHandler = signalHandler;
+        this.quantMarketHandler = quantMarketHandler;
+    }
+
+    @Override
+    public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
+        registry.addHandler(signalHandler, "/ws/signal").setAllowedOrigins();
+        registry.addHandler(quantMarketHandler, "/ws/quant/market").setAllowedOrigins();
     }
 }

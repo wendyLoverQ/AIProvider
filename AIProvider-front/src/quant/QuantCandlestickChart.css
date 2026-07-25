@@ -1,0 +1,57 @@
+/* QuantCandlestickChart — K 线图容器，只使用语义主题变量，不写功能页私有颜色。 */
+
+.quant-candlestick-chart{
+  /* 涨跌色别名：映射到全局语义变量，本组件内统一引用。 */
+  --accent-up: var(--accent-mint);
+  --accent-down: var(--accent-red);
+  position:relative;
+  width:100%;
+  min-height:340px;
+  height:100%;
+  padding:0;
+  border:1px solid var(--border-normal);
+  border-radius:var(--control-radius);
+  background:var(--bg-surface);
+  overflow:hidden;
+  outline:none;
+}
+
+.quant-candlestick-chart:focus-visible{
+  outline:2px solid var(--border-focus);
+  outline-offset:2px;
+}
+
+/* 图例：涨跌色块，浮在图表左上角，不阻挡交互。 */
+.quant-candlestick-legend{
+  position:absolute;
+  top:8px;
+  left:10px;
+  z-index:2;
+  display:inline-flex;
+  align-items:center;
+  gap:10px;
+  padding:3px 8px;
+  border-radius:var(--control-radius);
+  background:color-mix(in srgb,var(--bg-surface) 78%,transparent);
+  color:var(--text-muted);
+  font-size:11px;
+  pointer-events:none;
+}
+.quant-candlestick-legend .leg{
+  display:inline-block;
+  width:10px;
+  height:10px;
+  border-radius:2px;
+  margin-right:3px;
+  vertical-align:middle;
+}
+.quant-candlestick-legend .leg-up{
+  background:var(--accent-up);
+}
+.quant-candlestick-legend .leg-down{
+  background:var(--accent-down);
+}
+
+@media (max-width:600px){
+  .quant-candlestick-chart{min-height:260px}
+}

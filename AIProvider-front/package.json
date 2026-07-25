@@ -14,6 +14,7 @@
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
     "fflate": "^0.8.3",
+    "lightweight-charts": "5.2.0",
     "mediabunny": "^1.29.1",
     "motion": "^12.42.2",
     "react": "^19.2.7",

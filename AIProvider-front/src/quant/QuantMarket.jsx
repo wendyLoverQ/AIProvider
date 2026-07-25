@@ -4,13 +4,25 @@ import {
   ChartLineUp,
   Info,
   Lightning,
-  Pulse,
   Warning,
 } from "@phosphor-icons/react";
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { readJsonResponse } from "../apiResponse";
 import UiSearchField from "../UiSearchField";
 import QuantPageScaffold from "./QuantPageScaffold";
+import QuantCandlestickChart from "./QuantCandlestickChart";
+import {
+  useQuantMarketSocket,
+  SOCKET_STATUS,
+  SOCKET_STATUS_LABELS,
+} from "./useQuantMarketSocket";
+import { mergeKline, mergeSnapshot } from "./quantMarketReducer";
+import {
+  fieldLabel,
+  contractTypeLabel,
+  statusLabel,
+  providerLabel,
+  intervalLabel,
+} from "./quantMarketLabels";
 import "./QuantMarket.css";
 
 const API_BASE = "/api/quant/market";
@@ -18,13 +30,29 @@ const DEFAULT_PROVIDER = "BINANCE_USDM";
 const DEFAULT_QUOTE = "USDT";
 const DEFAULT_SYMBOL = "BTCUSDT";
 const SNAP_INTERVAL_MS = 15_000;
-const INTERVALS = [
-  { code: "1m", label: "1m" },
-  { code: "5m", label: "5m" },
-  { code: "15m", label: "15m" },
-  { code: "1h", label: "1h" },
-  { code: "4h", label: "4h" },
-  { code: "1d", label: "1d" },
+const INTERVALS = ["1m", "5m", "15m", "1h", "4h", "1d"];
+
+// 合约规则字段渲染顺序与类型，决定取中文标签与值格式化方式。
+const RULE_FIELDS = [
+  { key: "symbol", kind: "text" },
+  { key: "contractType", kind: "contractType" },
+  { key: "status", kind: "status" },
+  { key: "baseAsset", kind: "text" },
+  { key: "quoteAsset", kind: "text" },
+  { key: "marginAsset", kind: "text" },
+  { key: "onboardDate", kind: "time" },
+  { key: "tickSize", kind: "num" },
+  { key: "minPrice", kind: "num" },
+  { key: "maxPrice", kind: "num" },
+  { key: "stepSize", kind: "num" },
+  { key: "minQty", kind: "num" },
+  { key: "maxQty", kind: "num" },
+  { key: "marketStepSize", kind: "num" },
+  { key: "marketMinQty", kind: "num" },
+  { key: "marketMaxQty", kind: "num" },
+  { key: "minNotional", kind: "num" },
+  { key: "pricePrecision", kind: "text" },
+  { key: "quantityPrecision", kind: "text" },
 ];
 
 async function marketGet(path) {
@@ -66,12 +94,17 @@ function fmtTime(iso) {
   if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleString("zh-CN", { hour12: false });
 }
-function chartLabel(iso, interval) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return interval === "1d"
-    ? d.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" })
-    : d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+
+// 合约规则字段取值：contractType/status 翻译为中文，数值类格式化，其余原样。
+function ruleValue(kind, raw) {
+  if (raw == null || raw === "") return "—";
+  switch (kind) {
+    case "contractType": return contractTypeLabel(raw);
+    case "status": return statusLabel(raw);
+    case "time": return fmtTime(raw);
+    case "num": return fmtNum(raw);
+    default: return String(raw);
+  }
 }
 
 export default function QuantMarket() {
@@ -84,6 +117,8 @@ export default function QuantMarket() {
   const [interval, setIntervalValue] = useState("15m");
   const [snapshot, setSnapshot] = useState(null);
   const [klines, setKlines] = useState([]);
+  const [restKlines, setRestKlines] = useState([]);
+  const [lastKlineUpdate, setLastKlineUpdate] = useState(null);
   const [contractDetail, setContractDetail] = useState(null);
   const [phase, setPhase] = useState("initial-loading");
   const [error, setError] = useState("");
@@ -91,6 +126,14 @@ export default function QuantMarket() {
   const [reconnectKey, setReconnectKey] = useState(0);
   const snapshotSeq = useRef(0);
   const klineSeq = useRef(0);
+
+  // WebSocket 仅在初始加载完成且选中合约后启用。
+  const ws = useQuantMarketSocket({
+    provider,
+    symbol,
+    interval,
+    enabled: phase === "ready" && !!symbol,
+  });
 
   const filteredContracts = useMemo(() => {
     const needle = query.trim().toUpperCase();
@@ -118,7 +161,7 @@ export default function QuantMarket() {
     return marketGet(`/klines?provider=${encodeURIComponent(provider)}&symbol=${encodeURIComponent(sym)}&interval=${encodeURIComponent(itv)}&limit=120`);
   }, [provider]);
 
-  // Phase 1: initial load — health, providers, contracts, then determine symbol
+  // Phase 1: 初始加载 —— health、providers、contracts，再确定 symbol。
   useEffect(() => {
     let cancelled = false;
     setPhase("initial-loading");
@@ -147,17 +190,21 @@ export default function QuantMarket() {
     return () => { cancelled = true; };
   }, [reconnectKey, loadHealth, loadProviders, loadContracts]);
 
-  // Phase 2: snapshot + klines on symbol/interval change
+  // Phase 2: symbol/interval 变化时加载快照与初始 K 线。
   useEffect(() => {
     if (!symbol || phase === "initial-loading" || phase === "error") return;
     const mySeq = ++snapshotSeq.current;
     const myKlineSeq = ++klineSeq.current;
     setSnapshotError("");
+    setRestKlines([]);
+    setKlines([]);
+    setLastKlineUpdate(null);
     Promise.all([loadSnapshot(symbol), loadKlines(symbol, interval)])
       .then(([snap, ks]) => {
         if (snapshotSeq.current !== mySeq) return;
         if (klineSeq.current !== myKlineSeq) return;
         setSnapshot(snap);
+        setRestKlines(ks);
         setKlines(ks);
         const detail = contracts.find((c) => c.symbol === symbol);
         setContractDetail(detail || null);
@@ -168,35 +215,53 @@ export default function QuantMarket() {
       });
   }, [symbol, interval, phase, contracts, loadSnapshot, loadKlines]);
 
-  // Phase 3: auto-refresh snapshot every 15s
+  // Phase 3: 未平仓量每 15 秒 REST 刷新（WebSocket 不提供该字段），不覆盖 WS 已更新字段。
   useEffect(() => {
     if (!symbol || phase !== "ready") return;
     const timer = window.setInterval(() => {
-      const mySeq = ++snapshotSeq.current;
       loadSnapshot(symbol)
         .then((snap) => {
-          if (snapshotSeq.current !== mySeq) return;
-          setSnapshot(snap);
-          setSnapshotError("");
+          if (!snap) return;
+          setSnapshot((prev) => (prev ? { ...prev, openInterest: snap.openInterest } : prev));
         })
         .catch((e) => {
-          if (snapshotSeq.current !== mySeq) return;
-          setSnapshotError(e.message || "快照刷新失败");
+          // 未平仓量刷新失败不覆盖已有数据，仅记录警告，避免静默跳过。
+          console.warn("未平仓量刷新失败", e?.message);
         });
     }, SNAP_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [symbol, phase, loadSnapshot]);
 
-  // Phase 4: periodic health refresh
+  // WebSocket: K 线增量合并进表格数据，并产出图表单根更新。
   useEffect(() => {
-    if (phase !== "ready") return;
-    const timer = window.setInterval(() => {
-      loadHealth()
-        .then((h) => setHealth(h))
-        .catch(() => {});
-    }, SNAP_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [phase, loadHealth]);
+    if (!ws.klineEvent) {
+      setLastKlineUpdate(null);
+      return;
+    }
+    setKlines((prev) => {
+      const { candles, changed } = mergeKline(prev, ws.klineEvent);
+      return changed ? candles : prev;
+    });
+    setLastKlineUpdate(ws.klineEvent.data);
+  }, [ws.klineEvent]);
+
+  // WebSocket: TICKER 合并进快照。
+  useEffect(() => {
+    if (!ws.tickerEvent) return;
+    setSnapshot((prev) => mergeSnapshot(prev, ws.tickerEvent, "TICKER"));
+  }, [ws.tickerEvent]);
+
+  // WebSocket: MARK_PRICE 合并进快照。
+  useEffect(() => {
+    if (!ws.markPriceEvent) return;
+    setSnapshot((prev) => mergeSnapshot(prev, ws.markPriceEvent, "MARK_PRICE"));
+  }, [ws.markPriceEvent]);
+
+  // WebSocket: BOOK_TICKER 合并进快照。
+  useEffect(() => {
+    if (!ws.bookTickerEvent) return;
+    setSnapshot((prev) => mergeSnapshot(prev, ws.bookTickerEvent, "BOOK_TICKER"));
+  }, [ws.bookTickerEvent]);
 
   const reconnect = () => setReconnectKey((k) => k + 1);
   const manualRefreshKlines = () => {
@@ -205,6 +270,7 @@ export default function QuantMarket() {
     loadKlines(symbol, interval)
       .then((ks) => {
         if (klineSeq.current !== myKlineSeq) return;
+        setRestKlines(ks);
         setKlines(ks);
       })
       .catch((e) => setSnapshotError(e.message || "K 线刷新失败"));
@@ -239,8 +305,9 @@ export default function QuantMarket() {
 
   const available = health?.available;
   const positive = Number(snapshot?.priceChangePercent || 0) >= 0;
-  const chartData = klines.map((k) => ({ ...k, label: chartLabel(k.openTime, interval) }));
   const recentCandles = klines.slice(-10).reverse();
+  const wsLive = ws.status === SOCKET_STATUS.LIVE;
+  const wsLabel = wsLive ? "实时行情" : SOCKET_STATUS_LABELS[ws.status];
 
   return (
     <QuantPageScaffold pageClass="quant-market-page" title="合约行情">
@@ -248,7 +315,7 @@ export default function QuantMarket() {
         <div>
           <span className="eyebrow">BINANCE · USDⓈ-M PERPETUAL</span>
           <h3>合约行情</h3>
-          <small>Binance U 本位永续公共只读行情 · 不经过 CCXT</small>
+          <small>Binance U 本位永续公共只读行情 · WebSocket 实时推送 · 不经过 CCXT</small>
         </div>
         <button type="button" className="quant-refresh" onClick={reconnect}>
           <ArrowsClockwise />重新连接
@@ -264,7 +331,7 @@ export default function QuantMarket() {
       <section className="quant-market-health" aria-label="连接状态">
         <article className="quant-market-health-card">
           <div className="quant-market-health-head">
-            <span>数据源</span><strong>Binance</strong>
+            <span>数据源</span><strong>{providerLabel(provider)}</strong>
           </div>
           <div className="quant-market-health-head">
             <span>市场</span><strong>USDⓈ-M 永续</strong>
@@ -275,7 +342,7 @@ export default function QuantMarket() {
         </article>
         <article className="quant-market-health-card">
           <div className="quant-market-health-row">
-            <span>连接状态</span>
+            <span>REST 连接状态</span>
             <strong className={available ? "online" : "offline"}>
               <i className={available ? "dot online" : "dot"} />{available ? "在线" : "离线"}
             </strong>
@@ -302,7 +369,7 @@ export default function QuantMarket() {
         <label className="quant-market-select-label">
           <span>数据源</span>
           <select aria-label="行情数据源" value={provider} onChange={(e) => setProvider(e.target.value)}>
-            {providers.map((p) => <option key={p.providerId} value={p.providerId}>{p.providerId}</option>)}
+            {providers.map((p) => <option key={p.providerId} value={p.providerId}>{providerLabel(p.providerId)}</option>)}
           </select>
         </label>
         <span className="quant-market-quote-label">报价资产：{DEFAULT_QUOTE}</span>
@@ -315,7 +382,7 @@ export default function QuantMarket() {
         />
         <div className="quant-market-intervals" aria-label="K 线周期">
           {INTERVALS.map((itv) => (
-            <button type="button" key={itv.code} className={interval === itv.code ? "active" : ""} onClick={() => setIntervalValue(itv.code)}>{itv.label}</button>
+            <button type="button" key={itv} className={interval === itv ? "active" : ""} onClick={() => setIntervalValue(itv)}>{intervalLabel(itv)}</button>
           ))}
         </div>
         <button type="button" className="quant-market-refresh-klines" onClick={manualRefreshKlines}>
@@ -361,23 +428,25 @@ export default function QuantMarket() {
             </dl>
           </div>
 
+          <div className="quant-market-ws-status" role="status" aria-live="polite">
+            <span className={`ws-dot ws-${ws.status.toLowerCase()}`} aria-hidden="true" />
+            <span className="ws-label">{wsLabel}</span>
+            {ws.lastEventTime && <span className="ws-time">最后更新 · {fmtTime(ws.lastEventTime)}</span>}
+            {ws.error && !wsLive && <span className="ws-error">{ws.error}</span>}
+            {(ws.status === SOCKET_STATUS.FAILED || ws.status === SOCKET_STATUS.DISCONNECTED) && (
+              <button type="button" className="ws-reconnect" onClick={ws.reconnect}>
+                <ArrowsClockwise />重连行情
+              </button>
+            )}
+          </div>
+
           <div className="quant-market-chart">
-            {chartData.length ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartData} margin={{ top: 22, right: 20, left: 0, bottom: 4 }}>
-                  <defs>
-                    <linearGradient id="quantPriceFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="var(--accent-primary)" stopOpacity=".42" />
-                      <stop offset="100%" stopColor="var(--accent-primary)" stopOpacity="0" />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid stroke="var(--border-normal)" strokeDasharray="3 6" vertical={false} />
-                  <XAxis dataKey="label" stroke="var(--text-muted)" tick={{ fontSize: 9 }} minTickGap={45} />
-                  <YAxis domain={["auto", "auto"]} orientation="right" stroke="var(--text-muted)" tick={{ fontSize: 9 }} tickFormatter={(v) => Number(v).toLocaleString("zh-CN", { notation: "compact", maximumFractionDigits: 2 })} />
-                  <Tooltip contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-normal)", borderRadius: 10, fontSize: 10 }} formatter={(value) => [fmtPrice(value), "收盘价"]} />
-                  <Area type="monotone" dataKey="close" stroke="var(--accent-primary)" strokeWidth={2} fill="url(#quantPriceFill)" isAnimationActive={false} />
-                </AreaChart>
-              </ResponsiveContainer>
+            {restKlines.length ? (
+              <QuantCandlestickChart
+                key={`${symbol}-${interval}`}
+                candles={restKlines}
+                update={lastKlineUpdate}
+              />
             ) : (
               <div className="quant-market-chart-empty"><ChartLineUp /><span>{snapshotError ? "K 线加载失败" : "加载 K 线…"}</span></div>
             )}
@@ -392,22 +461,16 @@ export default function QuantMarket() {
         </header>
         {contractDetail ? (
           <div className="quant-market-rules-grid">
-            <div><span>symbol</span><strong>{contractDetail.symbol}</strong></div>
-            <div><span>contractType</span><strong>{contractDetail.contractType}</strong></div>
-            <div><span>status</span><strong>{contractDetail.status}</strong></div>
-            <div><span>baseAsset</span><strong>{contractDetail.baseAsset}</strong></div>
-            <div><span>quoteAsset</span><strong>{contractDetail.quoteAsset}</strong></div>
-            <div><span>marginAsset</span><strong>{contractDetail.marginAsset}</strong></div>
-            <div><span>onboardDate</span><strong>{fmtTime(contractDetail.onboardDate)}</strong></div>
-            <div><span>tickSize</span><strong>{fmtNum(contractDetail.tickSize)}</strong></div>
-            <div><span>stepSize</span><strong>{fmtNum(contractDetail.stepSize)}</strong></div>
-            <div><span>minQty</span><strong>{fmtNum(contractDetail.minQty)}</strong></div>
-            <div><span>maxQty</span><strong>{fmtNum(contractDetail.maxQty)}</strong></div>
-            <div><span>marketStepSize</span><strong>{fmtNum(contractDetail.marketStepSize)}</strong></div>
-            <div><span>marketMinQty</span><strong>{fmtNum(contractDetail.marketMinQty)}</strong></div>
-            <div><span>minNotional</span><strong>{fmtNum(contractDetail.minNotional)}</strong></div>
-            <div><span>pricePrecision</span><strong>{contractDetail.pricePrecision}</strong></div>
-            <div><span>quantityPrecision</span><strong>{contractDetail.quantityPrecision}</strong></div>
+            {RULE_FIELDS.map(({ key, kind }) => {
+              const label = fieldLabel(key);
+              return (
+                <div key={key}>
+                  <span className="rule-zh">{label.zh}</span>
+                  <small className="rule-en">{label.en}</small>
+                  <strong>{ruleValue(kind, contractDetail[key])}</strong>
+                </div>
+              );
+            })}
           </div>
         ) : (
           <p className="quant-market-empty">合约规则不可用</p>
@@ -453,7 +516,7 @@ export default function QuantMarket() {
         <Info weight="duotone" />
         <div>
           <strong>数据来源</strong>
-          <p>Binance USDⓈ-M Futures 官方公共 REST 行情 · 不使用 API Key · 不读取账户 · 不提供下单 · 不经过 CCXT · 不写入数据库</p>
+          <p>Binance USDⓈ-M Futures 官方公共行情 · REST 加载初始快照与 K 线 · WebSocket 实时推送增量 · 不使用 API Key · 不读取账户 · 不提供下单 · 不经过 CCXT · 不写入数据库</p>
         </div>
       </section>
     </QuantPageScaffold>

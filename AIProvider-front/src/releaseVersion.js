@@ -1,4 +1,4 @@
 export const RELEASE_VERSION = Object.freeze({
-  frontend: "2026.7.25.5.209",
-  backend: "2026.7.25.3.87",
+  frontend: "2026.7.25.7.211",
+  backend: "2026.7.25.5.89",
 });

@@ -34,6 +34,7 @@ html,body,#root,.neural-shell,.workspace,.home-launcher{background:var(--bg-page
 
 /* UI gate: every visible workspace consumes the same semantic surface tokens. */
 .favorite-library,.video-editor-shell,.foundry-workbench,.system-settings-shell,.file-transfer-page,.quant-page,.quant-market-page{color:var(--text-primary)!important}
+.quant-candlestick-chart{color:var(--text-primary)!important;background:var(--bg-surface)!important;border-color:var(--border-normal)!important}
 .video-editor-shell,.ve-commandbar,.ve-media-panel,.ve-inspector,.ve-stage-column,.ve-timeline,.ve-timeline-tools,.ve-ruler,.ve-ruler-label,.ve-track-head,.ve-track-lane,
 .foundry-hero,.foundry-status article,.foundry-status article.rpc,.foundry-query-panel,.foundry-result-panel,
 .system-settings-shell,.system-settings-shell .local-tool-block,.system-settings-shell .comfy-status{background:var(--bg-surface)!important;border-color:var(--border-subtle)!important;box-shadow:none!important}
