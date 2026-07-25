@@ -42,7 +42,6 @@ import {
   GearSix,
   SlidersHorizontal,
   Palette,
-  XLogo,
   Cat,
   Star,
   PawPrint,
@@ -78,7 +77,6 @@ import MonitorCenter from "./MonitorCenter";
 import PromptManager from "./PromptManager";
 import PromptOptionManager from "./PromptOptionManager";
 import UiControl from "./UiControl";
-import TwitterPublisher from "./TwitterPublisher";
 import ContentOperationsCenter from "./ContentOperationsCenter";
 import CuteHomeBackground from "./CuteHomeBackground";
 import ManualImageEditor from "./ManualImageEditor";
@@ -110,8 +108,8 @@ const NAV = [
   { key: "favorites", label: "我的最爱", icon: Star, group: "create", color: "#ff8fbe" },
   { key: "workshop", label: "图像工坊", icon: ImageSquare, group: "create", color: "#c69cff" },
   { key: "prompts", label: "Prompt 管理", icon: SlidersHorizontal, group: "create", color: "#f0a860" },
-  { key: "manualEditor", label: "图片编辑", icon: PaintBrush, group: "create", color: "#6fe2df" },
-  { key: "videoEditor", label: "视频编辑", icon: FilmSlate, group: "create", color: "#82b7ff" },
+  { key: "manualEditor", label: "图片编辑", icon: PaintBrush, hidden: true, group: "create", color: "#6fe2df" },
+  { key: "videoEditor", label: "视频编辑", icon: FilmSlate, hidden: true, group: "create", color: "#82b7ff" },
   { key: "maid", label: "我的女仆", icon: Heart, group: "create", color: "#ff718f" },
   { key: "monitor", label: "监控中心", icon: Pulse, group: "operate", color: "#ff6b6b" },
   { key: "asrRecords", label: "语音识别", icon: MicrophoneStage, group: "operate", color: "#82b7ff" },
@@ -127,7 +125,6 @@ const NAV = [
   { key: "quantPortfolio", label: "账户仓位", icon: Wallet, group: "quant", color: "#34d399" },
   { key: "quantOrders", label: "订单成交", icon: ListChecks, group: "quant", color: "#38bdf8" },
   { key: "quantLogs", label: "运行记录", icon: Scroll, group: "quant", color: "#94a3b8" },
-  { key: "twitter", label: "Twitter 发布", icon: XLogo, group: "publish", color: "#38bdf8" },
   { key: "contentOperations", label: "内容运营", icon: Broadcast, group: "publish", color: "#fb923c" },
   { key: "accounts", label: "账号中心", icon: IdentificationCard, group: "publish", color: "#34d399" },
   { key: "appearance", label: "UI 控制", icon: Palette, group: "system", color: "#e879f9" },
@@ -160,7 +157,6 @@ const PAGE_DESCRIPTIONS = {
   remoteCodex: "连接远程 Codex 并管理对话",
   foundry: "Foundry 工具与链上只读查询",
   fileTransfer: "个人设备之间上传、下载和删除文件",
-  twitter: "账号连接、内容编辑与发布任务",
   contentOperations: "采集、判断、发布与自动化运营",
   accounts: "集中保存平台登录信息与 API 凭据",
   appearance: "统一管理全站主题与组件外观",
@@ -299,14 +295,14 @@ function useDashboardData() {
 }
 
 function App() {
-  const viewFromPath = () => ({ "/favorites": "favorites", "/workshop": "workshop", "/manual-editor": "manualEditor", "/video-editor": "videoEditor", "/market": "market", "/quant": "quantOverview", "/quant/strategies": "quantStrategies", "/quant/backtests": "quantBacktests", "/quant/risk": "quantRisk", "/quant/portfolio": "quantPortfolio", "/quant/orders": "quantOrders", "/quant/logs": "quantLogs", "/prompts": "prompts", "/prompt-options": "promptOptions", "/maid": "maid", "/admin/monitor": "monitor", "/admin/asr": "asrRecords", "/remote-codex": "remoteCodex", "/foundry": "foundry", "/file-transfer": "fileTransfer", "/camera": "camera", "/twitter": "twitter", "/content-operations": "contentOperations", "/accounts": "accounts", "/appearance": "appearance", "/settings": "settings" })[window.location.pathname] || "home";
+  const viewFromPath = () => ({ "/favorites": "favorites", "/workshop": "workshop", "/manual-editor": "manualEditor", "/video-editor": "videoEditor", "/market": "market", "/quant": "quantOverview", "/quant/strategies": "quantStrategies", "/quant/backtests": "quantBacktests", "/quant/risk": "quantRisk", "/quant/portfolio": "quantPortfolio", "/quant/orders": "quantOrders", "/quant/logs": "quantLogs", "/prompts": "prompts", "/prompt-options": "promptOptions", "/maid": "maid", "/admin/monitor": "monitor", "/admin/asr": "asrRecords", "/remote-codex": "remoteCodex", "/foundry": "foundry", "/file-transfer": "fileTransfer", "/camera": "camera", "/content-operations": "contentOperations", "/accounts": "accounts", "/appearance": "appearance", "/settings": "settings" })[window.location.pathname] || "home";
   const [view, setView] = useState(viewFromPath);
   const [workshopMounted, setWorkshopMounted] = useState(() => viewFromPath() === "workshop");
   const [promptOptionCategory, setPromptOptionCategory] = useState("");
   const dashboard = useDashboardData();
   const current = NAV.find((item) => item.key === (view === "promptOptions" ? "prompts" : view));
   useEffect(() => {
-    const path = ({ favorites: "/favorites", workshop: "/workshop", manualEditor: "/manual-editor", videoEditor: "/video-editor", market: "/market", quantOverview: "/quant", quantStrategies: "/quant/strategies", quantBacktests: "/quant/backtests", quantRisk: "/quant/risk", quantPortfolio: "/quant/portfolio", quantOrders: "/quant/orders", quantLogs: "/quant/logs", prompts: "/prompts", promptOptions: "/prompt-options", maid: "/maid", monitor: "/admin/monitor", asrRecords: "/admin/asr", remoteCodex: "/remote-codex", foundry: "/foundry", fileTransfer: "/file-transfer", camera: "/camera", twitter: "/twitter", contentOperations: "/content-operations", accounts: "/accounts", appearance: "/appearance", settings: "/settings" })[view] || "/";
+    const path = ({ favorites: "/favorites", workshop: "/workshop", manualEditor: "/manual-editor", videoEditor: "/video-editor", market: "/market", quantOverview: "/quant", quantStrategies: "/quant/strategies", quantBacktests: "/quant/backtests", quantRisk: "/quant/risk", quantPortfolio: "/quant/portfolio", quantOrders: "/quant/orders", quantLogs: "/quant/logs", prompts: "/prompts", promptOptions: "/prompt-options", maid: "/maid", monitor: "/admin/monitor", asrRecords: "/admin/asr", remoteCodex: "/remote-codex", foundry: "/foundry", fileTransfer: "/file-transfer", camera: "/camera", contentOperations: "/content-operations", accounts: "/accounts", appearance: "/appearance", settings: "/settings" })[view] || "/";
     if (window.location.pathname !== path) window.history.replaceState({}, "", path);
   }, [view]);
   useEffect(() => {
@@ -401,7 +397,6 @@ function App() {
         {view === "remoteCodex" && <RemoteCodex />}
         {view === "foundry" && <FoundryWorkbench />}
         {view === "fileTransfer" && <FileTransfer />}
-        {view === "twitter" && <TwitterPublisher />}
         {view === "contentOperations" && <ContentOperationsCenter />}
         {view === "accounts" && <PlatformAccountCenter />}
         {view === "appearance" && <UiControl />}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -428,5 +428,59 @@ describe("UI release gate", () => {
     expect(workbench).not.toContain('className="task-queue-controls"');
     expect(workbenchCss).toMatch(/\.compact-home \.comfy-form,\.compact-home \.comfy-history\{height:100%!important;min-height:0!important;max-height:100%!important\}/);
     expect(workbenchCss).not.toContain("height:calc(100vh - 158px)!important");
+  });
+
+  it("hides image/video editor nav entries and fully removes the Twitter frontend page", () => {
+    const app = read("App.jsx");
+
+    // manualEditor 和 videoEditor 仍存在于 NAV，且都设置 hidden: true。
+    expect(app).toContain('{ key: "manualEditor"');
+    expect(app).toContain('{ key: "videoEditor"');
+    const manualEditorLine = app.match(/\{ key: "manualEditor"[^}]*\}/)[0];
+    const videoEditorLine = app.match(/\{ key: "videoEditor"[^}]*\}/)[0];
+    expect(manualEditorLine).toContain("hidden: true");
+    expect(videoEditorLine).toContain("hidden: true");
+
+    // /manual-editor 与 /video-editor 路由映射仍然存在。
+    expect(app).toContain('"/manual-editor": "manualEditor"');
+    expect(app).toContain('"/video-editor": "videoEditor"');
+    // 反向映射仍然存在。
+    expect(app).toContain("manualEditor: \"/manual-editor\"");
+    expect(app).toContain("videoEditor: \"/video-editor\"");
+
+    // ManualImageEditor 与 VideoEditor 仍被 import 和挂载。
+    expect(app).toContain('import ManualImageEditor from "./ManualImageEditor"');
+    expect(app).toContain('import VideoEditor from "./VideoEditor"');
+    expect(app).toContain('{view === "manualEditor" && <ManualImageEditor />}');
+    expect(app).toContain('{view === "videoEditor" && <VideoEditor />}');
+
+    // PAGE_DESCRIPTIONS 仍保留。
+    expect(app).toContain("manualEditor:");
+    expect(app).toContain("videoEditor:");
+
+    // twitter 不再存在于 NAV。
+    expect(app).not.toContain('{ key: "twitter"');
+    // /twitter 路由映射、反向映射和页面挂载已经删除。
+    expect(app).not.toContain('"/twitter": "twitter"');
+    expect(app).not.toContain('twitter: "/twitter"');
+    expect(app).not.toContain('{view === "twitter"');
+    // TwitterPublisher 不再被 import 或挂载。
+    expect(app).not.toContain("TwitterPublisher");
+    // XLogo 不再被 import。
+    expect(app).not.toMatch(/^\s*XLogo,?\s*$/m);
+
+    // Twitter 前端文件已删除。
+    expect(existsSync(path.join(srcDir, "TwitterPublisher.jsx"))).toBe(false);
+    expect(existsSync(path.join(srcDir, "TwitterPublisher.css"))).toBe(false);
+    expect(existsSync(path.join(srcDir, "TwitterPublisher.test.jsx"))).toBe(false);
+
+    // 整个 src 中不存在其他对 TwitterPublisher 的正式引用。
+    const staleRefs = jsxFiles.filter((name) => read(name).includes("TwitterPublisher"));
+    expect(staleRefs, `仍存在 TwitterPublisher 引用: ${staleRefs.join(", ")}`).toEqual([]);
+
+    // 图像工坊、内容运营、账号中心 仍然存在。
+    expect(app).toContain('{ key: "workshop"');
+    expect(app).toContain('{ key: "contentOperations"');
+    expect(app).toContain('{ key: "accounts"');
   });
 });
