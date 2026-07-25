@@ -16,7 +16,6 @@ import com.aiprovider.quant.market.model.MarketProviderId;
 import com.aiprovider.quant.market.model.MarketType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -32,6 +31,10 @@ import java.util.Map;
  * 从 Binance 分页下载历史闭合 K 线，校验后批量写入数据库。
  * 每批操作在独立事务内完成，中途失败时已提交的 K 线保留。
  *
+ * 不使用 @Service 注解，由 AIProvider-back 的
+ * {@link com.aiprovider.config.quant.QuantMarketHistoryConfiguration} 通过 @Bean 方式创建，
+ * 注入 batchSize 和 maxCandlesPerTask 配置参数。
+ *
  * 核心设计：
  * <ul>
  *   <li>分页游标严格使用最后一根已验证 K 线的 openTime + duration 推进</li>
@@ -41,7 +44,6 @@ import java.util.Map;
  *   <li>空页结束下载，进入缺口校验</li>
  * </ul>
  */
-@Service
 public class MarketHistorySyncService {
 
     private static final Logger log = LoggerFactory.getLogger(MarketHistorySyncService.class);

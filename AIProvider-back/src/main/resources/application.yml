@@ -141,3 +141,10 @@ quant:
     max-reconnect-attempts: ${BINANCE_USDM_WS_MAX_RECONNECT_ATTEMPTS:6}
     initial-reconnect-delay-ms: ${BINANCE_USDM_WS_INITIAL_RECONNECT_DELAY_MS:1000}
     max-reconnect-delay-ms: ${BINANCE_USDM_WS_MAX_RECONNECT_DELAY_MS:15000}
+  market-history:
+    batch-size: ${QUANT_MARKET_HISTORY_BATCH_SIZE:500}
+    max-candles-per-task: ${QUANT_MARKET_HISTORY_MAX_CANDLES:100000}
+    executor-core-pool-size: ${QUANT_MARKET_HISTORY_EXECUTOR_CORE:1}
+    executor-max-pool-size: ${QUANT_MARKET_HISTORY_EXECUTOR_MAX:1}
+    executor-queue-capacity: ${QUANT_MARKET_HISTORY_EXECUTOR_QUEUE:16}
+    executor-thread-name-prefix: ${QUANT_MARKET_HISTORY_EXECUTOR_PREFIX:quant-history-sync-}
