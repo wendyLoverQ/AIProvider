@@ -11,8 +11,6 @@ import org.ta4j.core.rules.CrossedDownIndicatorRule;
 import org.ta4j.core.rules.CrossedUpIndicatorRule;
 import org.ta4j.core.indicators.helpers.ClosePriceIndicator;
 
-import java.util.Map;
-
 /** Keeps Ta4j strategy construction behind the adapter boundary. */
 public final class Ta4jStrategyFactory {
     private final StrategyRegistry registry;
@@ -20,12 +18,12 @@ public final class Ta4jStrategyFactory {
     public Ta4jStrategyFactory() { this(new StrategyRegistry()); }
     public Ta4jStrategyFactory(StrategyRegistry registry) { this.registry = registry; }
 
-    public Strategy create(String code, BarSeries series, Map<String, Integer> parameters) {
+    public Strategy create(String code, BarSeries series, com.aiprovider.quant.strategy.StrategyBuildResult build) {
         QuantStrategyDefinition definition = registry.get(code);
-        definition.build(parameters, series.getBarCount());
+        if (!definition.version().equals(build.getVersion())) throw new StrategyException("BACKTEST_STRATEGY_VERSION_NOT_SUPPORTED", "strategy=" + code);
         if ("EMA_CROSS_LONG_ONLY".equals(definition.code())) {
-            int fast = parameters.get("fastPeriod");
-            int slow = parameters.get("slowPeriod");
+            int fast = build.getParameters().get("fastPeriod");
+            int slow = build.getParameters().get("slowPeriod");
             ClosePriceIndicator close = new ClosePriceIndicator(series);
             EMAIndicator fastEma = new EMAIndicator(close, fast);
             EMAIndicator slowEma = new EMAIndicator(close, slow);

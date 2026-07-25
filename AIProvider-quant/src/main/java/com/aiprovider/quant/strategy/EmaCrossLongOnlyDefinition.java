@@ -12,9 +12,19 @@ public final class EmaCrossLongOnlyDefinition implements QuantStrategyDefinition
     public List<StrategyParameterDefinition> parameters() { return List.of(new StrategyParameterDefinition("fastPeriod", 12, 2, 1000), new StrategyParameterDefinition("slowPeriod", 26, 2, 1000)); }
     public int minimumRequiredBars(Map<String, Integer> values) { return values.getOrDefault("slowPeriod", 26); }
     public StrategyBuildResult build(Map<String, Integer> values, int barCount) {
-        int fast = values.getOrDefault("fastPeriod", 12), slow = values.getOrDefault("slowPeriod", 26);
+        Map<String, Integer> resolved = resolve(values);
+        int fast = resolved.get("fastPeriod"), slow = resolved.get("slowPeriod");
         if (fast < 2 || slow < 2 || fast >= slow || slow > 1000) throw new StrategyException("BACKTEST_PARAMETER_INVALID", "fastPeriod=" + fast + " slowPeriod=" + slow);
-        if (barCount < minimumRequiredBars(values)) throw new StrategyException("BACKTEST_INSUFFICIENT_BARS", "barCount=" + barCount);
-        return new StrategyBuildResult(code(), version(), slow);
+        int minimumBars = slow + 1;
+        if (barCount < minimumBars) throw new StrategyException("BACKTEST_INSUFFICIENT_BARS", "barCount=" + barCount + " minimum=" + minimumBars);
+        return new StrategyBuildResult(code(), version(), minimumBars, resolved);
+    }
+
+    private Map<String, Integer> resolve(Map<String, Integer> values) {
+        Map<String, Integer> input = values == null ? Map.of() : values;
+        if (input.keySet().stream().anyMatch(key -> !key.equals("fastPeriod") && !key.equals("slowPeriod"))) {
+            throw new StrategyException("BACKTEST_PARAMETER_INVALID", "unknown strategy parameter");
+        }
+        return Map.of("fastPeriod", input.getOrDefault("fastPeriod", 12), "slowPeriod", input.getOrDefault("slowPeriod", 26));
     }
 }

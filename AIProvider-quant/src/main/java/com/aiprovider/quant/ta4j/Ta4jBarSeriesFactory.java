@@ -37,6 +37,7 @@ public final class Ta4jBarSeriesFactory {
         if (candles == null || candles.isEmpty()) fail("BAR_SERIES_EMPTY", "candles=0");
         if (candles.size() < 2) fail("BAR_SERIES_TOO_SHORT", "barCount=" + candles.size());
         if (interval == null || !interval.isFixedDuration()) fail("BAR_SERIES_INVALID_CANDLE", "interval invalid");
+        if (name == null || name.isBlank()) fail("BAR_SERIES_INVALID_CANDLE", "seriesName invalid");
         Set<Long> seen = new HashSet<>();
         HistoricalCandle previous = null;
         for (HistoricalCandle candle : candles) {
@@ -45,6 +46,8 @@ public final class Ta4jBarSeriesFactory {
                     || candle.getInterval() == null || candle.getSymbol().isBlank()) {
                 fail("BAR_SERIES_INVALID_CANDLE", "dataset identity invalid");
             }
+            validateCandle(candle);
+            if (!name.equals(candle.getSymbol())) fail("BAR_SERIES_MIXED_DATASET", "series symbol mismatch");
             if (candle.getInterval() != interval || !seen.add(candle.getOpenTime() == null ? Long.MIN_VALUE : candle.getOpenTime().toEpochMilli())) {
                 fail(candle.getInterval() != interval ? "BAR_SERIES_MIXED_DATASET" : "BAR_SERIES_DUPLICATE", "openTime invalid");
             }
@@ -55,7 +58,6 @@ public final class Ta4jBarSeriesFactory {
                 if (delta <= 0) fail("BAR_SERIES_UNSORTED", "openTime not increasing");
                 if (delta != interval.durationMillis()) fail("BAR_SERIES_GAPPED", "delta=" + delta);
             }
-            validateCandle(candle);
             previous = candle;
         }
     }

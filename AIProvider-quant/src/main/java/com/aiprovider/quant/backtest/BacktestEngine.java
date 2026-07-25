@@ -13,6 +13,14 @@ public final class BacktestEngine {
     public BacktestEngine() { this.delegate = new Ta4jBacktestEngine(); }
     public BacktestResult run(BacktestRequest request, String symbol, KlineInterval interval,
                               List<HistoricalCandle> candles) {
-        return delegate.run(request, symbol, interval, candles);
+        try {
+            return delegate.run(request, symbol, interval, candles);
+        } catch (BacktestException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new BacktestException("BACKTEST_EXECUTION_FAILED",
+                    "strategyCode=" + (request == null ? null : request.getStrategyCode()) + " symbol=" + symbol
+                            + " interval=" + interval + " barCount=" + (candles == null ? 0 : candles.size()), e);
+        }
     }
 }
