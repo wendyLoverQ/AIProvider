@@ -11,6 +11,7 @@ import com.aiprovider.service.ContentSourceException;
 import com.aiprovider.service.XiaohongshuAutomationException;
 import com.aiprovider.service.PromptTranslationException;
 import com.aiprovider.service.quant.MarketHistoryTaskException;
+import com.aiprovider.service.quant.BacktestTaskException;
 import com.aiprovider.quant.exchange.binance.usdm.BinanceUsdmUpstreamException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -140,6 +141,15 @@ public class ApiExceptionHandler {
                 status = 400;
                 break;
         }
+        return ResponseEntity.status(status).body(Result.error(status, exception.getMessage()));
+    }
+
+    @ExceptionHandler(BacktestTaskException.class)
+    public ResponseEntity<Result<Void>> backtest(BacktestTaskException exception) {
+        String code = exception.getErrorCode();
+        int status = "BACKTEST_RUN_NOT_FOUND".equals(code) || "BACKTEST_DATASET_NOT_FOUND".equals(code) ? 404
+                : "BACKTEST_QUEUE_FULL".equals(code) ? 503
+                : code != null && code.startsWith("BACKTEST_EXECUTION") || "BACKTEST_PERSISTENCE_FAILED".equals(code) ? 500 : 400;
         return ResponseEntity.status(status).body(Result.error(status, exception.getMessage()));
     }
 
