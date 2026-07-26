@@ -3,14 +3,21 @@ package com.aiprovider.controller.quant.dto;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Map;
+import javax.validation.constraints.*;
 
 public class BacktestCreateRequest {
-    private long datasetId;
-    private Instant startOpenTimeInclusive, endOpenTimeExclusive;
-    private String strategyCode, strategyVersion;
+    @Positive(message="datasetId 必须大于 0") private long datasetId;
+    @NotNull(message="startOpenTimeInclusive 不能为空")
+    private Instant startOpenTimeInclusive;
+    @NotNull(message="endOpenTimeExclusive 不能为空") private Instant endOpenTimeExclusive;
+    @NotBlank(message="strategyCode 不能为空") private String strategyCode;
+    @NotBlank(message="strategyVersion 不能为空") private String strategyVersion;
     private Map<String,Integer> strategyParameters;
-    private BigDecimal orderAmount, feeRate;
+    @NotNull @DecimalMin(value="0.000000000000000001", inclusive=true) private BigDecimal orderAmount;
+    @NotNull @DecimalMin(value="0", inclusive=true) @DecimalMax(value="0.01", inclusive=true) private BigDecimal feeRate;
     private boolean forceCloseAtEnd;
+    @AssertTrue(message="forceCloseAtEnd 必须为 true") public boolean isForceCloseAtEndValid(){return forceCloseAtEnd;}
+    @AssertTrue(message="strategyParameters 不得包含 null key/value") public boolean areStrategyParametersValid(){return strategyParameters==null||strategyParameters.entrySet().stream().noneMatch(e->e.getKey()==null||e.getValue()==null);}
     public long getDatasetId(){return datasetId;} public void setDatasetId(long v){datasetId=v;}
     public Instant getStartOpenTimeInclusive(){return startOpenTimeInclusive;} public void setStartOpenTimeInclusive(Instant v){startOpenTimeInclusive=v;}
     public Instant getEndOpenTimeExclusive(){return endOpenTimeExclusive;} public void setEndOpenTimeExclusive(Instant v){endOpenTimeExclusive=v;}
