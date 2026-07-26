@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import QuantBacktests from "./QuantBacktests";
+import QuantWalkForwardWorkspace from "./QuantWalkForwardWorkspace";
 
 const strategy = {
   code: "rsi/mean",
@@ -34,6 +35,45 @@ const result = (data) => ({
   ok: true,
   status: 200,
   json: async () => ({ code: 200, data }),
+});
+
+const walkForwardSummary = { studyId: "wf-1", datasetId: 7, provider: "BINANCE", marketType: "SPOT", dataType: "KLINE", symbol: "BTCUSDT", intervalCode: "1h", strategyCode: "s", strategyVersion: "1", parameterGrid: { fast: [5, 7] }, windowMode: "ROLLING", studyStartOpenTimeInclusive: "2024-01-01T00:00:00Z", studyEndOpenTimeExclusive: "2024-01-10T00:00:00Z", trainingBars: 48, validationBars: 24, stepBars: 24, foldCount: 2, candidateCountPerFold: 2, totalChildRuns: 8, selectionMetric: "TRAIN_TOTAL_RETURN_RATIO", minimumTrainTrades: 10, orderAmount: "1", feeRate: "0.001", forceCloseAtEnd: true, status: "COMPLETED_WITH_FAILURES", progressPercent: 100, pendingFolds: 0, activeFolds: 0, completedFolds: 1, failedFolds: 1, selectedParameterChanges: 0, successfulOosFolds: 1, totalOosTradeCount: 1, totalOosFees: "0", totalOosReturnRatio: "0", hasOosGaps: true, errorCode: null, errorMessage: null, createdAt: "2024-01-01T00:00:00Z", startedAt: "2024-01-01T00:00:00Z", finishedAt: "2024-01-10T00:00:00Z", updatedAt: "2024-01-10T00:00:00Z" };
+const walkForwardMetrics = { totalReturnRatio: "0", maximumDrawdownRatio: "0", profitFactor: "1", netProfit: "0", winRate: "0", totalFees: "0", buyAndHoldReturnRatio: "0", averageTradeReturnRatio: "0", tradeCount: 0 };
+const walkForwardFold = (foldId, status, progressPercent) => ({ foldId, foldIndex: foldId === "fold-a" ? 0 : 1, trainingStartOpenTimeInclusive: "2024-01-01T00:00:00Z", trainingEndOpenTimeExclusive: "2024-01-03T00:00:00Z", validationStartOpenTimeInclusive: "2024-01-03T00:00:00Z", validationEndOpenTimeExclusive: "2024-01-04T00:00:00Z", experimentId: `exp-${foldId}`, experimentStatus: status === "FAILED" ? "FAILED" : "COMPLETED", status, progressPercent, selectedCandidateId: status === "COMPLETED" ? "candidate-1" : null, selectedParameters: status === "COMPLETED" ? { fast: 5 } : null, selectedTrainingRunId: status === "COMPLETED" ? "train-1" : null, selectedValidationRunId: status === "COMPLETED" ? "valid-1" : null, selectionMetricValue: status === "COMPLETED" ? "0" : null, trainingMetrics: status === "COMPLETED" ? walkForwardMetrics : null, validationMetrics: status === "COMPLETED" ? walkForwardMetrics : null, errorCode: status === "FAILED" ? "CHILD_FAILED" : null, errorMessage: status === "FAILED" ? "子任务失败" : null, startedAt: null, finishedAt: null, updatedAt: "2024-01-04T00:00:00Z" });
+
+describe("Quant Walk-forward workspace lifecycle", () => {
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); window.history.replaceState({}, "", "/quant/backtests"); });
+
+  function installWalkForwardFetch() {
+    const oos = { sampled: false, totalPoints: 1, successfulFolds: 1, missingFolds: 1, hasGaps: true, totalReturnRatio: "0", maximumDrawdownRatio: "0", points: [{ pointIndex: 0, foldIndex: 0, openTime: "2024-01-03T00:00:00Z", indexRatio: "1", drawdownRatio: "0" }] };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url.includes("/strategies")) return result([strategy]);
+      if (url.includes("/datasets")) return result([]);
+      if (url.includes("/oos-equity")) return result(oos);
+      if (url.includes("/folds")) return result({ records: [walkForwardFold("fold-a", "COMPLETED", 100), walkForwardFold("fold-b", "FAILED", 100)], total: 2, page: 1, pageSize: 50 });
+      if (url.endsWith("/wf-1")) return result({ summary: walkForwardSummary, parameterFrequencies: [{ parameters: { fast: 5 }, selectedCount: 1, firstFoldIndex: 0, lastFoldIndex: 0 }] });
+      if (url.includes("walk-forward-studies")) return result({ records: [walkForwardSummary], total: 1, page: 1, pageSize: 20 });
+      throw new Error(`unexpected request ${url}`);
+    });
+    return fetchMock;
+  }
+
+  it("keeps foldId in history, restores same-page selection, and exposes failed folds with keyboard semantics", async () => {
+    const fetchMock = installWalkForwardFetch();
+    window.history.replaceState({}, "", "/quant/backtests?mode=walk-forward&studyId=wf-1&foldPage=1&foldId=fold-a");
+    render(<QuantWalkForwardWorkspace />);
+    await waitFor(() => expect(screen.getAllByRole("button").filter((item) => item.getAttribute("role") === "button")).toHaveLength(2));
+    const foldRows = () => screen.getAllByRole("button").filter((row) => row.getAttribute("role") === "button");
+    const row = (index) => foldRows().find((item) => item.textContent.trim().startsWith(String(index)));
+    expect(row(0).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(row(1));
+    expect(new URLSearchParams(window.location.search).get("foldId")).toBe("fold-b");
+    window.history.back();
+    await waitFor(() => expect(row(0).getAttribute("aria-selected")).toBe("true"));
+    fireEvent.keyDown(row(1), { key: "Enter" });
+    expect(new URLSearchParams(window.location.search).get("foldId")).toBe("fold-b");
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes("oos-equity"))).toHaveLength(1);
+  });
 });
 const installFetch = () =>
   vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {

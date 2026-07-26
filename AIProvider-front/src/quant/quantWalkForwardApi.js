@@ -70,10 +70,19 @@ function percent(value, message) {
   if (!Number.isFinite(n) || n < 0 || n > 100) fail(message);
   return value;
 }
-function integerObject(value, message) {
+export function parseIntegerArrayObject(value, message) {
   const source = object(value, message);
+  if (!Object.keys(source).length) fail(message);
   Object.entries(source).forEach(([key, values]) => {
-    if (!key || !Array.isArray(values) || !values.length || values.some((item) => !Number.isSafeInteger(item))) fail(message);
+    if (!key || !Array.isArray(values) || !values.length || new Set(values).size !== values.length || values.some((item) => !Number.isSafeInteger(item))) fail(message);
+  });
+  return source;
+}
+export function parseIntegerScalarObject(value, message) {
+  const source = object(value, message);
+  if (!Object.keys(source).length) fail(message);
+  Object.entries(source).forEach(([key, scalar]) => {
+    if (!key || Array.isArray(scalar) || !Number.isSafeInteger(scalar)) fail(message);
   });
   return source;
 }
@@ -91,7 +100,7 @@ function validateSummary(value) {
   safeInt(required(summary.datasetId, "Study 缺少 datasetId"), "Study datasetId 格式异常", { positive: true });
   ["provider", "marketType", "dataType", "symbol", "intervalCode", "strategyCode", "strategyVersion"].forEach((key) => string(required(summary[key], `Study 缺少 ${key}`), `Study ${key} 格式异常`));
   if (summary.windowMode !== "ROLLING") fail("Study windowMode 必须为 ROLLING");
-  integerObject(summary.parameterGrid, "Study parameterGrid 格式异常");
+  parseIntegerArrayObject(summary.parameterGrid, "Study parameterGrid 格式异常");
   ["studyStartOpenTimeInclusive", "studyEndOpenTimeExclusive"].forEach((key) => instant(required(summary[key], `Study 缺少 ${key}`), `Study ${key} 格式异常`));
   if (new Date(summary.studyStartOpenTimeInclusive).getTime() >= new Date(summary.studyEndOpenTimeExclusive).getTime()) fail("Study 时间范围异常");
   ["trainingBars", "validationBars", "stepBars"].forEach((key) => safeInt(required(summary[key], `Study 缺少 ${key}`), `Study ${key} 格式异常`, { positive: true }));
@@ -109,6 +118,7 @@ function validateSummary(value) {
   if (terminal ? Number(summary.progressPercent) !== 100 : Number(summary.progressPercent) >= 100) fail("Study 状态与 progressPercent 不一致");
   ["pendingFolds", "activeFolds", "completedFolds", "failedFolds", "selectedParameterChanges", "successfulOosFolds", "totalOosTradeCount"].forEach((key) => { const value = required(summary[key], `Study 缺少 ${key}`); if (value != null) safeInt(value, `Study ${key} 格式异常`); });
   ["pendingFolds", "activeFolds", "completedFolds", "failedFolds"].forEach((key) => { if (summary[key] > summary.foldCount) fail("Study Fold 计数越界"); });
+  if (summary.pendingFolds + summary.activeFolds + summary.completedFolds + summary.failedFolds !== summary.foldCount) fail("Study Fold 计数总和不一致");
   ["totalOosFees", "totalOosReturnRatio"].forEach((key) => decimal(required(summary[key], `Study 缺少 ${key}`), `Study ${key} 格式异常`));
   const hasOosGaps = required(summary.hasOosGaps, "Study 缺少 hasOosGaps");
   if (hasOosGaps != null && typeof hasOosGaps !== "boolean") fail("Study hasOosGaps 格式异常");
@@ -121,7 +131,7 @@ export function parseWalkForwardStudySummary(value) { return validateSummary(val
 
 export function parseParameterFrequency(value) {
   const item = object(value, "Study 参数频率响应格式异常");
-  integerObject(item.parameters, "Study 参数频率 parameters 格式异常");
+  parseIntegerScalarObject(item.parameters, "Study 参数频率 parameters 格式异常");
   safeInt(required(item.selectedCount, "Study 参数频率缺少 selectedCount"), "Study 参数频率 selectedCount 格式异常", { positive: true });
   safeInt(required(item.firstFoldIndex, "Study 参数频率缺少 firstFoldIndex"), "Study 参数频率 firstFoldIndex 格式异常");
   safeInt(required(item.lastFoldIndex, "Study 参数频率缺少 lastFoldIndex"), "Study 参数频率 lastFoldIndex 格式异常");
@@ -162,12 +172,12 @@ export function parseWalkForwardFold(value) {
   string(required(fold.experimentId, "Fold 缺少 experimentId"), "Fold experimentId 格式异常");
   if (!WALK_FORWARD_FOLD_STATUSES.has(fold.status)) fail("Fold status 非法");
   percent(fold.progressPercent, "Fold progressPercent 格式异常");
-  if (fold.status === "COMPLETED" ? Number(fold.progressPercent) !== 100 : Number(fold.progressPercent) >= 100) fail("Fold 状态与 progressPercent 不一致");
+  if ((fold.status === "COMPLETED" || fold.status === "FAILED") ? Number(fold.progressPercent) !== 100 : Number(fold.progressPercent) >= 100) fail("Fold 状态与 progressPercent 不一致");
   if (fold.experimentStatus != null && !EXPERIMENT_STATUSES.has(fold.experimentStatus)) fail("Fold experimentStatus 非法");
   const selected = fold.status === "COMPLETED";
   if (selected) {
     string(required(fold.selectedCandidateId, "已完成 Fold 缺少 selectedCandidateId"), "Fold selectedCandidateId 格式异常");
-    integerObject(required(fold.selectedParameters, "已完成 Fold 缺少 selectedParameters"), "Fold selectedParameters 格式异常");
+    parseIntegerScalarObject(required(fold.selectedParameters, "已完成 Fold 缺少 selectedParameters"), "Fold selectedParameters 格式异常");
     ["selectedTrainingRunId", "selectedValidationRunId"].forEach((key) => string(required(fold[key], `已完成 Fold 缺少 ${key}`), `Fold ${key} 格式异常`));
     decimal(required(fold.selectionMetricValue, "已完成 Fold 缺少 selectionMetricValue"), "Fold selectionMetricValue 格式异常", { nullable: false });
     metrics(required(fold.trainingMetrics, "已完成 Fold 缺少 trainingMetrics"), "Fold trainingMetrics 格式异常", { nullable: false });

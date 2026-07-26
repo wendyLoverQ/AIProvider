@@ -103,7 +103,6 @@ export default function QuantWalkForwardCreatePanel({ strategies, datasets, onCl
       const created = await createWalkForwardStudy(body, controller.signal);
       if (!mountedRef.current || controller.signal.aborted) return;
       await onCreated(created);
-      if (mountedRef.current && !controller.signal.aborted) onClose();
     } catch (exception) {
       if (mountedRef.current && exception.name !== "AbortError" && !controller.signal.aborted) setError(exception.message || "创建滚动验证失败");
     } finally {
