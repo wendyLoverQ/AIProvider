@@ -46,7 +46,8 @@ public class BacktestRunService {
             boolean same=existing.datasetId==q.getDatasetId() && existing.startOpenTimeMs==q.getStartOpenTimeInclusive().toEpochMilli()
                     && existing.endOpenTimeExclusiveMs==q.getEndOpenTimeExclusive().toEpochMilli() && code.equals(existing.strategyCode)
                     && version.equals(existing.strategyVersion) && Objects.equals(read(existing.requestedParametersJson),params)
-                    && Objects.equals(existing.orderAmount,q.getOrderAmount()) && Objects.equals(existing.feeRate,q.getFeeRate())
+                    && existing.orderAmount != null && existing.orderAmount.compareTo(q.getOrderAmount()) == 0
+                    && existing.feeRate != null && existing.feeRate.compareTo(q.getFeeRate()) == 0
                     && existing.forceCloseAtEnd==q.isForceCloseAtEnd();
             if(!same) throw error("BACKTEST_RUN_ID_CONFLICT","runId already belongs to a different request");
             return id;
