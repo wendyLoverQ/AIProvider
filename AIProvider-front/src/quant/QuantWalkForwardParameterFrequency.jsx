@@ -1,5 +1,6 @@
+function canonical(parameters) { return JSON.stringify(Object.fromEntries(Object.entries(parameters || {}).sort(([left], [right]) => left.localeCompare(right)))); }
 export default function QuantWalkForwardParameterFrequency({ frequencies = [], selectedParameterChanges }) {
-  const ordered = [...frequencies].sort((a, b) => b.selectedCount - a.selectedCount || a.firstFoldIndex - b.firstFoldIndex || JSON.stringify(a.parameters).localeCompare(JSON.stringify(b.parameters)));
+  const ordered = [...frequencies].sort((a, b) => b.selectedCount - a.selectedCount || a.firstFoldIndex - b.firstFoldIndex || canonical(a.parameters).localeCompare(canonical(b.parameters)));
   const total = ordered.reduce((sum, item) => sum + item.selectedCount, 0);
   return <section className="backtest-card quant-walk-forward-frequency"><header className="quant-section-head"><h4>参数选择频率</h4><small>客观频率，不代表“最优参数”</small></header><p className="backtest-help">参数变化次数：{selectedParameterChanges ?? "—"}。参数变化表示相邻成功 Fold 的选择发生变化，不等于策略失效。</p>{!ordered.length ? <div className="backtest-empty">暂无成功 Fold 参数频率</div> : <div className="quant-frequency-list">{ordered.map((item) => <div className="quant-frequency-row" key={JSON.stringify(item.parameters)}><strong>{Object.entries(item.parameters).map(([key, value]) => `${key}=${value}`).join(", ")}</strong><span>{item.selectedCount} 次 · {total ? `${((item.selectedCount / total) * 100).toFixed(1)}%` : "—"}</span><small>Fold {item.firstFoldIndex} ～ {item.lastFoldIndex}</small></div>)}</div>}</section>;
 }

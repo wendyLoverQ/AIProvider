@@ -14,8 +14,8 @@ function readRoute() {
 function writeMode(mode) {
   const url = new URL(window.location.href);
   url.searchParams.set("mode", mode);
-  if (mode === "single") ["experimentId", "candidatePage", "candidateSort", "candidateOrder", "studyId", "foldPage"].forEach((key) => url.searchParams.delete(key));
-  if (mode === "experiment") ["runId", "openCreate", "strategyCode", "studyId", "foldPage"].forEach((key) => url.searchParams.delete(key));
+  if (mode === "single") ["experimentId", "candidatePage", "candidateSort", "candidateOrder", "studyId", "foldPage", "foldId"].forEach((key) => url.searchParams.delete(key));
+  if (mode === "experiment") ["runId", "openCreate", "strategyCode", "studyId", "foldPage", "foldId"].forEach((key) => url.searchParams.delete(key));
   if (mode === "walk-forward") ["runId", "openCreate", "strategyCode", "experimentId", "candidatePage", "candidateSort", "candidateOrder"].forEach((key) => url.searchParams.delete(key));
   window.history.pushState(
     {},

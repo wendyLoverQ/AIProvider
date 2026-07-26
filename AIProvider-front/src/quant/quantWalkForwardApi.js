@@ -107,10 +107,11 @@ function validateSummary(value) {
   percent(summary.progressPercent, "Study progressPercent 格式异常");
   const terminal = summary.status === "COMPLETED" || summary.status === "COMPLETED_WITH_FAILURES" || summary.status === "FAILED";
   if (terminal ? Number(summary.progressPercent) !== 100 : Number(summary.progressPercent) >= 100) fail("Study 状态与 progressPercent 不一致");
-  ["pendingFolds", "activeFolds", "completedFolds", "failedFolds", "selectedParameterChanges", "successfulOosFolds", "totalOosTradeCount"].forEach((key) => { if (summary[key] != null) safeInt(summary[key], `Study ${key} 格式异常`); });
+  ["pendingFolds", "activeFolds", "completedFolds", "failedFolds", "selectedParameterChanges", "successfulOosFolds", "totalOosTradeCount"].forEach((key) => { const value = required(summary[key], `Study 缺少 ${key}`); if (value != null) safeInt(value, `Study ${key} 格式异常`); });
   ["pendingFolds", "activeFolds", "completedFolds", "failedFolds"].forEach((key) => { if (summary[key] > summary.foldCount) fail("Study Fold 计数越界"); });
-  ["totalOosFees", "totalOosReturnRatio"].forEach((key) => decimal(summary[key], `Study ${key} 格式异常`));
-  if (summary.hasOosGaps != null && typeof summary.hasOosGaps !== "boolean") fail("Study hasOosGaps 格式异常");
+  ["totalOosFees", "totalOosReturnRatio"].forEach((key) => decimal(required(summary[key], `Study 缺少 ${key}`), `Study ${key} 格式异常`));
+  const hasOosGaps = required(summary.hasOosGaps, "Study 缺少 hasOosGaps");
+  if (hasOosGaps != null && typeof hasOosGaps !== "boolean") fail("Study hasOosGaps 格式异常");
   ["errorCode", "errorMessage"].forEach((key) => { if (summary[key] != null && typeof summary[key] !== "string") fail(`Study ${key} 格式异常`); });
   ["createdAt", "startedAt", "finishedAt", "updatedAt"].forEach((key) => nullableInstant(summary[key], `Study ${key} 格式异常`));
   return summary;
@@ -209,7 +210,7 @@ export function parseWalkForwardOosEquity(value) {
   equity.points = equity.points.map(parseWalkForwardOosPoint);
   equity.points.forEach((point, index, points) => { if (index > 0 && (point.pointIndex <= points[index - 1].pointIndex || new Date(point.openTime) <= new Date(points[index - 1].openTime))) fail("OOS 点必须严格递增"); });
   if (!equity.sampled && equity.points.length !== equity.totalPoints) fail("非抽样 OOS 点数量不一致");
-  ["totalReturnRatio", "maximumDrawdownRatio"].forEach((key) => decimal(equity[key], `OOS ${key} 格式异常`));
+  ["totalReturnRatio", "maximumDrawdownRatio"].forEach((key) => decimal(required(equity[key], `OOS 缺少 ${key}`), `OOS ${key} 格式异常`));
   return equity;
 }
 

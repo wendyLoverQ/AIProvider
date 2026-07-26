@@ -41,6 +41,8 @@ const installFetch = () =>
     if (url.includes("/datasets")) return result([]);
     if (url.includes("/experiments"))
       return result({ records: [], total: 0, page: 1, pageSize: 20 });
+    if (url.includes("/walk-forward-studies"))
+      return result({ records: [], total: 0, page: 1, pageSize: 20 });
     if (url.includes("/runs"))
       return result({ records: [], total: 0, page: 1, pageSize: 20 });
     throw new Error(`unexpected request ${url}`);
@@ -116,6 +118,16 @@ describe("Quant backtest strategy handoff", () => {
         ),
       ).toBe("page"),
     );
+  });
+
+  it("opens the third walk-forward mode and keeps its route state", async () => {
+    installFetch();
+    render(<QuantBacktests />);
+    await waitFor(() => expect(screen.getByText("还没有创建回测")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "滚动验证" }));
+    await waitFor(() => expect(screen.getByText("当前没有滚动验证 Study")).toBeTruthy());
+    expect(new URLSearchParams(window.location.search).get("mode")).toBe("walk-forward");
+    expect(window.location.pathname).toBe("/quant/backtests");
   });
 
   it("loads a real runId deep link instead of falling back to another task", async () => {
