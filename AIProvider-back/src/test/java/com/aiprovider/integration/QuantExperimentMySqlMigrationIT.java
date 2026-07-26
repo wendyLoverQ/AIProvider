@@ -122,6 +122,29 @@ class QuantExperimentMySqlMigrationIT {
               first.candidateId, UUID.randomUUID().toString(), Instant.now()));
       assertEquals(1, candidates.markDispatched(first.candidateId, firstToken, Instant.now()));
 
+      String releaseToken = UUID.randomUUID().toString();
+      assertEquals(
+          1,
+          transaction
+              .execute(
+                  status ->
+                      Integer.valueOf(
+                          candidates.claimNextPending(
+                              experiment.experimentId, releaseToken, Instant.now())))
+              .intValue());
+      assertEquals(
+          0,
+          candidates.releaseClaimToPending(
+              second.candidateId, UUID.randomUUID().toString(), Instant.now()));
+      assertEquals(
+          1, candidates.releaseClaimToPending(second.candidateId, releaseToken, Instant.now()));
+      BacktestExperimentCandidateRow released = candidates.findByCandidateId(second.candidateId);
+      assertEquals("PENDING", released.dispatchStatus);
+      assertEquals(null, released.claimToken);
+      assertEquals(null, released.claimedAt);
+      assertEquals(null, released.errorCode);
+      assertEquals(null, released.errorMessage);
+
       BacktestRunRow run = run(first.trainingRunId);
       assertEquals(1, transaction.execute(status -> Integer.valueOf(runs.insert(run))).intValue());
       assertEquals(1, runs.findByRunIds(List.of(run.runId)).size());

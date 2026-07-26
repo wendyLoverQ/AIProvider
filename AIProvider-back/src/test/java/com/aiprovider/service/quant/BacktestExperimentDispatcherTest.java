@@ -88,6 +88,168 @@ class BacktestExperimentDispatcherTest {
         .tick();
     verify(candidates).claimNextPending(anyString(), anyString(), any());
     verify(candidates, never()).findClaimed(anyString(), anyString());
+    verify(candidates, times(1)).resetStaleClaims(any(), any());
+  }
+
+  @Test
+  void queueFullReleasesClaimForTheNextTick() {
+    BacktestExperimentMapper experiments = mock(BacktestExperimentMapper.class);
+    BacktestExperimentCandidateMapper candidates = mock(BacktestExperimentCandidateMapper.class);
+    BacktestRunService runs = mock(BacktestRunService.class);
+    BacktestExperimentService aggregate = mock(BacktestExperimentService.class);
+    BacktestExperimentRow experiment = row();
+    BacktestExperimentCandidateRow candidate = candidate(experiment, "c", "t", "v");
+    when(experiments.findNonTerminal()).thenReturn(List.of(experiment));
+    when(candidates.findAll(anyString())).thenReturn(List.of());
+    when(candidates.claimNextPending(anyString(), anyString(), any())).thenReturn(1, 0);
+    when(candidates.findClaimed(anyString(), anyString())).thenReturn(candidate);
+    when(candidates.releaseClaimToPending(anyString(), anyString(), any())).thenReturn(1);
+    doThrow(new BacktestTaskException("BACKTEST_QUEUE_FULL", "queue is full"))
+        .when(runs)
+        .createWithRunId(eq("v"), any());
+
+    new BacktestExperimentDispatcher(
+            experiments,
+            candidates,
+            mock(BacktestRunMapper.class),
+            runs,
+            aggregate,
+            properties(1),
+            new ObjectMapper())
+        .tick();
+
+    verify(candidates).releaseClaimToPending(eq("c"), anyString(), any());
+    verify(candidates, never()).markDispatchFailed(anyString(), anyString(), any(), any(), any());
+  }
+
+  @Test
+  void malformedParametersArePermanentAndDoNotReleaseClaim() {
+    BacktestExperimentMapper experiments = mock(BacktestExperimentMapper.class);
+    BacktestExperimentCandidateMapper candidates = mock(BacktestExperimentCandidateMapper.class);
+    BacktestExperimentRow experiment = row();
+    BacktestExperimentCandidateRow candidate = candidate(experiment, "c", "t", "v");
+    candidate.parametersJson = "{invalid";
+    when(experiments.findNonTerminal()).thenReturn(List.of(experiment));
+    when(candidates.findAll(anyString())).thenReturn(List.of());
+    when(candidates.claimNextPending(anyString(), anyString(), any())).thenReturn(1, 0);
+    when(candidates.findClaimed(anyString(), anyString())).thenReturn(candidate);
+    when(candidates.markDispatchFailed(anyString(), anyString(), any(), any(), any()))
+        .thenReturn(1);
+
+    new BacktestExperimentDispatcher(
+            experiments,
+            candidates,
+            mock(BacktestRunMapper.class),
+            mock(BacktestRunService.class),
+            mock(BacktestExperimentService.class),
+            properties(1),
+            new ObjectMapper())
+        .tick();
+
+    verify(candidates)
+        .markDispatchFailed(
+            eq("c"), anyString(), eq("BACKTEST_EXPERIMENT_DISPATCH_FAILED"), anyString(), any());
+    verify(candidates, never()).releaseClaimToPending(anyString(), anyString(), any());
+  }
+
+  @Test
+  void releaseCasMissDoesNotMarkCandidateFailed() {
+    BacktestExperimentMapper experiments = mock(BacktestExperimentMapper.class);
+    BacktestExperimentCandidateMapper candidates = mock(BacktestExperimentCandidateMapper.class);
+    BacktestRunService runs = mock(BacktestRunService.class);
+    BacktestExperimentRow experiment = row();
+    BacktestExperimentCandidateRow candidate = candidate(experiment, "c", "t", "v");
+    when(experiments.findNonTerminal()).thenReturn(List.of(experiment));
+    when(candidates.findAll(anyString())).thenReturn(List.of());
+    when(candidates.claimNextPending(anyString(), anyString(), any())).thenReturn(1, 0);
+    when(candidates.findClaimed(anyString(), anyString())).thenReturn(candidate);
+    when(candidates.releaseClaimToPending(anyString(), anyString(), any())).thenReturn(0);
+    doThrow(new BacktestTaskException("BACKTEST_QUEUE_FULL", "queue is full"))
+        .when(runs)
+        .createWithRunId(eq("v"), any());
+
+    new BacktestExperimentDispatcher(
+            experiments,
+            candidates,
+            mock(BacktestRunMapper.class),
+            runs,
+            mock(BacktestExperimentService.class),
+            properties(1),
+            new ObjectMapper())
+        .tick();
+
+    verify(candidates).releaseClaimToPending(eq("c"), anyString(), any());
+    verify(candidates, never()).markDispatchFailed(anyString(), anyString(), any(), any(), any());
+  }
+
+  @Test
+  void temporaryFailureInOneExperimentDoesNotStopTheNextExperiment() {
+    BacktestExperimentMapper experiments = mock(BacktestExperimentMapper.class);
+    BacktestExperimentCandidateMapper candidates = mock(BacktestExperimentCandidateMapper.class);
+    BacktestRunService runs = mock(BacktestRunService.class);
+    BacktestExperimentRow firstExperiment = row();
+    BacktestExperimentRow secondExperiment = row();
+    BacktestExperimentCandidateRow first = candidate(firstExperiment, "c1", "t1", "v1");
+    BacktestExperimentCandidateRow second = candidate(secondExperiment, "c2", "t2", "v2");
+    when(experiments.findNonTerminal()).thenReturn(List.of(firstExperiment, secondExperiment));
+    when(candidates.findAll(anyString())).thenReturn(List.of());
+    when(candidates.claimNextPending(anyString(), anyString(), any())).thenReturn(1, 1);
+    when(candidates.findClaimed(anyString(), anyString())).thenReturn(first, second);
+    when(candidates.releaseClaimToPending(anyString(), anyString(), any())).thenReturn(1);
+    when(candidates.markDispatched(anyString(), anyString(), any())).thenReturn(1);
+    when(runs.createWithRunId(eq("t1"), any())).thenReturn("t1");
+    when(runs.createWithRunId(eq("t2"), any())).thenReturn("t2");
+    when(runs.createWithRunId(eq("v1"), any()))
+        .thenThrow(new BacktestTaskException("BACKTEST_QUEUE_FULL", "queue is full"));
+    when(runs.createWithRunId(eq("v2"), any())).thenReturn("v2");
+
+    new BacktestExperimentDispatcher(
+            experiments,
+            candidates,
+            mock(BacktestRunMapper.class),
+            runs,
+            mock(BacktestExperimentService.class),
+            properties(1),
+            new ObjectMapper())
+        .tick();
+
+    verify(candidates).releaseClaimToPending(eq("c1"), anyString(), any());
+    verify(candidates).markDispatched(eq("c2"), anyString(), any());
+  }
+
+  @Test
+  void nextTickRetriesValidationWithoutRecreatingTrainingContract() {
+    BacktestExperimentMapper experiments = mock(BacktestExperimentMapper.class);
+    BacktestExperimentCandidateMapper candidates = mock(BacktestExperimentCandidateMapper.class);
+    BacktestRunService runs = mock(BacktestRunService.class);
+    BacktestExperimentRow experiment = row();
+    BacktestExperimentCandidateRow candidate = candidate(experiment, "c", "t", "v");
+    when(experiments.findNonTerminal()).thenReturn(List.of(experiment), List.of(experiment));
+    when(candidates.findAll(anyString())).thenReturn(List.of());
+    when(candidates.claimNextPending(anyString(), anyString(), any())).thenReturn(1, 1);
+    when(candidates.findClaimed(anyString(), anyString())).thenReturn(candidate);
+    when(candidates.releaseClaimToPending(anyString(), anyString(), any())).thenReturn(1);
+    when(candidates.markDispatched(anyString(), anyString(), any())).thenReturn(1);
+    when(runs.createWithRunId(eq("t"), any())).thenReturn("t");
+    when(runs.createWithRunId(eq("v"), any()))
+        .thenThrow(new BacktestTaskException("BACKTEST_QUEUE_FULL", "queue is full"))
+        .thenReturn("v");
+
+    BacktestExperimentDispatcher dispatcher =
+        new BacktestExperimentDispatcher(
+            experiments,
+            candidates,
+            mock(BacktestRunMapper.class),
+            runs,
+            mock(BacktestExperimentService.class),
+            properties(1),
+            new ObjectMapper());
+    dispatcher.tick();
+    dispatcher.tick();
+
+    verify(runs, times(2)).createWithRunId(eq("t"), any());
+    verify(runs, times(2)).createWithRunId(eq("v"), any());
+    verify(candidates).markDispatched(eq("c"), anyString(), any());
   }
 
   private QuantExperimentProperties properties(int active) {
@@ -101,6 +263,7 @@ class BacktestExperimentDispatcherTest {
     BacktestExperimentCandidateRow c = new BacktestExperimentCandidateRow();
     c.candidateId = id;
     c.experimentId = experiment.experimentId;
+    c.parametersJson = "{\"fastPeriod\":5,\"slowPeriod\":20}";
     c.trainingRunId = train;
     c.validationRunId = validation;
     c.dispatchStatus = "DISPATCHED";

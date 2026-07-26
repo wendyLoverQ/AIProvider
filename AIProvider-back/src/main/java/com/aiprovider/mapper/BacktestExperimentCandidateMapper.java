@@ -131,6 +131,16 @@ public interface BacktestExperimentCandidateMapper {
 
   @Update(
       "UPDATE q_backtest_experiment_candidate SET"
+          + " DispatchStatus='PENDING',ClaimToken=NULL,ClaimedAt=NULL,ErrorCode=NULL,ErrorMessage=NULL,UpdatedAt=#{now}"
+          + " WHERE CandidateId=#{candidateId} AND DispatchStatus='CLAIMED' AND"
+          + " ClaimToken=#{claimToken}")
+  int releaseClaimToPending(
+      @Param("candidateId") String candidateId,
+      @Param("claimToken") String claimToken,
+      @Param("now") Instant now);
+
+  @Update(
+      "UPDATE q_backtest_experiment_candidate SET"
           + " DispatchStatus='PENDING',ClaimToken=NULL,ClaimedAt=NULL,UpdatedAt=#{now} WHERE"
           + " DispatchStatus='CLAIMED' AND ClaimedAt < #{cutoff}")
   int resetStaleClaims(@Param("cutoff") Instant cutoff, @Param("now") Instant now);

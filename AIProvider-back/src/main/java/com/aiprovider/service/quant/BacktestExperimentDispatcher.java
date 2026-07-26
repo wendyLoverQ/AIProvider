@@ -25,6 +25,8 @@ public class BacktestExperimentDispatcher {
       Set.of(
           "BACKTEST_REQUEST_INVALID",
           "BACKTEST_DATASET_NOT_FOUND",
+          "BACKTEST_STRATEGY_NOT_FOUND",
+          "BACKTEST_PARAMETER_INVALID",
           "BACKTEST_STRATEGY_VERSION_NOT_SUPPORTED",
           "BACKTEST_RUN_ID_CONFLICT",
           "BACKTEST_EXPERIMENT_GRID_INVALID",
@@ -58,6 +60,12 @@ public class BacktestExperimentDispatcher {
 
   @Scheduled(fixedDelayString = "${quant.experiment.dispatcher-fixed-delay-ms:2000}")
   public void tick() {
+    Instant now = Instant.now();
+    try {
+      candidates.resetStaleClaims(now.minusSeconds(properties.getStaleClaimSeconds()), now);
+    } catch (RuntimeException exception) {
+      log.warn("quant experiment stale claim reset failed", exception);
+    }
     for (BacktestExperimentRow experiment : experiments.findNonTerminal()) {
       try {
         dispatchExperiment(experiment);
@@ -114,7 +122,7 @@ public class BacktestExperimentDispatcher {
       }
     } catch (RuntimeException exception) {
       String code = errorCode(exception);
-      if (PERMANENT_CODES.contains(code)) {
+      if (isPermanent(exception, code)) {
         if (candidates.markDispatchFailed(
                 candidate.candidateId, token, code, message(exception), Instant.now())
             != 1) {
@@ -124,12 +132,23 @@ public class BacktestExperimentDispatcher {
               token);
         }
       } else {
-        log.warn(
-            "quant experiment transient dispatch failure candidateId={} retained for recovery"
-                + " code={}",
-            candidate.candidateId,
-            code,
-            exception);
+        int affected =
+            candidates.releaseClaimToPending(candidate.candidateId, token, Instant.now());
+        if (affected == 0) {
+          log.error(
+              "quant experiment transient dispatch release CAS lost candidateId={} token={}",
+              candidate.candidateId,
+              token);
+        } else if (affected > 1) {
+          throw new BacktestTaskException(
+              "BACKTEST_EXPERIMENT_STATE_CONFLICT", "claim release affected multiple rows");
+        } else {
+          log.warn(
+              "quant experiment transient dispatch released candidateId={} code={}",
+              candidate.candidateId,
+              code,
+              exception);
+        }
       }
     }
   }
@@ -186,6 +205,10 @@ public class BacktestExperimentDispatcher {
       return taskException.getErrorCode();
     }
     return "BACKTEST_EXPERIMENT_DISPATCH_FAILED";
+  }
+
+  private boolean isPermanent(RuntimeException exception, String code) {
+    return exception instanceof BacktestTaskException && PERMANENT_CODES.contains(code);
   }
 
   private String message(RuntimeException exception) {
