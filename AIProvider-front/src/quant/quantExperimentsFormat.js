@@ -37,6 +37,60 @@ export const CANDIDATE_SORTS = [
   ["VALIDATION_TRADE_COUNT", "VALIDATION 交易数"],
 ];
 
+export const WALK_FORWARD_SELECTION_METRIC_LABELS = {
+  TRAIN_TOTAL_RETURN_RATIO: "训练集总收益率最高",
+  TRAIN_PROFIT_FACTOR: "训练集 Profit Factor 最高",
+  TRAIN_NET_PROFIT: "训练集净利润最高",
+  TRAIN_WIN_RATE: "训练集胜率最高",
+  TRAIN_MAXIMUM_DRAWDOWN_RATIO: "训练集最大回撤最低",
+};
+
+export function calculateWalkForwardWindow({
+  studyStart,
+  studyEnd,
+  dataset,
+  trainingBars,
+  validationBars,
+  candidateCount,
+}) {
+  const duration = intervalDurationMs(dataset?.interval);
+  const startMs = new Date(studyStart).getTime();
+  const endMs = new Date(studyEnd).getTime();
+  const totalBars = calculateExpectedBars(studyStart, studyEnd, dataset?.interval);
+  if (!duration || !Number.isFinite(startMs) || !Number.isFinite(endMs) || !Number.isSafeInteger(totalBars)) return { error: "请填写有效的研究时间范围" };
+  const coverageStart = new Date(dataset?.earliestOpenTime).getTime();
+  const coverageEnd = new Date(dataset?.latestOpenTime).getTime() + duration;
+  if (!Number.isFinite(coverageStart) || !Number.isFinite(coverageEnd)) return { error: "数据集覆盖时间无效" };
+  if (startMs >= endMs) return { error: "研究开始必须早于研究结束" };
+  if (startMs < coverageStart || endMs > coverageEnd) return { error: "研究时间必须处于数据集覆盖范围内" };
+  if (startMs % duration !== 0 || endMs % duration !== 0) return { error: "研究时间必须对齐数据集周期" };
+  if (!Number.isSafeInteger(trainingBars) || trainingBars <= 0) return { error: "trainingBars 必须为正安全整数" };
+  if (!Number.isSafeInteger(validationBars) || validationBars <= 0) return { error: "validationBars 必须为正安全整数" };
+  if (totalBars < trainingBars + validationBars) return { error: "研究区间不足以容纳一个 TRAIN 和一个 VALIDATION Fold" };
+  const remainder = totalBars - trainingBars;
+  if (remainder % validationBars !== 0) return { error: "研究区间尾部必须能够按 validationBars 整除，不能静默截断" };
+  const foldCount = remainder / validationBars;
+  if (!Number.isSafeInteger(foldCount) || foldCount < 1) return { error: "Fold 数量异常" };
+  if (foldCount > 36) return { error: "Fold 数量不能超过 36" };
+  if (!Number.isSafeInteger(candidateCount) || candidateCount < 1) return { error: "候选组合数量异常" };
+  const totalChildRuns = foldCount * candidateCount * 2;
+  if (!Number.isSafeInteger(totalChildRuns)) return { error: "总回测任务数超出安全整数范围" };
+  if (totalChildRuns > 2048) return { error: "总回测任务数不能超过 2048" };
+  const firstValidationEnd = startMs + (trainingBars + validationBars) * duration;
+  const lastValidationEnd = startMs + totalBars * duration;
+  return {
+    totalBars,
+    foldCount,
+    stepBars: validationBars,
+    totalChildRuns,
+    firstTrainingStart: new Date(startMs).toISOString(),
+    firstTrainingEnd: new Date(startMs + trainingBars * duration).toISOString(),
+    firstValidationStart: new Date(startMs + trainingBars * duration).toISOString(),
+    firstValidationEnd: new Date(firstValidationEnd).toISOString(),
+    lastValidationEnd: new Date(lastValidationEnd).toISOString(),
+  };
+}
+
 export function formatExperimentStatus(status) {
   return EXPERIMENT_STATUS_LABELS[status] || "—";
 }

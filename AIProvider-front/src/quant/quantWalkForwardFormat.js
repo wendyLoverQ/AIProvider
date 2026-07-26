@@ -1,0 +1,3 @@
+export const WALK_FORWARD_STUDY_STATUS_LABELS = { QUEUED: "排队中", RUNNING: "运行中", COMPLETED: "已完成", COMPLETED_WITH_FAILURES: "已完成（部分 Fold 失败）", FAILED: "失败" };
+export const WALK_FORWARD_FOLD_STATUS_LABELS = { PENDING: "待开始", CREATING_EXPERIMENT: "正在创建参数实验", WAITING_EXPERIMENT: "参数实验运行中", COMPLETED: "已完成", FAILED: "失败" };
+export const WALK_FORWARD_SELECTION_METRIC_LABELS = { TRAIN_TOTAL_RETURN_RATIO: "训练集总收益率最高", TRAIN_PROFIT_FACTOR: "训练集 Profit Factor 最高", TRAIN_NET_PROFIT: "训练集净利润最高", TRAIN_WIN_RATE: "训练集胜率最高", TRAIN_MAXIMUM_DRAWDOWN_RATIO: "训练集最大回撤最低" };

@@ -1,0 +1,17 @@
+import { formatDecimalString, formatInstant, formatRatioString, intervalCode } from "./quantBacktestsFormat";
+import { WALK_FORWARD_SELECTION_METRIC_LABELS } from "./quantExperimentsFormat";
+import { WALK_FORWARD_STUDY_STATUS_LABELS } from "./quantWalkForwardFormat";
+
+export default function QuantWalkForwardStudyDetail({ detail, loading, error, onRetry }) {
+  if (loading) return <section className="backtest-card backtest-empty">正在读取 Study 详情…</section>;
+  if (error) return <section className="backtest-card quant-error" role="alert"><strong>Study 详情加载失败</strong><span>{error}</span><button type="button" onClick={onRetry}>重试</button></section>;
+  if (!detail?.summary) return <section className="backtest-card backtest-empty">请选择一个滚动验证 Study</section>;
+  const study = detail.summary;
+  return <section className="backtest-card quant-walk-forward-detail"><header className="quant-section-head"><div><span className="eyebrow">WALK-FORWARD STUDY</span><h4>Study 详情</h4></div><span className={`backtest-status status-${study.status.toLowerCase()}`}>{WALK_FORWARD_STUDY_STATUS_LABELS[study.status]}</span></header>
+    <dl className="backtest-detail-grid"><div><dt>studyId</dt><dd className="copyable-id">{study.studyId}</dd></div><div><dt>数据集</dt><dd>{study.symbol} · {intervalCode(study.intervalCode)} · {study.provider}</dd></div><div><dt>策略</dt><dd>{study.strategyCode} · {study.strategyVersion}</dd></div><div><dt>窗口</dt><dd>ROLLING · TRAIN {study.trainingBars} · VALIDATION {study.validationBars} · STEP {study.stepBars}</dd></div><div><dt>研究区间</dt><dd>{formatInstant(study.studyStartOpenTimeInclusive)} ～ {formatInstant(study.studyEndOpenTimeExclusive)}</dd></div><div><dt>Fold / child runs</dt><dd>{study.foldCount} / {study.totalChildRuns}</dd></div><div><dt>候选 / 选择指标</dt><dd>{study.candidateCountPerFold} / {WALK_FORWARD_SELECTION_METRIC_LABELS[study.selectionMetric]}</dd></div><div><dt>最低训练交易</dt><dd>{study.minimumTrainTrades}</dd></div><div><dt>进度</dt><dd>{study.progressPercent}% · {study.completedFolds} 完成 / {study.failedFolds} 失败</dd></div><div><dt>数量 / 手续费</dt><dd>{study.orderAmount} / {study.feeRate}</dd></div><div><dt>创建 / 开始 / 完成</dt><dd>{formatInstant(study.createdAt)} / {formatInstant(study.startedAt)} / {formatInstant(study.finishedAt)}</dd></div></dl>
+    <div className="quant-walk-forward-grid"><strong>参数网格</strong>{Object.entries(study.parameterGrid).map(([key, values]) => <span key={key}>{key}: {values.join(", ")}</span>)}</div>
+    <p className="backtest-help">每个 Fold 只根据 TRAIN 指标选择参数，再查看对应 VALIDATION 表现。样本外结果不代表未来收益。</p>
+    {study.errorMessage && <div className="backtest-inline-error" role="alert">{study.errorCode || "STUDY_FAILED"}：{study.errorMessage}</div>}
+    {(study.status === "COMPLETED" || study.status === "COMPLETED_WITH_FAILURES" || study.status === "FAILED") && <div className="quant-walk-forward-oos-summary"><span>成功 OOS Fold：{study.successfulOosFolds ?? "—"}</span><span>缺失 Fold：{study.hasOosGaps ? "存在" : "无"}</span><span>参数变化：{study.selectedParameterChanges ?? "—"}</span><span>OOS 交易：{study.totalOosTradeCount ?? "—"}</span><span>OOS 费用：{formatDecimalString(study.totalOosFees)}</span><span>OOS 收益：{formatRatioString(study.totalOosReturnRatio)}</span></div>}
+  </section>;
+}
