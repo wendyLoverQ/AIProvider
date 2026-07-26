@@ -11,6 +11,18 @@ import com.aiprovider.quant.strategy.StrategyRegistry;
 import org.junit.jupiter.api.Test;
 import org.ta4j.core.BarSeries;
 import org.ta4j.core.Strategy;
+import org.ta4j.core.Indicator;
+import org.ta4j.core.Rule;
+import org.ta4j.core.num.Num;
+import org.ta4j.core.indicators.EMAIndicator;
+import org.ta4j.core.indicators.MACDIndicator;
+import org.ta4j.core.indicators.RSIIndicator;
+import org.ta4j.core.indicators.helpers.ClosePriceIndicator;
+import org.ta4j.core.rules.CrossedDownIndicatorRule;
+import org.ta4j.core.rules.CrossedUpIndicatorRule;
+import org.ta4j.core.rules.IsEqualRule;
+import org.ta4j.core.rules.OverIndicatorRule;
+import org.ta4j.core.rules.UnderIndicatorRule;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -18,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.fail;
 
 class ResearchStrategyTa4jTest {
     @Test
@@ -26,8 +39,14 @@ class ResearchStrategyTa4jTest {
         BarSeries series = new Ta4jBarSeriesFactory().create("BTCUSDT", KlineInterval.M1, candles);
         StrategyBuildResult build = new StrategyRegistry().get("RSI_MEAN_REVERSION_LONG_ONLY").build(Map.of("rsiPeriod", 14, "entryThreshold", 30, "exitThreshold", 55), candles.size());
         Strategy strategy = new Ta4jStrategyFactory().create("RSI_MEAN_REVERSION_LONG_ONLY", series, build);
-        assertThat(firstTrue(strategy, series.getBeginIndex(), series.getEndIndex(), true)).isGreaterThanOrEqualTo(14);
-        assertThat(firstTrue(strategy, series.getBeginIndex(), series.getEndIndex(), false)).isGreaterThanOrEqualTo(14);
+        int rsiPeriod = 14;
+        int flatEnd = 14, downEnd = 34, recoveryEnd = 54;
+        int entryIndex = requireFirstSatisfied(strategy, series.getBeginIndex(), series.getEndIndex(), true);
+        int exitIndex = requireFirstSatisfied(strategy, series.getBeginIndex(), series.getEndIndex(), false);
+        assertThat(entryIndex).isBetween(rsiPeriod, downEnd);
+        assertThat(exitIndex).isGreaterThan(entryIndex).isGreaterThan(downEnd).isLessThanOrEqualTo(recoveryEnd);
+        for (int index = series.getBeginIndex(); index < rsiPeriod; index++) assertThat(strategy.shouldEnter(index)).as("RSI warmup index %s", index).isFalse();
+        assertThat(flatEnd).isEqualTo(14);
     }
 
     @Test
@@ -36,29 +55,87 @@ class ResearchStrategyTa4jTest {
         BarSeries series = new Ta4jBarSeriesFactory().create("BTCUSDT", KlineInterval.M1, candles);
         StrategyBuildResult build = new StrategyRegistry().get("MACD_TREND_LONG_ONLY").build(Map.of("fastPeriod", 12, "slowPeriod", 26, "signalPeriod", 9), candles.size());
         Strategy strategy = new Ta4jStrategyFactory().create("MACD_TREND_LONG_ONLY", series, build);
-        assertThat(firstTrue(strategy, series.getBeginIndex(), series.getEndIndex(), true)).isGreaterThanOrEqualTo(35);
-        assertThat(firstTrue(strategy, series.getBeginIndex(), series.getEndIndex(), false)).isGreaterThanOrEqualTo(35);
+        int slowPeriod = 26, signalPeriod = 9;
+        int flatEnd = 19, upEnd = 69, retreatEnd = 99;
+        int entryIndex = requireFirstSatisfied(strategy, series.getBeginIndex(), series.getEndIndex(), true);
+        int exitIndex = requireFirstSatisfied(strategy, series.getBeginIndex(), series.getEndIndex(), false);
+        assertThat(entryIndex).isBetween(slowPeriod + signalPeriod, upEnd);
+        assertThat(exitIndex).isGreaterThan(entryIndex).isBetween(upEnd + 1, retreatEnd);
+        MACDIndicator macd = new MACDIndicator(new ClosePriceIndicator(series), 12, slowPeriod);
+        EMAIndicator signal = new EMAIndicator(macd, signalPeriod);
+        assertThat(macd.getValue(entryIndex - 1).isLessThanOrEqual(signal.getValue(entryIndex - 1))).isTrue();
+        assertThat(macd.getValue(entryIndex).isGreaterThan(signal.getValue(entryIndex))).isTrue();
+        assertThat(macd.getValue(exitIndex - 1).isGreaterThanOrEqual(signal.getValue(exitIndex - 1))).isTrue();
+        assertThat(macd.getValue(exitIndex).isLessThan(signal.getValue(exitIndex))).isTrue();
+        assertThat(flatEnd).isEqualTo(19);
     }
 
     @Test
-    void enginePreservesResearchStrategyContractAndIsDeterministic() {
+    void enginePreservesAllThreeStrategyContractsAndIsDeterministic() {
         List<HistoricalCandle> candles = candles(20, 25, 25, 30);
-        BacktestRequest request = new BacktestRequest("MACD_TREND_LONG_ONLY", "1.0.0", Map.of("fastPeriod", 12, "slowPeriod", 26, "signalPeriod", 9), BigDecimal.ONE, BigDecimal.ZERO, true);
-        var first = new BacktestEngine().run(request, "BTCUSDT", KlineInterval.M1, candles);
-        var second = new BacktestEngine().run(request, "BTCUSDT", KlineInterval.M1, candles);
-        assertThat(first.getStrategyCode()).isEqualTo("MACD_TREND_LONG_ONLY");
-        assertThat(first.getStrategyVersion()).isEqualTo("1.0.0");
-        assertThat(first.getExecutionModel()).isEqualTo("TA4J_TRADE_ON_NEXT_OPEN");
-        assertThat(first.getStrategyParameters()).containsExactlyInAnyOrderEntriesOf(request.getStrategyParameters());
-        assertThat(first.getEquityCurve()).hasSize(candles.size());
-        assertThat(first.getTrades().stream().map(trade -> List.of(trade.getEntryIndex(), trade.getExitIndex(), trade.getNetProfit(), trade.getReturnRatio())).toList())
-                .isEqualTo(second.getTrades().stream().map(trade -> List.of(trade.getEntryIndex(), trade.getExitIndex(), trade.getNetProfit(), trade.getReturnRatio())).toList());
-        assertThat(first.getEquityCurve()).isEqualTo(second.getEquityCurve());
+        List<BacktestRequest> requests = List.of(
+                new BacktestRequest("EMA_CROSS_LONG_ONLY", "1.0.0", Map.of("fastPeriod", 2, "slowPeriod", 4), BigDecimal.ONE, BigDecimal.ZERO, true),
+                new BacktestRequest("RSI_MEAN_REVERSION_LONG_ONLY", "1.0.0", Map.of("rsiPeriod", 14, "entryThreshold", 30, "exitThreshold", 55), BigDecimal.ONE, BigDecimal.ZERO, true),
+                new BacktestRequest("MACD_TREND_LONG_ONLY", "1.0.0", Map.of("fastPeriod", 12, "slowPeriod", 26, "signalPeriod", 9), BigDecimal.ONE, BigDecimal.ZERO, true));
+        for (BacktestRequest request : requests) {
+            var first = new BacktestEngine().run(request, "BTCUSDT", KlineInterval.M1, candles);
+            var second = new BacktestEngine().run(request, "BTCUSDT", KlineInterval.M1, candles);
+            assertThat(first.getStrategyCode()).isEqualTo(request.getStrategyCode());
+            assertThat(first.getStrategyVersion()).isEqualTo("1.0.0");
+            assertThat(first.getExecutionModel()).isEqualTo("TA4J_TRADE_ON_NEXT_OPEN");
+            assertThat(first.getStrategyParameters()).containsExactlyInAnyOrderEntriesOf(request.getStrategyParameters());
+            assertThat(first.getBarCount()).isEqualTo(candles.size());
+            assertThat(first.getEquityCurve()).hasSize(candles.size());
+            assertThat(first.getTrades().stream().map(ResearchStrategyTa4jTest::tradeSnapshot).toList())
+                    .isEqualTo(second.getTrades().stream().map(ResearchStrategyTa4jTest::tradeSnapshot).toList());
+            assertThat(first.getEquityCurve().stream().map(point -> new EquitySnapshot(point.openTime(), point.equityRatio(), point.drawdownRatio(), point.inPosition())).toList())
+                    .isEqualTo(second.getEquityCurve().stream().map(point -> new EquitySnapshot(point.openTime(), point.equityRatio(), point.drawdownRatio(), point.inPosition())).toList());
+        }
     }
 
-    private int firstTrue(Strategy strategy, int begin, int end, boolean entry) {
-        for (int i = begin; i <= end; i++) if (entry ? strategy.shouldEnter(i) : strategy.shouldExit(i)) return i;
-        return Integer.MAX_VALUE;
+    @Test
+    void forceCloseAtEndControlsOnlyTheExplicitEndOfSeriesTrade() {
+        List<HistoricalCandle> candles = candles(20, 25, 40, 0);
+        BacktestRequest forceClose = new BacktestRequest("MACD_TREND_LONG_ONLY", "1.0.0", Map.of("fastPeriod", 12, "slowPeriod", 26, "signalPeriod", 9), BigDecimal.ONE, BigDecimal.ZERO, true);
+        BacktestRequest keepOpen = new BacktestRequest("MACD_TREND_LONG_ONLY", "1.0.0", Map.of("fastPeriod", 12, "slowPeriod", 26, "signalPeriod", 9), BigDecimal.ONE, BigDecimal.ZERO, false);
+        var forced = new BacktestEngine().run(forceClose, "BTCUSDT", KlineInterval.M1, candles);
+        var unforced = new BacktestEngine().run(keepOpen, "BTCUSDT", KlineInterval.M1, candles);
+        assertThat(forced.getTrades()).isNotEmpty();
+        var last = forced.getTrades().get(forced.getTrades().size() - 1);
+        assertThat(last.isForcedExit()).isTrue();
+        assertThat(last.getExitReason()).isEqualTo("END_OF_SERIES");
+        assertThat(last.getExitIndex()).isEqualTo(candles.size() - 1);
+        assertThat(last.getExitPrice()).isEqualByComparingTo(candles.get(candles.size() - 1).getClosePrice());
+        assertThat(unforced.getTrades()).noneMatch(trade -> trade.isForcedExit() || "END_OF_SERIES".equals(trade.getExitReason()));
+    }
+
+    private static TradeSnapshot tradeSnapshot(com.aiprovider.quant.backtest.BacktestTrade trade) {
+        return new TradeSnapshot(trade.getTradeNo(), trade.getEntrySignalIndex(), trade.getEntryIndex(), trade.getEntryTime(), trade.getEntryPrice(), trade.getExitSignalIndex(), trade.getExitIndex(), trade.getExitTime(), trade.getExitPrice(), trade.getAmount(), trade.getGrossProfit(), trade.getFee(), trade.getNetProfit(), trade.getReturnRatio(), trade.getBarsHeld(), trade.isForcedExit(), trade.getExitReason());
+    }
+
+    private record TradeSnapshot(int tradeNo, Integer entrySignalIndex, int entryIndex, Instant entryTime, BigDecimal entryPrice, Integer exitSignalIndex, int exitIndex, Instant exitTime, BigDecimal exitPrice, BigDecimal amount, BigDecimal grossProfit, BigDecimal fee, BigDecimal netProfit, BigDecimal returnRatio, int barsHeld, boolean forcedExit, String exitReason) {}
+    private record EquitySnapshot(Instant openTime, BigDecimal equityRatio, BigDecimal drawdownRatio, boolean inPosition) {}
+
+    @Test
+    void rsiThresholdRulesIncludeEqualityAtBothBoundaries() {
+        BarSeries series = new Ta4jBarSeriesFactory().create("BTCUSDT", KlineInterval.M1, candles(3, 0, 0, 0));
+        List<BigDecimal> values = List.of(new BigDecimal("29"), new BigDecimal("30"), new BigDecimal("31"));
+        Indicator<Num> indicator = new Indicator<>() {
+            @Override public Num getValue(int index) { return series.numOf(values.get(index)); }
+            @Override public int getUnstableBars() { return 0; }
+            @Override public BarSeries getBarSeries() { return series; }
+        };
+        Num threshold = series.numOf(30);
+        Rule entry = new UnderIndicatorRule(indicator, threshold).or(new IsEqualRule(indicator, threshold));
+        Rule exit = new OverIndicatorRule(indicator, threshold).or(new IsEqualRule(indicator, threshold));
+        assertThat(entry.isSatisfied(0)).isTrue(); assertThat(entry.isSatisfied(1)).isTrue(); assertThat(entry.isSatisfied(2)).isFalse();
+        assertThat(exit.isSatisfied(0)).isFalse(); assertThat(exit.isSatisfied(1)).isTrue(); assertThat(exit.isSatisfied(2)).isTrue();
+    }
+
+    private int requireFirstSatisfied(Strategy strategy, int begin, int end, boolean entry) {
+        for (int index = begin; index <= end; index++) if (entry ? strategy.shouldEnter(index) : strategy.shouldExit(index)) return index;
+        fail((entry ? "entry" : "exit") + " signal not found in range " + begin + ".." + end);
+        throw new AssertionError("unreachable");
     }
 
     private List<HistoricalCandle> candles(int flat, int down, int up, int retreat) {

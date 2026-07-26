@@ -184,7 +184,6 @@ public final class Ta4jBacktestEngine {
         }
         if (request.getOrderAmount() == null || request.getOrderAmount().signum() <= 0) throw new BacktestException("BACKTEST_PARAMETER_INVALID", context(request, symbol, interval, null, "orderAmount"));
         if (request.getFeeRate() == null || request.getFeeRate().signum() < 0 || request.getFeeRate().compareTo(new BigDecimal("0.01")) > 0) throw new BacktestException("BACKTEST_PARAMETER_INVALID", context(request, symbol, interval, null, "feeRate"));
-        if (!request.isForceCloseAtEnd()) throw new BacktestException("BACKTEST_PARAMETER_INVALID", context(request, symbol, interval, null, "forceCloseAtEnd=true required"));
     }
 
     private String context(BacktestRequest request, String symbol, KlineInterval interval, List<HistoricalCandle> candles, String detail) {
