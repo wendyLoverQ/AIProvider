@@ -18,7 +18,8 @@ public final class BacktestExperimentAggregate {
             boolean trainTerminal=train.terminal(),validationTerminal=validation.terminal();
             boolean dispatchFailed="FAILED".equals(candidate.dispatchStatus());
             boolean missingDispatched="DISPATCHED".equals(candidate.dispatchStatus())&&(!train.exists()||!validation.exists());
-            if("CLAIMED".equals(candidate.dispatchStatus())||("DISPATCHED".equals(candidate.dispatchStatus())&&!missingDispatched&&(!trainTerminal||!validationTerminal))) active++;
+            boolean hasNonTerminalRun=(train.exists()&&!trainTerminal)||(validation.exists()&&!validationTerminal);
+            if("CLAIMED".equals(candidate.dispatchStatus())||hasNonTerminalRun) active++;
             completedLegs+=train.completed()?1:0; completedLegs+=validation.completed()?1:0;
             failedLegs+=train.failed()?1:0; failedLegs+=validation.failed()?1:0;
             if(dispatchFailed||missingDispatched){if(!train.exists())failedLegs++;if(!validation.exists())failedLegs++;}

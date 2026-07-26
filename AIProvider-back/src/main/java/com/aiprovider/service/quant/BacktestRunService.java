@@ -13,6 +13,7 @@ import com.aiprovider.service.quant.model.BacktestRunCommand;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -55,10 +56,35 @@ public class BacktestRunService {
         BacktestRunRow row=new BacktestRunRow(); row.runId=id; row.datasetId=q.getDatasetId();
         row.provider=dataset.getProvider().name(); row.marketType=dataset.getMarketType().name(); row.dataType=dataset.getDataType().name(); row.symbol=dataset.getSymbol(); row.intervalCode=dataset.getInterval().code();
         row.startOpenTimeMs=q.getStartOpenTimeInclusive().toEpochMilli(); row.endOpenTimeExclusiveMs=q.getEndOpenTimeExclusive().toEpochMilli(); row.strategyCode=code; row.strategyVersion=version;
-        row.requestedParametersJson=write(params); row.orderAmount=q.getOrderAmount(); row.feeRate=q.getFeeRate(); row.forceCloseAtEnd=q.isForceCloseAtEnd(); row.queuedAt=Instant.now(); row.updatedAt=row.queuedAt; runs.insert(row);
+        row.requestedParametersJson=write(params); row.orderAmount=q.getOrderAmount(); row.feeRate=q.getFeeRate(); row.forceCloseAtEnd=q.isForceCloseAtEnd(); row.queuedAt=Instant.now(); row.updatedAt=row.queuedAt;
+        try {
+            if (runs.insert(row) != 1) {
+                throw error("BACKTEST_RUN_PERSISTENCE_FAILED", "run insert affected an unexpected number of rows");
+            }
+        } catch (DataIntegrityViolationException exception) {
+            BacktestRunRow raced = runs.findByRunId(id);
+            if (raced == null) {
+                throw exception;
+            }
+            if (!sameRequest(raced, q, code, version, params)) {
+                throw error("BACKTEST_RUN_ID_CONFLICT", "runId already belongs to a different request");
+            }
+            return id;
+        }
         BacktestRunCommand command=new BacktestRunCommand(id,row.datasetId,q.getStartOpenTimeInclusive(),q.getEndOpenTimeExclusive(),code,version,params,q.getOrderAmount(),q.getFeeRate(),q.isForceCloseAtEnd());
         try { executor.execute(() -> run(command)); } catch(RejectedExecutionException ex) { failSafely(id,"BACKTEST_QUEUE_FULL",descriptor(ex.getMessage())); throw error("BACKTEST_QUEUE_FULL","runId="+id+" queue is full"); }
         return id;
+    }
+    private boolean sameRequest(BacktestRunRow existing, BacktestCreateRequest q, String code, String version, Map<String,Integer> params) {
+        return existing.datasetId == q.getDatasetId()
+                && existing.startOpenTimeMs == q.getStartOpenTimeInclusive().toEpochMilli()
+                && existing.endOpenTimeExclusiveMs == q.getEndOpenTimeExclusive().toEpochMilli()
+                && code.equals(existing.strategyCode)
+                && version.equals(existing.strategyVersion)
+                && Objects.equals(read(existing.requestedParametersJson), params)
+                && existing.orderAmount != null && existing.orderAmount.compareTo(q.getOrderAmount()) == 0
+                && existing.feeRate != null && existing.feeRate.compareTo(q.getFeeRate()) == 0
+                && existing.forceCloseAtEnd == q.isForceCloseAtEnd();
     }
     private void run(BacktestRunCommand c) {
         try {

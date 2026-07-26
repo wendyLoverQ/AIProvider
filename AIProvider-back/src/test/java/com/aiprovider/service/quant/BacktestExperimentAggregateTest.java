@@ -26,4 +26,10 @@ class BacktestExperimentAggregateTest {
         var allFailed=BacktestExperimentAggregate.calculate(1,List.of(new BacktestExperimentAggregate.CandidateState("DISPATCHED",missing(),run("COMPLETED","100"))));
         assertEquals("FAILED",allFailed.status());assertEquals(1,allFailed.failedCandidates());assertEquals(1,allFailed.failedLegs());assertEquals(100,allFailed.progressPercent().intValue());
     }
+    @Test void failedDispatchWithRunningTrainingRemainsActiveUntilTrainingTerminates(){
+        var running=BacktestExperimentAggregate.calculate(1,List.of(new BacktestExperimentAggregate.CandidateState("FAILED",run("RUNNING","42.00"),missing())));
+        assertEquals("RUNNING",running.status());assertEquals(1,running.activeCandidates());assertEquals(1,running.failedCandidates());assertEquals(new BigDecimal("71.00"),running.progressPercent());
+        var terminal=BacktestExperimentAggregate.calculate(1,List.of(new BacktestExperimentAggregate.CandidateState("FAILED",run("COMPLETED","100"),missing())));
+        assertEquals("FAILED",terminal.status());assertEquals(0,terminal.activeCandidates());assertEquals(new BigDecimal("100.00"),terminal.progressPercent());
+    }
 }
