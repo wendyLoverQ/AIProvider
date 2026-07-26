@@ -178,6 +178,44 @@ public class BacktestExperimentService {
     return refresh(require(id));
   }
 
+  /** Batch read used by Walk-forward; missing IDs remain absent so callers can expose them. */
+  public Map<String, BacktestExperimentDtos.ExperimentSummary> getMany(
+      Collection<String> experimentIds) {
+    if (experimentIds == null || experimentIds.isEmpty()) return Map.of();
+    List<String> ids = new ArrayList<>(new LinkedHashSet<>(experimentIds));
+    List<BacktestExperimentRow> rows = experiments.findByExperimentIds(ids);
+    Map<String, BacktestExperimentSnapshot> snapshots =
+        BacktestExperimentSnapshot.loadMany(rows, candidates, runs);
+    List<BacktestExperimentRow> changed = new ArrayList<>();
+    for (BacktestExperimentRow row : rows) {
+      BacktestExperimentAggregate.Result result = aggregate(snapshots.get(row.experimentId));
+      if (!result.status().equals(row.status)) {
+        Instant now = Instant.now();
+        int affected =
+            experiments.updateAggregate(
+                row.experimentId,
+                result.status(),
+                terminal(result.status()) ? now : null,
+                summaryErrorCode(snapshots.get(row.experimentId), result),
+                summaryErrorMessage(snapshots.get(row.experimentId), result),
+                now);
+        if (affected != 1)
+          throw error(
+              "BACKTEST_EXPERIMENT_STATE_CONFLICT",
+              "batch aggregate update affected an unexpected number of rows");
+        changed.add(row);
+      }
+    }
+    if (!changed.isEmpty()) {
+      rows = experiments.findByExperimentIds(ids);
+      snapshots = BacktestExperimentSnapshot.loadMany(rows, candidates, runs);
+    }
+    Map<String, BacktestExperimentDtos.ExperimentSummary> result = new LinkedHashMap<>();
+    for (BacktestExperimentRow row : rows)
+      result.put(row.experimentId, summary(row, snapshots.get(row.experimentId)));
+    return Map.copyOf(result);
+  }
+
   public BacktestDtos.Page<BacktestExperimentDtos.CandidateResult> candidates(
       String id, int page, int size, String sortBy, String order) {
     BacktestExperimentRow experiment = require(id);

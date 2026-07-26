@@ -3,6 +3,7 @@ package com.aiprovider.mapper;
 import com.aiprovider.mapper.row.WalkForwardFoldRow;
 import com.aiprovider.mapper.row.WalkForwardTrainingCandidateRow;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import org.apache.ibatis.annotations.*;
 
@@ -46,6 +47,13 @@ public interface WalkForwardFoldMapper {
           + COLUMNS
           + " FROM q_walk_forward_fold WHERE StudyId=#{studyId} ORDER BY FoldIndex ASC")
   List<WalkForwardFoldRow> findAllByStudyId(@Param("studyId") String studyId);
+
+  @ResultMap("walkForwardFoldRow")
+  @Select(
+      "<script>SELECT "
+          + COLUMNS
+          + " FROM q_walk_forward_fold WHERE StudyId IN <foreach collection='studyIds' item='studyId' open='(' separator=',' close=')'>#{studyId}</foreach> ORDER BY StudyId ASC,FoldIndex ASC</script>")
+  List<WalkForwardFoldRow> findAllByStudyIds(@Param("studyIds") Collection<String> studyIds);
 
   @ResultMap("walkForwardFoldRow")
   @Select(
@@ -139,15 +147,46 @@ public interface WalkForwardFoldMapper {
         @Result(column = "MetricValue", property = "metricValue")
       })
   @Select(
-      "SELECT"
-          + " c.CandidateId,c.CandidateIndex,c.ParametersJson,c.TrainingRunId,c.ValidationRunId,tr.TradeCount,${metricColumn}"
-          + " AS MetricValue FROM q_backtest_experiment_candidate c JOIN q_backtest_run tr ON"
-          + " tr.RunId=c.TrainingRunId WHERE c.ExperimentId=#{experimentId} AND"
-          + " tr.Status='COMPLETED' AND tr.TradeCount >= #{minimumTrainTrades} AND ${metricColumn}"
-          + " IS NOT NULL ORDER BY ${metricColumn} ${direction},c.CandidateIndex ASC LIMIT 1")
-  WalkForwardTrainingCandidateRow findBestTrainingCandidate(
-      @Param("experimentId") String experimentId,
-      @Param("metricColumn") String metricColumn,
-      @Param("direction") String direction,
-      @Param("minimumTrainTrades") int minimumTrainTrades);
+      "SELECT c.CandidateId,c.CandidateIndex,c.ParametersJson,c.TrainingRunId,c.ValidationRunId,tr.TradeCount,tr.TotalReturnRatio AS MetricValue"
+          + " FROM q_backtest_experiment_candidate c JOIN q_backtest_run tr ON tr.RunId=c.TrainingRunId"
+          + " WHERE c.ExperimentId=#{experimentId} AND tr.Status='COMPLETED' AND tr.TradeCount >= #{minimumTrainTrades}"
+          + " AND tr.TotalReturnRatio IS NOT NULL ORDER BY tr.TotalReturnRatio DESC,c.CandidateIndex ASC LIMIT 1")
+  WalkForwardTrainingCandidateRow findBestByTrainTotalReturnRatio(
+      @Param("experimentId") String experimentId, @Param("minimumTrainTrades") int minimumTrainTrades);
+
+  @ResultMap("walkForwardTrainingCandidateRow")
+  @Select(
+      "SELECT c.CandidateId,c.CandidateIndex,c.ParametersJson,c.TrainingRunId,c.ValidationRunId,tr.TradeCount,tr.ProfitFactor AS MetricValue"
+          + " FROM q_backtest_experiment_candidate c JOIN q_backtest_run tr ON tr.RunId=c.TrainingRunId"
+          + " WHERE c.ExperimentId=#{experimentId} AND tr.Status='COMPLETED' AND tr.TradeCount >= #{minimumTrainTrades}"
+          + " AND tr.ProfitFactor IS NOT NULL ORDER BY tr.ProfitFactor DESC,c.CandidateIndex ASC LIMIT 1")
+  WalkForwardTrainingCandidateRow findBestByTrainProfitFactor(
+      @Param("experimentId") String experimentId, @Param("minimumTrainTrades") int minimumTrainTrades);
+
+  @ResultMap("walkForwardTrainingCandidateRow")
+  @Select(
+      "SELECT c.CandidateId,c.CandidateIndex,c.ParametersJson,c.TrainingRunId,c.ValidationRunId,tr.TradeCount,tr.NetProfit AS MetricValue"
+          + " FROM q_backtest_experiment_candidate c JOIN q_backtest_run tr ON tr.RunId=c.TrainingRunId"
+          + " WHERE c.ExperimentId=#{experimentId} AND tr.Status='COMPLETED' AND tr.TradeCount >= #{minimumTrainTrades}"
+          + " AND tr.NetProfit IS NOT NULL ORDER BY tr.NetProfit DESC,c.CandidateIndex ASC LIMIT 1")
+  WalkForwardTrainingCandidateRow findBestByTrainNetProfit(
+      @Param("experimentId") String experimentId, @Param("minimumTrainTrades") int minimumTrainTrades);
+
+  @ResultMap("walkForwardTrainingCandidateRow")
+  @Select(
+      "SELECT c.CandidateId,c.CandidateIndex,c.ParametersJson,c.TrainingRunId,c.ValidationRunId,tr.TradeCount,tr.WinRate AS MetricValue"
+          + " FROM q_backtest_experiment_candidate c JOIN q_backtest_run tr ON tr.RunId=c.TrainingRunId"
+          + " WHERE c.ExperimentId=#{experimentId} AND tr.Status='COMPLETED' AND tr.TradeCount >= #{minimumTrainTrades}"
+          + " AND tr.WinRate IS NOT NULL ORDER BY tr.WinRate DESC,c.CandidateIndex ASC LIMIT 1")
+  WalkForwardTrainingCandidateRow findBestByTrainWinRate(
+      @Param("experimentId") String experimentId, @Param("minimumTrainTrades") int minimumTrainTrades);
+
+  @ResultMap("walkForwardTrainingCandidateRow")
+  @Select(
+      "SELECT c.CandidateId,c.CandidateIndex,c.ParametersJson,c.TrainingRunId,c.ValidationRunId,tr.TradeCount,tr.MaximumDrawdownRatio AS MetricValue"
+          + " FROM q_backtest_experiment_candidate c JOIN q_backtest_run tr ON tr.RunId=c.TrainingRunId"
+          + " WHERE c.ExperimentId=#{experimentId} AND tr.Status='COMPLETED' AND tr.TradeCount >= #{minimumTrainTrades}"
+          + " AND tr.MaximumDrawdownRatio IS NOT NULL ORDER BY tr.MaximumDrawdownRatio ASC,c.CandidateIndex ASC LIMIT 1")
+  WalkForwardTrainingCandidateRow findBestByTrainMaximumDrawdownRatio(
+      @Param("experimentId") String experimentId, @Param("minimumTrainTrades") int minimumTrainTrades);
 }

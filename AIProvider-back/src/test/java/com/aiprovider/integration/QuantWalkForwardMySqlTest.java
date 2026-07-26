@@ -24,7 +24,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Testcontainers(disabledWithoutDocker = true)
-class QuantWalkForwardMySqlIT {
+class QuantWalkForwardMySqlTest {
   @Container
   static final MySQLContainer<?> MYSQL =
       new MySQLContainer<>("mysql:8.0.36")
@@ -80,33 +80,49 @@ class QuantWalkForwardMySqlIT {
           context.runs, a.trainingRunId, a.validationRunId, b.trainingRunId, b.validationRunId);
       context.jdbc.update(
           "UPDATE q_backtest_run SET"
-              + " Status='COMPLETED',TradeCount=10,TotalReturnRatio=?,NetProfit=? WHERE RunId=?",
+              + " Status='COMPLETED',TradeCount=10,TotalReturnRatio=?,NetProfit=?,ProfitFactor=?,WinRate=?,MaximumDrawdownRatio=? WHERE RunId=?",
           new BigDecimal("0.80"),
           new BigDecimal("8"),
+          new BigDecimal("2"),
+          new BigDecimal("0.70"),
+          new BigDecimal("0.10"),
           a.trainingRunId);
       context.jdbc.update(
           "UPDATE q_backtest_run SET"
-              + " Status='COMPLETED',TradeCount=10,TotalReturnRatio=?,NetProfit=? WHERE RunId=?",
+              + " Status='COMPLETED',TradeCount=10,TotalReturnRatio=?,NetProfit=?,ProfitFactor=?,WinRate=?,MaximumDrawdownRatio=? WHERE RunId=?",
           new BigDecimal("0.10"),
           new BigDecimal("1"),
+          new BigDecimal("1"),
+          new BigDecimal("0.20"),
+          new BigDecimal("0.90"),
           a.validationRunId);
       context.jdbc.update(
           "UPDATE q_backtest_run SET"
-              + " Status='COMPLETED',TradeCount=10,TotalReturnRatio=?,NetProfit=? WHERE RunId=?",
+              + " Status='COMPLETED',TradeCount=10,TotalReturnRatio=?,NetProfit=?,ProfitFactor=?,WinRate=?,MaximumDrawdownRatio=? WHERE RunId=?",
           new BigDecimal("0.20"),
           new BigDecimal("2"),
+          new BigDecimal("3"),
+          new BigDecimal("0.80"),
+          new BigDecimal("0.20"),
           b.trainingRunId);
       context.jdbc.update(
           "UPDATE q_backtest_run SET"
-              + " Status='COMPLETED',TradeCount=10,TotalReturnRatio=?,NetProfit=? WHERE RunId=?",
+              + " Status='COMPLETED',TradeCount=10,TotalReturnRatio=?,NetProfit=?,ProfitFactor=?,WinRate=?,MaximumDrawdownRatio=? WHERE RunId=?",
           new BigDecimal("0.90"),
           new BigDecimal("9"),
+          new BigDecimal("4"),
+          new BigDecimal("0.95"),
+          new BigDecimal("0.01"),
           b.validationRunId);
 
       WalkForwardTrainingCandidateRow selected =
-          context.folds.findBestTrainingCandidate(experimentId, "tr.TotalReturnRatio", "DESC", 10);
+          context.folds.findBestByTrainTotalReturnRatio(experimentId, 10);
       assertNotNull(selected);
       assertEquals(a.candidateId, selected.candidateId);
+      assertEquals(b.candidateId, context.folds.findBestByTrainProfitFactor(experimentId, 10).candidateId);
+      assertEquals(b.candidateId, context.folds.findBestByTrainNetProfit(experimentId, 10).candidateId);
+      assertEquals(b.candidateId, context.folds.findBestByTrainWinRate(experimentId, 10).candidateId);
+      assertEquals(a.candidateId, context.folds.findBestByTrainMaximumDrawdownRatio(experimentId, 10).candidateId);
     }
   }
 

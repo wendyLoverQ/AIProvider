@@ -3,6 +3,8 @@ package com.aiprovider.mapper;
 import com.aiprovider.mapper.row.BacktestRunRow;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
 import org.apache.ibatis.annotations.*;
 
@@ -63,14 +65,15 @@ public interface BacktestRunMapper {
   @Select("SELECT " + COLUMNS + " FROM q_backtest_run WHERE RunId=#{runId}")
   BacktestRunRow findByRunId(@Param("runId") String runId);
 
-  default List<BacktestRunRow> findByRunIds(List<String> runIds) {
+  default List<BacktestRunRow> findByRunIds(Collection<String> runIds) {
     if (runIds == null || runIds.isEmpty()) {
       return List.of();
     }
-    if (runIds.size() > 128) {
-      throw new IllegalArgumentException("runIds must contain at most 128 values");
+    List<String> uniqueRunIds = new java.util.ArrayList<>(new LinkedHashSet<>(runIds));
+    if (uniqueRunIds.size() > 4096) {
+      throw new IllegalArgumentException("runIds must contain at most 4096 values");
     }
-    return findByRunIdsSql(runIds);
+    return findByRunIdsSql(uniqueRunIds);
   }
 
   @ResultMap("backtestRunRow")

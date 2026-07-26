@@ -3,8 +3,13 @@ package com.aiprovider.service.quant;
 import com.aiprovider.config.quant.QuantWalkForwardProperties;
 import com.aiprovider.controller.quant.dto.BacktestExperimentCreateRequest;
 import com.aiprovider.controller.quant.dto.BacktestExperimentDtos;
-import com.aiprovider.mapper.*;
-import com.aiprovider.mapper.row.*;
+import com.aiprovider.mapper.BacktestRunMapper;
+import com.aiprovider.mapper.WalkForwardFoldMapper;
+import com.aiprovider.mapper.WalkForwardStudyMapper;
+import com.aiprovider.mapper.row.BacktestRunRow;
+import com.aiprovider.mapper.row.WalkForwardFoldRow;
+import com.aiprovider.mapper.row.WalkForwardStudyRow;
+import com.aiprovider.mapper.row.WalkForwardTrainingCandidateRow;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
@@ -17,208 +22,201 @@ import org.springframework.stereotype.Service;
 @Service
 public class WalkForwardStudyDispatcher {
   private static final Logger log = LogManager.getLogger(WalkForwardStudyDispatcher.class);
-  private static final Set<String> PERMANENT =
-      Set.of(
-          "WALK_FORWARD_REQUEST_INVALID",
-          "WALK_FORWARD_WINDOW_INVALID",
-          "WALK_FORWARD_TOO_LARGE",
-          "WALK_FORWARD_EXPERIMENT_CONFLICT",
-          "WALK_FORWARD_STATE_CONFLICT",
-          "BACKTEST_EXPERIMENT_GRID_INVALID",
-          "BACKTEST_EXPERIMENT_RANGE_INVALID");
   private final WalkForwardStudyMapper studies;
   private final WalkForwardFoldMapper folds;
   private final BacktestExperimentCreationService creation;
-  private final WalkForwardStudyService service;
-  private final BacktestExperimentService experiments;
   private final BacktestRunMapper runs;
   private final ObjectMapper json;
   private final QuantWalkForwardProperties properties;
+  private final WalkForwardStudySnapshotLoader snapshots;
 
   public WalkForwardStudyDispatcher(
       WalkForwardStudyMapper studies,
       WalkForwardFoldMapper folds,
       BacktestExperimentCreationService creation,
-      WalkForwardStudyService service,
-      BacktestExperimentService experiments,
       BacktestRunMapper runs,
       ObjectMapper json,
-      QuantWalkForwardProperties properties) {
+      QuantWalkForwardProperties properties,
+      WalkForwardStudySnapshotLoader snapshots) {
     this.studies = studies;
     this.folds = folds;
     this.creation = creation;
-    this.service = service;
-    this.experiments = experiments;
     this.runs = runs;
     this.json = json;
     this.properties = properties;
+    this.snapshots = snapshots;
   }
 
   @Scheduled(fixedDelayString = "${quant.walk-forward.dispatcher-fixed-delay-ms:3000}")
   public void tick() {
     Instant now = Instant.now();
     try {
-      folds.resetStaleCreatingClaims(now.minusSeconds(properties.getStaleClaimSeconds()), now);
-    } catch (RuntimeException e) {
-      log.warn("walk-forward stale claim reset failed", e);
+      int reset = folds.resetStaleCreatingClaims(now.minusSeconds(properties.getStaleClaimSeconds()), now);
+      log.info("operation=walk-forward-reset-stale affectedRows={} result=success", reset);
+    } catch (RuntimeException failure) {
+      log.error("operation=walk-forward-reset-stale result=retryable", failure);
+      return;
     }
-    for (WalkForwardStudyRow study : studies.findNonTerminal()) {
-      try {
-        processStudy(study);
-      } catch (RuntimeException e) {
-        log.error("walk-forward study tick failed studyId=" + study.studyId, e);
+    List<WalkForwardStudyRow> studyRows = studies.findNonTerminal();
+    if (studyRows.isEmpty()) return;
+    List<String> studyIds = studyRows.stream().map(row -> row.studyId).toList();
+    List<WalkForwardFoldRow> foldRows = folds.findAllByStudyIds(studyIds);
+    Map<String, WalkForwardStudySnapshot> loaded;
+    try {
+      loaded = snapshots.loadMany(studyRows, foldRows, false);
+    } catch (RuntimeException failure) {
+      WalkForwardDispatchErrorClassifier.Classification classified =
+          WalkForwardDispatchErrorClassifier.classify(failure);
+      log.error("operation=walk-forward-batch-load result=" + classified.kind() + " errorCode=" + classified.errorCode(), failure);
+      if (classified.kind() == WalkForwardDispatchErrorClassifier.Kind.PERMANENT) {
+        for (WalkForwardFoldRow fold : foldRows) {
+          if ("CREATING_EXPERIMENT".equals(fold.status) || "WAITING_EXPERIMENT".equals(fold.status)) {
+            WalkForwardStudyRow study = studyRows.stream().filter(row -> row.studyId.equals(fold.studyId)).findFirst().orElse(null);
+            if (study != null) markFailed(study, fold, classified);
+          }
+        }
       }
+      return;
+    }
+
+    List<WaitingWork> waiting = new ArrayList<>();
+    for (WalkForwardStudyRow study : studyRows) {
+      WalkForwardStudySnapshot snapshot = loaded.get(study.studyId);
+      if (snapshot == null) continue;
+      WalkForwardFoldRow creatingFold = snapshot.folds().stream().filter(f -> "CREATING_EXPERIMENT".equals(f.status)).findFirst().orElse(null);
+      if (creatingFold != null) {
+        processCreating(study, creatingFold);
+        continue;
+      }
+      WalkForwardFoldRow waitingFold = snapshot.folds().stream().filter(f -> "WAITING_EXPERIMENT".equals(f.status)).findFirst().orElse(null);
+      if (waitingFold != null) {
+        try {
+          WaitingWork work = prepareWaiting(study, waitingFold, snapshot);
+          if (work != null) waiting.add(work);
+        } catch (RuntimeException failure) {
+          handleFailure(study, waitingFold, failure);
+        }
+        continue;
+      }
+      if (snapshot.folds().stream().anyMatch(f -> "PENDING".equals(f.status))) claimNext(study);
+    }
+
+    if (!waiting.isEmpty()) {
+      List<String> runIds = waiting.stream().map(work -> work.selected.validationRunId).toList();
+      Map<String, BacktestRunRow> validationRuns = new LinkedHashMap<>();
+      for (BacktestRunRow run : runs.findByRunIds(runIds)) validationRuns.put(run.runId, run);
+      for (WaitingWork work : waiting) processWaiting(work, validationRuns.get(work.selected.validationRunId));
     }
   }
 
   void recoverStaleClaims(long staleClaimSeconds) {
     Instant now = Instant.now();
-    folds.resetStaleCreatingClaims(now.minusSeconds(staleClaimSeconds), now);
-  }
-
-  private void processStudy(WalkForwardStudyRow study) {
-    service.get(study.studyId);
-    List<WalkForwardFoldRow> all = folds.findAllByStudyId(study.studyId);
-    WalkForwardFoldRow creating =
-        all.stream().filter(f -> "CREATING_EXPERIMENT".equals(f.status)).findFirst().orElse(null);
-    if (creating != null) {
-      processCreating(study, creating);
-      service.get(study.studyId);
-      return;
-    }
-    WalkForwardFoldRow waiting =
-        all.stream().filter(f -> "WAITING_EXPERIMENT".equals(f.status)).findFirst().orElse(null);
-    if (waiting != null) {
-      processWaiting(study, waiting);
-      service.get(study.studyId);
-      return;
-    }
-    if (all.stream().noneMatch(f -> "PENDING".equals(f.status))) {
-      service.get(study.studyId);
-      return;
-    }
-    int claimed =
-        folds.claimNextPending(study.studyId, UUID.randomUUID().toString(), Instant.now());
-    if (claimed > 1) throw error("WALK_FORWARD_STATE_CONFLICT", "claim affected multiple folds");
-    service.get(study.studyId);
+    int affected = folds.resetStaleCreatingClaims(now.minusSeconds(staleClaimSeconds), now);
+    log.info("operation=walk-forward-recovery-reset affectedRows={} result=success", affected);
   }
 
   private void processCreating(WalkForwardStudyRow study, WalkForwardFoldRow fold) {
     String token = fold.claimToken;
     if (token == null) return;
     try {
-      BacktestExperimentCreateRequest request = request(study, fold);
-      creation.createWithExperimentId(fold.experimentId, request);
-      if (folds.markWaitingExperiment(fold.foldId, token, Instant.now()) != 1)
-        throw error(
-            "WALK_FORWARD_STATE_CONFLICT", "mark waiting affected an unexpected number of rows");
-    } catch (RuntimeException exception) {
-      String code = code(exception);
-      if (isPermanent(exception, code)) markFailed(fold, code, message(exception));
-      else if (folds.releaseCreationClaim(fold.foldId, token, Instant.now()) == 0)
-        log.warn("walk-forward creation claim lost foldId=" + fold.foldId);
+      creation.createWithExperimentId(fold.experimentId, request(study, fold));
+      int affected = folds.markWaitingExperiment(fold.foldId, token, Instant.now());
+      expectSingle("markWaitingExperiment", study, fold, affected);
+    } catch (RuntimeException failure) {
+      handleFailure(study, fold, failure);
     }
   }
 
-  private void processWaiting(WalkForwardStudyRow study, WalkForwardFoldRow fold) {
-    BacktestExperimentDtos.ExperimentSummary experiment;
-    try {
-      experiment = experiments.get(fold.experimentId);
-    } catch (RuntimeException e) {
-      return;
-    }
-    if (!Set.of("COMPLETED", "COMPLETED_WITH_FAILURES", "FAILED").contains(experiment.status()))
-      return;
+  private WaitingWork prepareWaiting(
+      WalkForwardStudyRow study, WalkForwardFoldRow fold, WalkForwardStudySnapshot snapshot) {
+    BacktestExperimentDtos.ExperimentSummary experiment = snapshot.experiment(fold.experimentId);
+    if (experiment == null)
+      throw new WalkForwardTaskException("WALK_FORWARD_EXPERIMENT_NOT_FOUND", "experimentId=" + fold.experimentId);
+    if (!Set.of("COMPLETED", "COMPLETED_WITH_FAILURES", "FAILED").contains(experiment.status())) return null;
     WalkForwardSelectionMetric metric;
-    try {
-      metric = WalkForwardSelectionMetric.valueOf(study.selectionMetric);
-    } catch (IllegalArgumentException e) {
-      markFailed(fold, "WALK_FORWARD_REQUEST_INVALID", "selectionMetric is invalid");
-      return;
-    }
-    WalkForwardTrainingCandidateRow selected =
-        folds.findBestTrainingCandidate(
-            fold.experimentId,
-            metric.column(),
-            metric.isAscending() ? "ASC" : "DESC",
-            study.minimumTrainTrades);
-    if (selected == null) {
-      markFailed(
-          fold, "WALK_FORWARD_NO_ELIGIBLE_CANDIDATE", "no eligible completed TRAIN candidate");
-      return;
-    }
-    BacktestRunRow validation = runs.findByRunId(selected.validationRunId);
-    if (validation == null || !"COMPLETED".equals(validation.status)) {
-      markFailed(
-          fold,
-          "WALK_FORWARD_SELECTED_VALIDATION_FAILED",
-          "selected validation run is not completed");
-      return;
-    }
-    if (folds.completeSelection(
-            fold.foldId,
-            selected.candidateId,
-            selected.parametersJson,
-            selected.trainingRunId,
-            selected.validationRunId,
-            selected.metricValue,
-            Instant.now())
-        != 1)
-      throw error(
-          "WALK_FORWARD_STATE_CONFLICT",
-          "complete selection affected an unexpected number of rows");
+    try { metric = WalkForwardSelectionMetric.valueOf(study.selectionMetric); }
+    catch (IllegalArgumentException e) { throw new WalkForwardTaskException("WALK_FORWARD_EXPERIMENT_INVALID", "selectionMetric is invalid"); }
+    WalkForwardTrainingCandidateRow selected = findBest(fold.experimentId, metric, study.minimumTrainTrades);
+    if (selected == null)
+      throw new WalkForwardTaskException("WALK_FORWARD_NO_ELIGIBLE_CANDIDATE", "no eligible completed TRAIN candidate");
+    return new WaitingWork(study, fold, selected);
   }
 
-  private BacktestExperimentCreateRequest request(
-      WalkForwardStudyRow study, WalkForwardFoldRow fold) {
-    BacktestExperimentCreateRequest q = new BacktestExperimentCreateRequest();
-    q.setDatasetId(study.datasetId);
-    q.setStrategyCode(study.strategyCode);
-    q.setStrategyVersion(study.strategyVersion);
-    q.setParameterGrid(readGrid(study.parameterGridJson));
-    q.setTrainingStartOpenTimeInclusive(Instant.ofEpochMilli(fold.trainingStartOpenTimeMs));
-    q.setTrainingEndOpenTimeExclusive(Instant.ofEpochMilli(fold.trainingEndOpenTimeMs));
-    q.setValidationStartOpenTimeInclusive(Instant.ofEpochMilli(fold.validationStartOpenTimeMs));
-    q.setValidationEndOpenTimeExclusive(Instant.ofEpochMilli(fold.validationEndOpenTimeMs));
-    q.setOrderAmount(study.orderAmount);
-    q.setFeeRate(study.feeRate);
-    q.setForceCloseAtEnd(study.forceCloseAtEnd);
-    return q;
+  private void processWaiting(WaitingWork work, BacktestRunRow validation) {
+    WalkForwardFoldRow fold = work.fold;
+    try {
+      if (validation == null || !"COMPLETED".equals(validation.status))
+        throw new WalkForwardTaskException("WALK_FORWARD_SELECTED_VALIDATION_FAILED", "selected validation run is not completed");
+      int affected = folds.completeSelection(fold.foldId, work.selected.candidateId, work.selected.parametersJson, work.selected.trainingRunId, work.selected.validationRunId, work.selected.metricValue, Instant.now());
+      expectSingle("completeSelection", work.study, fold, affected);
+    } catch (RuntimeException failure) {
+      handleFailure(work.study, fold, failure);
+    }
+  }
+
+  private void claimNext(WalkForwardStudyRow study) {
+    String token = UUID.randomUUID().toString();
+    int affected = folds.claimNextPending(study.studyId, token, Instant.now());
+    if (affected > 1) throw stateConflict("claimNextPending affected more than one row");
+    log.info("operation=claimNextPending studyId={} affectedRows={} result={}", study.studyId, affected, affected == 1 ? "claimed" : "cas_lost");
+  }
+
+  private void handleFailure(WalkForwardStudyRow study, WalkForwardFoldRow fold, RuntimeException failure) {
+    WalkForwardDispatchErrorClassifier.Classification classified = WalkForwardDispatchErrorClassifier.classify(failure);
+    if (classified.kind() == WalkForwardDispatchErrorClassifier.Kind.PERMANENT) {
+      markFailed(study, fold, classified);
+    } else {
+      if ("CREATING_EXPERIMENT".equals(fold.status) && fold.claimToken != null) {
+        int affected = folds.releaseCreationClaim(fold.foldId, fold.claimToken, Instant.now());
+        if (affected > 1) throw stateConflict("releaseCreationClaim affected more than one row");
+        log.warn("operation=releaseCreationClaim studyId={} foldId={} experimentId={} claimToken={} errorCode={} affectedRows={} result=retryable", study.studyId, fold.foldId, fold.experimentId, fold.claimToken, classified.errorCode(), affected);
+      } else {
+        log.warn("operation=walk-forward-dispatch studyId={} foldId={} experimentId={} errorCode={} affectedRows=0 result=retryable", study.studyId, fold.foldId, fold.experimentId, classified.errorCode(), failure);
+      }
+    }
+  }
+
+  private void markFailed(WalkForwardStudyRow study, WalkForwardFoldRow fold, WalkForwardDispatchErrorClassifier.Classification classified) {
+    int affected = folds.markFailed(fold.foldId, classified.errorCode(), classified.errorMessage(), Instant.now());
+    if (affected > 1) throw stateConflict("markFailed affected more than one row");
+    if (affected == 0) {
+      WalkForwardFoldRow current = folds.findByFoldId(fold.foldId);
+      log.warn("operation=markFailed studyId={} foldId={} experimentId={} errorCode={} affectedRows=0 result=cas_lost currentStatus={}", study.studyId, fold.foldId, fold.experimentId, classified.errorCode(), current == null ? "MISSING" : current.status);
+      return;
+    }
+    log.error("operation=markFailed studyId={} foldId={} experimentId={} errorCode={} affectedRows=1 result=failed", study.studyId, fold.foldId, fold.experimentId, classified.errorCode());
+  }
+
+  private void expectSingle(String operation, WalkForwardStudyRow study, WalkForwardFoldRow fold, int affected) {
+    if (affected > 1) throw stateConflict(operation + " affected more than one row");
+    log.info("operation={} studyId={} foldId={} experimentId={} claimToken={} affectedRows={} result={}", operation, study.studyId, fold.foldId, fold.experimentId, fold.claimToken, affected, affected == 1 ? "success" : "cas_lost");
+  }
+
+  private WalkForwardTrainingCandidateRow findBest(String experimentId, WalkForwardSelectionMetric metric, int minimumTrainTrades) {
+    return switch (metric) {
+      case TRAIN_TOTAL_RETURN_RATIO -> folds.findBestByTrainTotalReturnRatio(experimentId, minimumTrainTrades);
+      case TRAIN_PROFIT_FACTOR -> folds.findBestByTrainProfitFactor(experimentId, minimumTrainTrades);
+      case TRAIN_NET_PROFIT -> folds.findBestByTrainNetProfit(experimentId, minimumTrainTrades);
+      case TRAIN_WIN_RATE -> folds.findBestByTrainWinRate(experimentId, minimumTrainTrades);
+      case TRAIN_MAXIMUM_DRAWDOWN_RATIO -> folds.findBestByTrainMaximumDrawdownRatio(experimentId, minimumTrainTrades);
+    };
+  }
+
+  private BacktestExperimentCreateRequest request(WalkForwardStudyRow study, WalkForwardFoldRow fold) {
+    BacktestExperimentCreateRequest request = new BacktestExperimentCreateRequest();
+    request.setDatasetId(study.datasetId); request.setStrategyCode(study.strategyCode); request.setStrategyVersion(study.strategyVersion);
+    request.setParameterGrid(readGrid(study.parameterGridJson));
+    request.setTrainingStartOpenTimeInclusive(Instant.ofEpochMilli(fold.trainingStartOpenTimeMs)); request.setTrainingEndOpenTimeExclusive(Instant.ofEpochMilli(fold.trainingEndOpenTimeMs));
+    request.setValidationStartOpenTimeInclusive(Instant.ofEpochMilli(fold.validationStartOpenTimeMs)); request.setValidationEndOpenTimeExclusive(Instant.ofEpochMilli(fold.validationEndOpenTimeMs));
+    request.setOrderAmount(study.orderAmount); request.setFeeRate(study.feeRate); request.setForceCloseAtEnd(study.forceCloseAtEnd);
+    return request;
   }
 
   private Map<String, List<Integer>> readGrid(String value) {
-    try {
-      return json.readValue(value, new TypeReference<LinkedHashMap<String, List<Integer>>>() {});
-    } catch (Exception e) {
-      throw error("WALK_FORWARD_REQUEST_INVALID", "stored grid JSON is invalid");
-    }
+    try { return json.readValue(value, new TypeReference<LinkedHashMap<String, List<Integer>>>() {}); }
+    catch (Exception e) { throw new WalkForwardTaskException("WALK_FORWARD_EXPERIMENT_INVALID", "stored grid JSON is invalid"); }
   }
 
-  private void markFailed(WalkForwardFoldRow fold, String code, String message) {
-    folds.markFailed(fold.foldId, code, clean(message), Instant.now());
-  }
-
-  private boolean isPermanent(RuntimeException e, String code) {
-    return PERMANENT.contains(code);
-  }
-
-  private String code(RuntimeException e) {
-    return e instanceof WalkForwardTaskException w
-        ? w.getErrorCode()
-        : e instanceof BacktestTaskException b ? b.getErrorCode() : "WALK_FORWARD_DISPATCH_FAILED";
-  }
-
-  private String message(RuntimeException e) {
-    return clean(e.getMessage());
-  }
-
-  private String clean(String message) {
-    String value =
-        message == null ? "walk-forward dispatch failed" : message.replaceAll("[\\r\\n]", " ");
-    return value.substring(0, Math.min(1000, value.length()));
-  }
-
-  private WalkForwardTaskException error(String code, String message) {
-    return new WalkForwardTaskException(code, clean(message));
-  }
+  private WalkForwardTaskException stateConflict(String message) { return new WalkForwardTaskException("WALK_FORWARD_STATE_CONFLICT", message); }
+  private record WaitingWork(WalkForwardStudyRow study, WalkForwardFoldRow fold, WalkForwardTrainingCandidateRow selected) {}
 }

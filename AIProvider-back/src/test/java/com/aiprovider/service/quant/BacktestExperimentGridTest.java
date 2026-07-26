@@ -39,8 +39,10 @@ class BacktestExperimentGridTest {
         LinkedHashMap<String,List<Integer>> duplicate = new LinkedHashMap<>(); duplicate.put("a", List.of(1, 1)); duplicate.put("b", List.of(2));
         BacktestTaskException duplicateError = assertThrows(BacktestTaskException.class, () -> BacktestExperimentGrid.expand(duplicate, definition, 64));
         assertEquals("BACKTEST_EXPERIMENT_GRID_INVALID", duplicateError.getErrorCode());
-        LinkedHashMap<String,List<Integer>> tooMany = new LinkedHashMap<>(); tooMany.put("a", List.of(1,2,3,4,5)); tooMany.put("b", new ArrayList<>(java.util.stream.IntStream.rangeClosed(1,13).boxed().toList()));
-        assertThrows(BacktestTaskException.class, () -> BacktestExperimentGrid.expand(tooMany, definition, 64));
+    LinkedHashMap<String,List<Integer>> tooMany = new LinkedHashMap<>(); tooMany.put("a", List.of(1,2,3,4,5)); tooMany.put("b", new ArrayList<>(java.util.stream.IntStream.rangeClosed(1,13).boxed().toList()));
+    assertThrows(BacktestTaskException.class, () -> BacktestExperimentGrid.expand(tooMany, definition, 64));
+    BacktestTaskException capacity = assertThrows(BacktestTaskException.class, () -> BacktestExperimentGrid.candidateCount(tooMany, definition, 64));
+    assertEquals("WALK_FORWARD_TOO_LARGE", capacity.getErrorCode());
         LinkedHashMap<String,List<Integer>> unknown = new LinkedHashMap<>(); unknown.put("a", List.of(1)); unknown.put("c", List.of(1));
         assertThrows(BacktestTaskException.class, () -> BacktestExperimentGrid.expand(unknown, definition, 64));
     }

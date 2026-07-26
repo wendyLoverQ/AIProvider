@@ -58,8 +58,10 @@ public class WalkForwardStudyCreationService {
       throw error("WALK_FORWARD_REQUEST_INVALID", "strategy version is not supported");
     BacktestExperimentGrid.Result grid;
     try {
+      BacktestExperimentGrid.candidateCount(request.getParameterGrid(), definition, 64);
       grid = BacktestExperimentGrid.expand(request.getParameterGrid(), definition, 64);
     } catch (BacktestTaskException e) {
+      if ("WALK_FORWARD_TOO_LARGE".equals(e.getErrorCode())) throw e;
       throw error("WALK_FORWARD_REQUEST_INVALID", e.getMessage());
     }
     WalkForwardFoldGenerator.Result generated =

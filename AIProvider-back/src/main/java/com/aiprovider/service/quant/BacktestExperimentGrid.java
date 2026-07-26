@@ -9,6 +9,25 @@ import java.util.*;
 final class BacktestExperimentGrid {
     private BacktestExperimentGrid() {}
 
+    static int candidateCount(Map<String,List<Integer>> input, QuantStrategyDefinition definition, int maxCandidates) {
+        if (input == null || input.size() != definition.parameters().size()) invalid("parameter grid keys do not match strategy definition");
+        long total = 1;
+        for (StrategyParameterDefinition parameter : definition.parameters()) {
+            List<Integer> values = input.get(parameter.name());
+            if (values == null || values.isEmpty() || values.size() > 20
+                    || new HashSet<>(values).size() != values.size()
+                    || values.stream().anyMatch(value -> value == null || value < parameter.minValue() || value > parameter.maxValue())) {
+                invalid("invalid values for " + parameter.name());
+            }
+            try { total = Math.multiplyExact(total, values.size()); }
+            catch (ArithmeticException e) { tooLarge("candidate count overflow"); }
+        }
+        if (!new HashSet<>(input.keySet()).equals(new HashSet<>(definition.parameters().stream().map(StrategyParameterDefinition::name).toList())))
+            invalid("parameter grid keys do not match strategy definition");
+        if (total > maxCandidates || total > 64) tooLarge("candidate count exceeds capacity");
+        return (int) total;
+    }
+
     static Result expand(Map<String,List<Integer>> input, QuantStrategyDefinition definition, int maxCandidates) {
         if (input == null || input.size() != definition.parameters().size()) invalid("parameter grid keys do not match strategy definition");
         LinkedHashMap<String,List<Integer>> grid = new LinkedHashMap<>();
@@ -52,5 +71,6 @@ final class BacktestExperimentGrid {
     }
 
     private static void invalid(String message) { throw new BacktestTaskException("BACKTEST_EXPERIMENT_GRID_INVALID", message); }
+    private static void tooLarge(String message) { throw new BacktestTaskException("WALK_FORWARD_TOO_LARGE", message); }
     record Result(Map<String,List<Integer>> grid, List<Map<String,Integer>> combinations) {}
 }

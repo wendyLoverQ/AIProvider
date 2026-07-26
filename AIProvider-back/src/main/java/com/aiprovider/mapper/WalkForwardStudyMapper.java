@@ -2,6 +2,7 @@ package com.aiprovider.mapper;
 
 import com.aiprovider.mapper.row.WalkForwardStudyRow;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import org.apache.ibatis.annotations.*;
 
@@ -52,6 +53,13 @@ public interface WalkForwardStudyMapper {
 
   @ResultMap("walkForwardStudyRow")
   @Select(
+      "<script>SELECT "
+          + COLUMNS
+          + " FROM q_walk_forward_study WHERE StudyId IN <foreach collection='studyIds' item='studyId' open='(' separator=',' close=')'>#{studyId}</foreach></script>")
+  List<WalkForwardStudyRow> findByStudyIds(@Param("studyIds") Collection<String> studyIds);
+
+  @ResultMap("walkForwardStudyRow")
+  @Select(
       "SELECT "
           + COLUMNS
           + " FROM q_walk_forward_study WHERE Status IN ('QUEUED','RUNNING') ORDER BY CreatedAt"
@@ -96,10 +104,11 @@ public interface WalkForwardStudyMapper {
 
   @Update(
       "UPDATE q_walk_forward_study SET"
-          + " Status=#{status},ProgressPercent=#{progress},ErrorCode=#{errorCode},ErrorMessage=#{errorMessage},StartedAt=IF(#{status}='RUNNING',COALESCE(StartedAt,#{now}),StartedAt),FinishedAt=#{finishedAt},UpdatedAt=#{now}"
-          + " WHERE StudyId=#{studyId} AND Status IN ('QUEUED','RUNNING')")
+          + " Status=#{status},ProgressPercent=#{progress},ErrorCode=#{errorCode},ErrorMessage=#{errorMessage},StartedAt=IF(#{status}='RUNNING',COALESCE(StartedAt,#{now}),StartedAt),FinishedAt=IF(#{status} IN ('COMPLETED','COMPLETED_WITH_FAILURES','FAILED'),COALESCE(FinishedAt,#{finishedAt}),NULL),UpdatedAt=#{now}"
+          + " WHERE StudyId=#{studyId} AND Status=#{expectedStatus}")
   int updateAggregate(
       @Param("studyId") String studyId,
+      @Param("expectedStatus") String expectedStatus,
       @Param("status") String status,
       @Param("progress") java.math.BigDecimal progress,
       @Param("errorCode") String errorCode,

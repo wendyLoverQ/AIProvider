@@ -198,6 +198,7 @@ public class ApiExceptionHandler {
     int status;
     switch (exception.getErrorCode()) {
       case "WALK_FORWARD_NOT_FOUND":
+      case "WALK_FORWARD_EXPERIMENT_NOT_FOUND":
         status = 404;
         break;
       case "WALK_FORWARD_STATE_CONFLICT":

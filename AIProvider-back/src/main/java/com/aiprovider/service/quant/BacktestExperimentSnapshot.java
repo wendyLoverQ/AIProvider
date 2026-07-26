@@ -15,7 +15,7 @@ import java.util.Map;
 public record BacktestExperimentSnapshot(
     List<BacktestExperimentCandidateRow> candidates, Map<String, BacktestRunRow> runsById) {
 
-  private static final int MAX_RUN_IDS_PER_QUERY = 128;
+  private static final int MAX_RUN_IDS_PER_QUERY = 4096;
 
   public static BacktestExperimentSnapshot load(
       BacktestExperimentRow experiment,

@@ -39,16 +39,7 @@ final class WalkForwardFoldGenerator {
     long foldCountLong = (totalBars - request.getTrainingBars()) / request.getValidationBars();
     if (foldCountLong < 1 || foldCountLong > maxFolds)
       fail("WALK_FORWARD_TOO_LARGE", "fold count exceeds capacity");
-    long candidateCountLong = 1;
-    try {
-      for (List<Integer> values : request.getParameterGrid().values())
-        candidateCountLong = Math.multiplyExact(candidateCountLong, values.size());
-    } catch (ArithmeticException e) {
-      fail("WALK_FORWARD_TOO_LARGE", "candidate count overflow");
-      return null;
-    }
-    if (candidateCountLong > 64) fail("WALK_FORWARD_TOO_LARGE", "candidate count exceeds capacity");
-    int candidateCount = (int) candidateCountLong;
+    int candidateCount = BacktestExperimentGrid.candidateCount(request.getParameterGrid(), definition, 64);
     long totalChildren;
     try {
       totalChildren = Math.multiplyExact(Math.multiplyExact(foldCountLong, candidateCount), 2L);
