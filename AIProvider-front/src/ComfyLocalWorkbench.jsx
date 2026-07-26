@@ -2068,11 +2068,16 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
     if (!workflow || !entries.length) return;
     setBatchOperation((current) => ({ ...current, busy: true }));
     try {
-      const prepared = await Promise.all(entries.map(async ({ image }) => {
+      const prepared = await Promise.all(entries.map(async ({ item, image }) => {
         const blob = image.blob || await (await fetch(image.url)).blob();
-        const file = new File([blob], image.filename || image.path?.split(/[\\/]/).pop() || "input.png", { type: blob.type || "image/png" });
         const hash = await sha256Blob(blob);
-        return { file, hash, image };
+        return {
+          hash,
+          image,
+          source: item.source === "asset" ? "asset" : "gallery",
+          path: image.path,
+          fileName: image.filename || image.path?.split(/[\\/]/).pop() || "input.png",
+        };
       }));
       const duplicateResponse = await fetch("/api/comfy-tasks/duplicates", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -2096,8 +2101,10 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
       body.append("workflowBinding", JSON.stringify(workflow.binding));
       body.append("folder", folder);
       body.append("clientId", generateId());
-      body.append("inputSha256List", JSON.stringify(prepared.map((item) => item.hash)));
-      prepared.forEach((item) => body.append("sourceImages", item.file, item.file.name));
+      body.append("sourceImagesJson", JSON.stringify(prepared.map((item) => ({
+        source: item.source,
+        path: item.path,
+      }))));
       const response = await call("/api/generate/batch", { method: "POST", body }, 120000);
       const data = await readJson(response, "本机批量生成接口");
       if (!response.ok || !data.success || !Array.isArray(data.tasks) || data.tasks.length !== prepared.length)
@@ -2117,8 +2124,8 @@ export default function ComfyLocalWorkbench({ mode = "workbench", active = true 
         workflowName: workflow.name || workflow.id,
         promptSchemeName: appliedPresetTitle || "",
         promptMode: batchForm.promptMode || "tags",
-        inputSha256: prepared[index].hash,
-        inputImages: [{ key: "sourceImage", name: prepared[index].file.name, url: prepared[index].image.url }],
+        inputSha256: task.inputSha256 || prepared[index].hash,
+        inputImages: [{ key: "sourceImage", name: task.inputFileName || prepared[index].fileName, url: prepared[index].image.url }],
         finalOutputNodeId: task.finalOutputNodeId,
         progressPlan: createComfyProgressPlan(workflow.definition, [task.finalOutputNodeId]),
         progressDetail: null,

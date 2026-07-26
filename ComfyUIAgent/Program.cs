@@ -419,28 +419,37 @@ app.MapPost("/api/generate", async (HttpRequest request, IHttpClientFactory fact
 app.MapPost("/api/generate/batch", async (HttpRequest request, IHttpClientFactory factory) => {
     if (!request.HasFormContentType) return Results.BadRequest(new { success = false, message = "批量生成请求必须使用 multipart/form-data" });
     var form = await request.ReadFormAsync(request.HttpContext.RequestAborted);
-    var sourceFiles = form.Files.GetFiles("sourceImages");
-    var hashes = JsonSerializer.Deserialize<string[]>(form["inputSha256List"].ToString(), GalleryJsonOptions()) ?? Array.Empty<string>();
-    if (sourceFiles.Count == 0 || sourceFiles.Count > 1000 || hashes.Length != sourceFiles.Count)
-        return Results.BadRequest(new { success = false, message = "批量图片和 SHA-256 列表数量不一致，或超出 1000 张限制" });
-    if (hashes.Any(hash => hash == null || !System.Text.RegularExpressions.Regex.IsMatch(hash, "^[0-9a-fA-F]{64}$")))
-        return Results.BadRequest(new { success = false, message = "批量图片 SHA-256 无效" });
+    BatchSourceImage[] sourceImages;
+    try {
+        sourceImages = JsonSerializer.Deserialize<BatchSourceImage[]>(form["sourceImagesJson"].ToString(), GalleryJsonOptions())
+            ?? Array.Empty<BatchSourceImage>();
+    } catch (JsonException exception) {
+        return Results.BadRequest(new { success = false, message = $"批量图片地址无效：{exception.Message}" });
+    }
+    if (sourceImages.Length == 0 || sourceImages.Length > 1000)
+        return Results.BadRequest(new { success = false, message = "批量图片地址数量必须在 1 到 1000 之间" });
 
     var commonFields = form.ToDictionary(entry => entry.Key, entry => entry.Value);
-    var preparedItems = new PreparedGeneration?[sourceFiles.Count];
-    var preparationErrors = new IResult?[sourceFiles.Count];
-    await Parallel.ForEachAsync(Enumerable.Range(0, sourceFiles.Count), new ParallelOptions {
-        MaxDegreeOfParallelism = Math.Min(4, sourceFiles.Count),
+    var preparedItems = new PreparedGeneration?[sourceImages.Length];
+    var preparationErrors = new IResult?[sourceImages.Length];
+    await Parallel.ForEachAsync(Enumerable.Range(0, sourceImages.Length), new ParallelOptions {
+        MaxDegreeOfParallelism = Math.Min(4, sourceImages.Length),
         CancellationToken = request.HttpContext.RequestAborted
     }, async (index, _) => {
-        var source = sourceFiles[index];
-        var hash = hashes[index].ToLowerInvariant();
-        var extension = Path.GetExtension(source.FileName);
-        var uniqueName = $"{Path.GetFileNameWithoutExtension(source.FileName)}_{hash[..12]}{extension}";
-        await using var sourceStream = source.OpenReadStream();
-        var childFile = new FormFile(sourceStream, 0, source.Length, "sourceImage", uniqueName) {
-            Headers = source.Headers,
-            ContentType = source.ContentType
+        var source = sourceImages[index];
+        var sourcePath = string.Equals(source.Source, "asset", StringComparison.OrdinalIgnoreCase)
+            ? ResolveAssetPath(source.Path ?? "")
+            : string.Equals(source.Source, "gallery", StringComparison.OrdinalIgnoreCase)
+                ? ResolveGalleryPath(source.Path ?? "", mustExist: true)
+                : throw new InvalidOperationException("批量图片来源仅支持 asset 或 gallery");
+        var hash = FileSha256(sourcePath).ToLowerInvariant();
+        var sourceName = Path.GetFileName(sourcePath);
+        var extension = Path.GetExtension(sourceName);
+        var uniqueName = $"{Path.GetFileNameWithoutExtension(sourceName)}_{hash[..12]}{extension}";
+        await using var sourceStream = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var childFile = new FormFile(sourceStream, 0, sourceStream.Length, "sourceImage", uniqueName) {
+            Headers = new HeaderDictionary(),
+            ContentType = GalleryMediaContentType(sourcePath)
         };
         var childFiles = new FormFileCollection { childFile };
         var childFields = new Dictionary<string, Microsoft.Extensions.Primitives.StringValues>(commonFields) {
@@ -448,7 +457,7 @@ app.MapPost("/api/generate/batch", async (HttpRequest request, IHttpClientFactor
         };
         var prepared = await PrepareGeneration(new FormCollection(childFields, childFiles), factory);
         preparationErrors[index] = prepared.Error;
-        if (prepared.Value != null) preparedItems[index] = prepared.Value with { InputSha256 = hash, InputFileName = source.FileName };
+        if (prepared.Value != null) preparedItems[index] = prepared.Value with { InputSha256 = hash, InputFileName = sourceName };
     });
     var preparationError = preparationErrors.FirstOrDefault(error => error != null);
     if (preparationError != null) return preparationError;
@@ -1992,6 +2001,7 @@ sealed record ImageMigrationFile(string Source, string Target, string Sha256);
 sealed record ImageMigrationPlan(List<ImageMigrationFile> Files, string? Error);
 sealed record PreparedGeneration(BridgeQueuedGeneration QueueItem, string PromptId, string FinalOutputNodeId, long? ActualSeed, int? Width, int? Height, string? InputSha256, string? InputFileName);
 sealed record GenerationPreparation(PreparedGeneration? Value, IResult? Error);
+sealed class BatchSourceImage { public string? Source { get; set; } public string? Path { get; set; } }
 sealed class AssetPathRequest { public string? Path { get; set; } }
 sealed class HistoryMoveRequest { public string[] PromptIds { get; set; } = Array.Empty<string>(); public string? Folder { get; set; } }
 class GalleryPathsRequest { public string[] Paths { get; set; } = Array.Empty<string>(); }

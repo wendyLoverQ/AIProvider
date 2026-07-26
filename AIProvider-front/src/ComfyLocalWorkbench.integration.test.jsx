@@ -854,8 +854,11 @@ describe("Comfy image generation flow", () => {
     await waitFor(() => expect(bridgeBatchBody).toBeInstanceOf(FormData));
     expect(duplicateBatchBody.workflowId).toBe(cutoutWorkflow.id);
     expect(duplicateBatchBody.inputSha256List).toHaveLength(2);
-    expect(bridgeBatchBody.getAll("sourceImages")).toHaveLength(2);
-    expect(JSON.parse(bridgeBatchBody.get("inputSha256List"))).toHaveLength(2);
+    expect(bridgeBatchBody.getAll("sourceImages")).toHaveLength(0);
+    expect(JSON.parse(bridgeBatchBody.get("sourceImagesJson"))).toEqual([
+      { source: "gallery", path: "aimaid/done.png" },
+      { source: "gallery", path: "aimaid/done-2.png" },
+    ]);
     await waitFor(() => expect(taskRecordBatchBody).toHaveLength(2));
     expect(taskRecordBatchBody.map((item) => item.promptId)).toEqual(["batch-prompt-1", "batch-prompt-2"]);
     expect(screen.getByText("批量操作已一次提交 2 个任务")).toBeTruthy();
