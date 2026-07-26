@@ -7,62 +7,498 @@ import com.aiprovider.quant.market.history.model.MarketDataset;
 import com.aiprovider.quant.strategy.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.*;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class BacktestExperimentService {
-    private static final int MAX_CANDIDATES=64;
-    private final BacktestExperimentMapper experiments; private final BacktestExperimentCandidateMapper candidates;
-    private final BacktestRunMapper runs; private final com.aiprovider.quant.market.history.port.MarketDatasetRepository datasets;
-    private final StrategyRegistry strategies; private final ObjectMapper json; private final int maxCandidates;
-    public BacktestExperimentService(BacktestExperimentMapper e,BacktestExperimentCandidateMapper c,BacktestRunMapper r,com.aiprovider.quant.market.history.port.MarketDatasetRepository d,StrategyRegistry s,ObjectMapper j,com.aiprovider.config.quant.QuantExperimentProperties p){experiments=e;candidates=c;runs=r;datasets=d;strategies=s;json=j;maxCandidates=p.getMaxCandidates();}
+  private static final int MAX_CANDIDATES = 64;
+  private final BacktestExperimentMapper experiments;
+  private final BacktestExperimentCandidateMapper candidates;
+  private final BacktestRunMapper runs;
+  private final com.aiprovider.quant.market.history.port.MarketDatasetRepository datasets;
+  private final StrategyRegistry strategies;
+  private final ObjectMapper json;
+  private final int maxCandidates;
 
-    @Transactional
-    public BacktestExperimentDtos.CreateResponse create(BacktestExperimentCreateRequest q){
-        validateRequest(q); MarketDataset dataset=datasets.findById(q.getDatasetId());
-        if(dataset==null)throw error("BACKTEST_EXPERIMENT_RANGE_INVALID","datasetId not found");
-        QuantStrategyDefinition definition;
-        try{definition=strategies.get(q.getStrategyCode().trim());}catch(StrategyException e){throw error("BACKTEST_EXPERIMENT_GRID_INVALID",e.getMessage());}
-        if(!definition.version().equals(q.getStrategyVersion().trim()))throw error("BACKTEST_EXPERIMENT_GRID_INVALID","strategy version is not supported");
-        BacktestExperimentGrid.Result gridResult=BacktestExperimentGrid.expand(q.getParameterGrid(),definition,maxCandidates);
-        Map<String,List<Integer>> grid=gridResult.grid();
-        List<Map<String,Integer>> combinations=gridResult.combinations();
-        validateRange(dataset,q,combinations,definition);
-        Instant now=Instant.now(); BacktestExperimentRow row=new BacktestExperimentRow(); row.experimentId=UUID.randomUUID().toString(); row.datasetId=q.getDatasetId();
-        row.provider=dataset.getProvider().name();row.marketType=dataset.getMarketType().name();row.dataType=dataset.getDataType().name();row.symbol=dataset.getSymbol();row.intervalCode=dataset.getInterval().code();row.strategyCode=q.getStrategyCode().trim();row.strategyVersion=q.getStrategyVersion().trim();row.parameterGridJson=write(grid);row.candidateCount=combinations.size();
-        row.trainingStartOpenTimeMs=q.getTrainingStartOpenTimeInclusive().toEpochMilli();row.trainingEndOpenTimeMs=q.getTrainingEndOpenTimeExclusive().toEpochMilli();row.validationStartOpenTimeMs=q.getValidationStartOpenTimeInclusive().toEpochMilli();row.validationEndOpenTimeMs=q.getValidationEndOpenTimeExclusive().toEpochMilli();row.orderAmount=q.getOrderAmount();row.feeRate=q.getFeeRate();row.forceCloseAtEnd=true;row.createdAt=now;row.updatedAt=now;
-        if(experiments.insert(row)!=1)throw error("BACKTEST_EXPERIMENT_STATE_CONFLICT","experiment insert affected an unexpected number of rows");
-        List<BacktestExperimentCandidateRow> rows=new ArrayList<>(); for(int i=0;i<combinations.size();i++){BacktestExperimentCandidateRow c=new BacktestExperimentCandidateRow();c.candidateId=UUID.randomUUID().toString();c.experimentId=row.experimentId;c.candidateIndex=i;c.parametersJson=write(combinations.get(i));c.trainingRunId=UUID.randomUUID().toString();c.validationRunId=UUID.randomUUID().toString();c.createdAt=now;c.updatedAt=now;rows.add(c);} if(candidates.insertBatch(rows)!=rows.size())throw error("BACKTEST_EXPERIMENT_STATE_CONFLICT","candidate insert affected an unexpected number of rows");
-        return new BacktestExperimentDtos.CreateResponse(row.experimentId,row.candidateCount,row.candidateCount*2);
+  public BacktestExperimentService(
+      BacktestExperimentMapper e,
+      BacktestExperimentCandidateMapper c,
+      BacktestRunMapper r,
+      com.aiprovider.quant.market.history.port.MarketDatasetRepository d,
+      StrategyRegistry s,
+      ObjectMapper j,
+      com.aiprovider.config.quant.QuantExperimentProperties p) {
+    experiments = e;
+    candidates = c;
+    runs = r;
+    datasets = d;
+    strategies = s;
+    json = j;
+    maxCandidates = p.getMaxCandidates();
+  }
+
+  @Transactional
+  public BacktestExperimentDtos.CreateResponse create(BacktestExperimentCreateRequest q) {
+    validateRequest(q);
+    MarketDataset dataset = datasets.findById(q.getDatasetId());
+    if (dataset == null) throw error("BACKTEST_EXPERIMENT_RANGE_INVALID", "datasetId not found");
+    QuantStrategyDefinition definition;
+    try {
+      definition = strategies.get(q.getStrategyCode().trim());
+    } catch (StrategyException e) {
+      throw error("BACKTEST_EXPERIMENT_GRID_INVALID", e.getMessage());
     }
-    public BacktestDtos.Page<BacktestExperimentDtos.ExperimentSummary> page(int page,int size,String status,String symbol,String strategyCode){validatePage(page,size);long offset=offset(page,size);String s=clean(status,true),sym=clean(symbol,true),code=clean(strategyCode,false);if(s!=null&&!Set.of("QUEUED","RUNNING","COMPLETED","COMPLETED_WITH_FAILURES","FAILED").contains(s))throw error("BACKTEST_EXPERIMENT_REQUEST_INVALID","status is invalid");List<BacktestExperimentRow> rows=experiments.findPage(s,sym,code,size,(int)offset);Map<String,BacktestExperimentSnapshot> snapshots=BacktestExperimentSnapshot.loadMany(rows,candidates,runs);return new BacktestDtos.Page<>(rows.stream().map(row->summary(row,snapshots.get(row.experimentId))).toList(),experiments.count(s,sym,code),page,size);}
-    public BacktestExperimentDtos.ExperimentSummary get(String id){return refresh(require(id));}
-    public BacktestDtos.Page<BacktestExperimentDtos.CandidateResult> candidates(String id,int page,int size,String sortBy,String order){BacktestExperimentRow experiment=require(id);if(page<1||size<1||size>100)throw error("BACKTEST_EXPERIMENT_REQUEST_INVALID","page/pageSize invalid");String sb=sortBy==null?"CANDIDATE_INDEX":sortBy.toUpperCase(Locale.ROOT),ord=order==null?"ASC":order.toUpperCase(Locale.ROOT);if(!candidateSorts().contains(sb)||!(ord.equals("ASC")||ord.equals("DESC")))throw error("BACKTEST_EXPERIMENT_REQUEST_INVALID","sortBy/order is invalid");long offset=offset(page,size);List<BacktestExperimentCandidateRow> rows=candidates.findPageSorted(id,size,(int)offset,sortExpression(sb),ord);BacktestExperimentSnapshot snapshot=load(experiment,rows);return new BacktestDtos.Page<>(rows.stream().map(c->candidate(c,snapshot)).toList(),candidates.count(id),page,size);}
-    private BacktestExperimentDtos.ExperimentSummary refresh(BacktestExperimentRow row){BacktestExperimentSnapshot snapshot=load(row);BacktestExperimentAggregate.Result result=aggregate(snapshot);if(!result.status().equals(row.status)){Instant now=Instant.now();if(experiments.updateAggregate(row.experimentId,result.status(),terminal(result.status())?now:null,summaryErrorCode(snapshot,result),summaryErrorMessage(snapshot,result),now)!=1)throw error("BACKTEST_EXPERIMENT_STATE_CONFLICT","aggregate update affected an unexpected number of rows");row=require(row.experimentId);}return summary(row,snapshot);}
-    private Set<String> candidateSorts(){return Set.of("CANDIDATE_INDEX","TRAIN_TOTAL_RETURN_RATIO","VALIDATION_TOTAL_RETURN_RATIO","TRAIN_MAXIMUM_DRAWDOWN_RATIO","VALIDATION_MAXIMUM_DRAWDOWN_RATIO","TRAIN_PROFIT_FACTOR","VALIDATION_PROFIT_FACTOR","TRAIN_NET_PROFIT","VALIDATION_NET_PROFIT","TRAIN_WIN_RATE","VALIDATION_WIN_RATE","TRAIN_TRADE_COUNT","VALIDATION_TRADE_COUNT");}
-    private String sortExpression(String s){return switch(s){case "CANDIDATE_INDEX"->"c.CandidateIndex";case "TRAIN_TOTAL_RETURN_RATIO"->"tr.TotalReturnRatio";case "VALIDATION_TOTAL_RETURN_RATIO"->"vr.TotalReturnRatio";case "TRAIN_MAXIMUM_DRAWDOWN_RATIO"->"tr.MaximumDrawdownRatio";case "VALIDATION_MAXIMUM_DRAWDOWN_RATIO"->"vr.MaximumDrawdownRatio";case "TRAIN_PROFIT_FACTOR"->"tr.ProfitFactor";case "VALIDATION_PROFIT_FACTOR"->"vr.ProfitFactor";case "TRAIN_NET_PROFIT"->"tr.NetProfit";case "VALIDATION_NET_PROFIT"->"vr.NetProfit";case "TRAIN_WIN_RATE"->"tr.WinRate";case "VALIDATION_WIN_RATE"->"vr.WinRate";case "TRAIN_TRADE_COUNT"->"tr.TradeCount";case "VALIDATION_TRADE_COUNT"->"vr.TradeCount";default->throw error("BACKTEST_EXPERIMENT_REQUEST_INVALID","sortBy is invalid");};}
-    private BacktestExperimentSnapshot load(BacktestExperimentRow experiment){return BacktestExperimentSnapshot.load(experiment,candidates,runs);}
-    private BacktestExperimentSnapshot load(BacktestExperimentRow experiment,List<BacktestExperimentCandidateRow> pageRows){return BacktestExperimentSnapshot.load(pageRows,runs);}
-    private BacktestExperimentAggregate.Result aggregate(BacktestExperimentSnapshot snapshot){return BacktestExperimentAggregate.calculate(snapshot.candidates().size(),snapshot.candidates().stream().map(c->new BacktestExperimentAggregate.CandidateState(c.dispatchStatus,state(snapshot.run(c.trainingRunId)),state(snapshot.run(c.validationRunId)))).toList());}
-    private boolean terminal(String status){return Set.of("COMPLETED","COMPLETED_WITH_FAILURES","FAILED").contains(status);}
-    private String summaryErrorCode(BacktestExperimentSnapshot snapshot,BacktestExperimentAggregate.Result result){if(result.failedCandidates()==0)return null;for(BacktestExperimentCandidateRow c:snapshot.candidates()){if("FAILED".equals(c.dispatchStatus))return "BACKTEST_EXPERIMENT_DISPATCH_FAILED";if("FAILED".equals(status(snapshot.run(c.trainingRunId)))||"FAILED".equals(status(snapshot.run(c.validationRunId))))return "BACKTEST_EXPERIMENT_CHILD_RUN_FAILED";}return "BACKTEST_EXPERIMENT_CHILD_RUN_FAILED";}
-    private String summaryErrorMessage(BacktestExperimentSnapshot snapshot,BacktestExperimentAggregate.Result result){return result.failedCandidates()==0?null:"one or more experiment candidates failed";}
-    private String status(BacktestRunRow row){return row==null?null:row.status;}
-    private BacktestExperimentDtos.ExperimentSummary summary(BacktestExperimentRow r,BacktestExperimentSnapshot snapshot){BacktestExperimentAggregate.Result aggregate=aggregate(snapshot);return new BacktestExperimentDtos.ExperimentSummary(r.experimentId,r.datasetId,r.provider,r.marketType,r.dataType,r.symbol,r.intervalCode,r.strategyCode,r.strategyVersion,readGrid(r.parameterGridJson),r.candidateCount,Instant.ofEpochMilli(r.trainingStartOpenTimeMs),Instant.ofEpochMilli(r.trainingEndOpenTimeMs),Instant.ofEpochMilli(r.validationStartOpenTimeMs),Instant.ofEpochMilli(r.validationEndOpenTimeMs),r.orderAmount,r.feeRate,r.forceCloseAtEnd,aggregate.status(),aggregate.progressPercent(),aggregate.pendingCandidates(),aggregate.activeCandidates(),aggregate.completedCandidates(),aggregate.failedCandidates(),aggregate.completedLegs(),aggregate.failedLegs(),r.errorCode,r.errorMessage,r.createdAt,r.startedAt,r.finishedAt,r.updatedAt);}
-    private BacktestExperimentAggregate.RunState state(BacktestRunRow row){return row==null?new BacktestExperimentAggregate.RunState(false,null,BigDecimal.ZERO):new BacktestExperimentAggregate.RunState(true,row.status,row.progressPercent);}
-    private BacktestExperimentDtos.CandidateResult candidate(BacktestExperimentCandidateRow c,BacktestExperimentSnapshot snapshot){return new BacktestExperimentDtos.CandidateResult(c.candidateId,c.candidateIndex,read(c.parametersJson),c.dispatchStatus,segment("TRAIN",c.trainingRunId,c.dispatchStatus,c.errorCode,c.errorMessage,snapshot.run(c.trainingRunId)),segment("VALIDATION",c.validationRunId,c.dispatchStatus,c.errorCode,c.errorMessage,snapshot.run(c.validationRunId)));}
-    private BacktestExperimentDtos.SegmentResult segment(String type,String id,String dispatchStatus,String dispatchErrorCode,String dispatchErrorMessage,BacktestRunRow r){if(r==null){boolean failed="FAILED".equals(dispatchStatus);return new BacktestExperimentDtos.SegmentResult(type,id,failed?"FAILED":"NOT_CREATED",failed?BigDecimal.valueOf(100):BigDecimal.ZERO,failed?dispatchErrorCode:null,failed?dispatchErrorMessage:null,null,null,null,null,null);}BacktestDtos.Metrics m=new BacktestDtos.Metrics(r.tradeCount,r.winningTradeCount,r.losingTradeCount,r.breakEvenTradeCount,r.winRate,r.grossProfit,r.grossLoss,r.netProfit,r.totalReturnRatio,r.maximumDrawdownRatio,r.profitFactor,r.averageTradeReturnRatio,r.buyAndHoldReturnRatio,r.totalFees);return new BacktestExperimentDtos.SegmentResult(type,id,r.status,r.progressPercent,r.errorCode,r.errorMessage,r.barCount,r.tradeCount,m,r.startedAt,r.finishedAt);}
-    private BacktestExperimentRow require(String id){BacktestExperimentRow r=experiments.findByExperimentId(id);if(r==null)throw error("BACKTEST_EXPERIMENT_NOT_FOUND","experimentId not found");return r;}
-    private void validateRange(MarketDataset d,BacktestExperimentCreateRequest q,List<Map<String,Integer>> cs,QuantStrategyDefinition def){Instant ts=q.getTrainingStartOpenTimeInclusive(),te=q.getTrainingEndOpenTimeExclusive(),vs=q.getValidationStartOpenTimeInclusive(),ve=q.getValidationEndOpenTimeExclusive();if(d.getStatus()==null||!"CONTIGUOUS".equals(d.getStatus().name())||d.getInterval()==null||!d.getInterval().isFixedDuration()||d.getEarliestOpenTime()==null||d.getLatestOpenTime()==null||d.getCandleCount()<=0||d.getGapCount()!=0||d.getGapSegmentCount()!=0||d.getLastValidatedAt()==null||!ts.isBefore(te)||te.isAfter(vs)||!vs.isBefore(ve)||!aligned(d,ts)||!aligned(d,te)||!aligned(d,vs)||!aligned(d,ve)||ts.isBefore(d.getEarliestOpenTime())||ve.isAfter(d.getLatestOpenTime().plusMillis(d.getInterval().durationMillis())))throw error("BACKTEST_EXPERIMENT_RANGE_INVALID","experiment range is outside contiguous dataset coverage");long train=bars(d,ts,te),valid=bars(d,vs,ve);int min=cs.stream().mapToInt(def::minimumRequiredBars).max().orElse(Integer.MAX_VALUE);if(train<min||valid<min)throw error("BACKTEST_EXPERIMENT_RANGE_INVALID","range has fewer bars than strategy minimum");}
-    private boolean aligned(MarketDataset d,Instant i){return d.getInterval().isFixedDuration()&&d.getInterval().alignOpenTime(i).equals(i);}
-    private long bars(MarketDataset d,Instant s,Instant e){return Math.max(0,(e.toEpochMilli()-s.toEpochMilli())/d.getInterval().durationMillis());}
-    private void validateRequest(BacktestExperimentCreateRequest q){if(q==null||q.getDatasetId()<=0||blank(q.getStrategyCode())||blank(q.getStrategyVersion())||q.getParameterGrid()==null||q.getTrainingStartOpenTimeInclusive()==null||q.getTrainingEndOpenTimeExclusive()==null||q.getValidationStartOpenTimeInclusive()==null||q.getValidationEndOpenTimeExclusive()==null||q.getOrderAmount()==null||!decimal(q.getOrderAmount())||q.getOrderAmount().signum()<=0||q.getFeeRate()==null||!decimal(q.getFeeRate())||q.getFeeRate().signum()<0||q.getFeeRate().compareTo(new BigDecimal("0.01"))>0||!q.isForceCloseAtEnd())throw error("BACKTEST_EXPERIMENT_REQUEST_INVALID","invalid experiment request");}
-    private boolean decimal(BigDecimal v){if(v.scale()>18||v.precision()>38)return false;BigDecimal n=v.stripTrailingZeros();return Math.max(0,n.precision()-n.scale())<=20;}private boolean blank(String s){return s==null||s.trim().isEmpty();}
-    private String clean(String s,boolean upper){if(s==null||s.isBlank())return null;String v=s.trim();return upper?v.toUpperCase(Locale.ROOT):v;}private void validatePage(int p,int s){if(p<1||s<1||s>100)throw error("BACKTEST_EXPERIMENT_REQUEST_INVALID","page/pageSize invalid");}private long offset(int p,int s){try{long v=Math.multiplyExact((long)p-1,s);if(v>10_000_000)throw error("BACKTEST_EXPERIMENT_REQUEST_INVALID","page offset exceeds limit");return v;}catch(ArithmeticException e){throw error("BACKTEST_EXPERIMENT_REQUEST_INVALID","page offset overflow");}}
-    private String write(Object v){try{return json.writeValueAsString(v);}catch(Exception e){throw error("BACKTEST_EXPERIMENT_REQUEST_INVALID","JSON serialization failed");}}private Map<String,Integer> read(String v){try{return json.readValue(v,new TypeReference<LinkedHashMap<String,Integer>>(){});}catch(Exception e){throw error("BACKTEST_PERSISTENCE_FAILED","stored parameters JSON is invalid");}}private Map<String,List<Integer>> readGrid(String v){try{return json.readValue(v,new TypeReference<LinkedHashMap<String,List<Integer>>>(){});}catch(Exception e){throw error("BACKTEST_PERSISTENCE_FAILED","stored grid JSON is invalid");}}
-    private BacktestTaskException error(String c,String m){String text=(m==null?"experiment failed":m).replaceAll("[\\r\\n]"," ");return new BacktestTaskException(c,text.substring(0,Math.min(1000,text.length())));}
+    if (!definition.version().equals(q.getStrategyVersion().trim()))
+      throw error("BACKTEST_EXPERIMENT_GRID_INVALID", "strategy version is not supported");
+    BacktestExperimentGrid.Result gridResult =
+        BacktestExperimentGrid.expand(q.getParameterGrid(), definition, maxCandidates);
+    Map<String, List<Integer>> grid = gridResult.grid();
+    List<Map<String, Integer>> combinations = gridResult.combinations();
+    validateRange(dataset, q, combinations, definition);
+    Instant now = Instant.now();
+    BacktestExperimentRow row = new BacktestExperimentRow();
+    row.experimentId = UUID.randomUUID().toString();
+    row.datasetId = q.getDatasetId();
+    row.provider = dataset.getProvider().name();
+    row.marketType = dataset.getMarketType().name();
+    row.dataType = dataset.getDataType().name();
+    row.symbol = dataset.getSymbol();
+    row.intervalCode = dataset.getInterval().code();
+    row.strategyCode = q.getStrategyCode().trim();
+    row.strategyVersion = q.getStrategyVersion().trim();
+    row.parameterGridJson = write(grid);
+    row.candidateCount = combinations.size();
+    row.trainingStartOpenTimeMs = q.getTrainingStartOpenTimeInclusive().toEpochMilli();
+    row.trainingEndOpenTimeMs = q.getTrainingEndOpenTimeExclusive().toEpochMilli();
+    row.validationStartOpenTimeMs = q.getValidationStartOpenTimeInclusive().toEpochMilli();
+    row.validationEndOpenTimeMs = q.getValidationEndOpenTimeExclusive().toEpochMilli();
+    row.orderAmount = q.getOrderAmount();
+    row.feeRate = q.getFeeRate();
+    row.forceCloseAtEnd = true;
+    row.createdAt = now;
+    row.updatedAt = now;
+    if (experiments.insert(row) != 1)
+      throw error(
+          "BACKTEST_EXPERIMENT_STATE_CONFLICT",
+          "experiment insert affected an unexpected number of rows");
+    List<BacktestExperimentCandidateRow> rows = new ArrayList<>();
+    for (int i = 0; i < combinations.size(); i++) {
+      BacktestExperimentCandidateRow c = new BacktestExperimentCandidateRow();
+      c.candidateId = UUID.randomUUID().toString();
+      c.experimentId = row.experimentId;
+      c.candidateIndex = i;
+      c.parametersJson = write(combinations.get(i));
+      c.trainingRunId = UUID.randomUUID().toString();
+      c.validationRunId = UUID.randomUUID().toString();
+      c.createdAt = now;
+      c.updatedAt = now;
+      rows.add(c);
+    }
+    if (candidates.insertBatch(rows) != rows.size())
+      throw error(
+          "BACKTEST_EXPERIMENT_STATE_CONFLICT",
+          "candidate insert affected an unexpected number of rows");
+    return new BacktestExperimentDtos.CreateResponse(
+        row.experimentId, row.candidateCount, row.candidateCount * 2);
+  }
+
+  public BacktestDtos.Page<BacktestExperimentDtos.ExperimentSummary> page(
+      int page, int size, String status, String symbol, String strategyCode) {
+    validatePage(page, size);
+    long offset = offset(page, size);
+    String s = clean(status, true), sym = clean(symbol, true), code = clean(strategyCode, false);
+    if (s != null
+        && !Set.of("QUEUED", "RUNNING", "COMPLETED", "COMPLETED_WITH_FAILURES", "FAILED")
+            .contains(s)) throw error("BACKTEST_EXPERIMENT_REQUEST_INVALID", "status is invalid");
+    List<BacktestExperimentRow> rows = experiments.findPage(s, sym, code, size, (int) offset);
+    Map<String, BacktestExperimentSnapshot> snapshots =
+        BacktestExperimentSnapshot.loadMany(rows, candidates, runs);
+    return new BacktestDtos.Page<>(
+        rows.stream().map(row -> summary(row, snapshots.get(row.experimentId))).toList(),
+        experiments.count(s, sym, code),
+        page,
+        size);
+  }
+
+  public BacktestExperimentDtos.ExperimentSummary get(String id) {
+    return refresh(require(id));
+  }
+
+  public BacktestDtos.Page<BacktestExperimentDtos.CandidateResult> candidates(
+      String id, int page, int size, String sortBy, String order) {
+    BacktestExperimentRow experiment = require(id);
+    if (page < 1 || size < 1 || size > 100)
+      throw error("BACKTEST_EXPERIMENT_REQUEST_INVALID", "page/pageSize invalid");
+    String sb = sortBy == null ? "CANDIDATE_INDEX" : sortBy.toUpperCase(Locale.ROOT),
+        ord = order == null ? "ASC" : order.toUpperCase(Locale.ROOT);
+    if (!candidateSorts().contains(sb) || !(ord.equals("ASC") || ord.equals("DESC")))
+      throw error("BACKTEST_EXPERIMENT_REQUEST_INVALID", "sortBy/order is invalid");
+    long offset = offset(page, size);
+    List<BacktestExperimentCandidateRow> rows =
+        candidates.findPageSorted(id, size, (int) offset, sortExpression(sb), ord);
+    BacktestExperimentSnapshot snapshot = load(experiment, rows);
+    return new BacktestDtos.Page<>(
+        rows.stream().map(c -> candidate(c, snapshot)).toList(), candidates.count(id), page, size);
+  }
+
+  private BacktestExperimentDtos.ExperimentSummary refresh(BacktestExperimentRow row) {
+    BacktestExperimentSnapshot snapshot = load(row);
+    BacktestExperimentAggregate.Result result = aggregate(snapshot);
+    if (!result.status().equals(row.status)) {
+      Instant now = Instant.now();
+      if (experiments.updateAggregate(
+              row.experimentId,
+              result.status(),
+              terminal(result.status()) ? now : null,
+              summaryErrorCode(snapshot, result),
+              summaryErrorMessage(snapshot, result),
+              now)
+          != 1)
+        throw error(
+            "BACKTEST_EXPERIMENT_STATE_CONFLICT",
+            "aggregate update affected an unexpected number of rows");
+      row = require(row.experimentId);
+    }
+    return summary(row, snapshot);
+  }
+
+  private Set<String> candidateSorts() {
+    return Set.of(
+        "CANDIDATE_INDEX",
+        "TRAIN_TOTAL_RETURN_RATIO",
+        "VALIDATION_TOTAL_RETURN_RATIO",
+        "TRAIN_MAXIMUM_DRAWDOWN_RATIO",
+        "VALIDATION_MAXIMUM_DRAWDOWN_RATIO",
+        "TRAIN_PROFIT_FACTOR",
+        "VALIDATION_PROFIT_FACTOR",
+        "TRAIN_NET_PROFIT",
+        "VALIDATION_NET_PROFIT",
+        "TRAIN_WIN_RATE",
+        "VALIDATION_WIN_RATE",
+        "TRAIN_TRADE_COUNT",
+        "VALIDATION_TRADE_COUNT");
+  }
+
+  private String sortExpression(String s) {
+    return switch (s) {
+      case "CANDIDATE_INDEX" -> "c.CandidateIndex";
+      case "TRAIN_TOTAL_RETURN_RATIO" -> "tr.TotalReturnRatio";
+      case "VALIDATION_TOTAL_RETURN_RATIO" -> "vr.TotalReturnRatio";
+      case "TRAIN_MAXIMUM_DRAWDOWN_RATIO" -> "tr.MaximumDrawdownRatio";
+      case "VALIDATION_MAXIMUM_DRAWDOWN_RATIO" -> "vr.MaximumDrawdownRatio";
+      case "TRAIN_PROFIT_FACTOR" -> "tr.ProfitFactor";
+      case "VALIDATION_PROFIT_FACTOR" -> "vr.ProfitFactor";
+      case "TRAIN_NET_PROFIT" -> "tr.NetProfit";
+      case "VALIDATION_NET_PROFIT" -> "vr.NetProfit";
+      case "TRAIN_WIN_RATE" -> "tr.WinRate";
+      case "VALIDATION_WIN_RATE" -> "vr.WinRate";
+      case "TRAIN_TRADE_COUNT" -> "tr.TradeCount";
+      case "VALIDATION_TRADE_COUNT" -> "vr.TradeCount";
+      default -> throw error("BACKTEST_EXPERIMENT_REQUEST_INVALID", "sortBy is invalid");
+    };
+  }
+
+  private BacktestExperimentSnapshot load(BacktestExperimentRow experiment) {
+    return BacktestExperimentSnapshot.load(experiment, candidates, runs);
+  }
+
+  private BacktestExperimentSnapshot load(
+      BacktestExperimentRow experiment, List<BacktestExperimentCandidateRow> pageRows) {
+    return BacktestExperimentSnapshot.load(pageRows, runs);
+  }
+
+  private BacktestExperimentAggregate.Result aggregate(BacktestExperimentSnapshot snapshot) {
+    return BacktestExperimentAggregate.calculate(
+        snapshot.candidates().size(),
+        snapshot.candidates().stream()
+            .map(
+                c ->
+                    new BacktestExperimentAggregate.CandidateState(
+                        c.dispatchStatus,
+                        state(snapshot.run(c.trainingRunId)),
+                        state(snapshot.run(c.validationRunId))))
+            .toList());
+  }
+
+  private boolean terminal(String status) {
+    return Set.of("COMPLETED", "COMPLETED_WITH_FAILURES", "FAILED").contains(status);
+  }
+
+  private String summaryErrorCode(
+      BacktestExperimentSnapshot snapshot, BacktestExperimentAggregate.Result result) {
+    if (result.failedCandidates() == 0) return null;
+    for (BacktestExperimentCandidateRow c : snapshot.candidates()) {
+      if ("FAILED".equals(c.dispatchStatus)) return "BACKTEST_EXPERIMENT_DISPATCH_FAILED";
+      if ("FAILED".equals(status(snapshot.run(c.trainingRunId)))
+          || "FAILED".equals(status(snapshot.run(c.validationRunId))))
+        return "BACKTEST_EXPERIMENT_CHILD_RUN_FAILED";
+    }
+    return "BACKTEST_EXPERIMENT_CHILD_RUN_FAILED";
+  }
+
+  private String summaryErrorMessage(
+      BacktestExperimentSnapshot snapshot, BacktestExperimentAggregate.Result result) {
+    return result.failedCandidates() == 0 ? null : "one or more experiment candidates failed";
+  }
+
+  private String status(BacktestRunRow row) {
+    return row == null ? null : row.status;
+  }
+
+  private BacktestExperimentDtos.ExperimentSummary summary(
+      BacktestExperimentRow r, BacktestExperimentSnapshot snapshot) {
+    BacktestExperimentAggregate.Result aggregate = aggregate(snapshot);
+    return new BacktestExperimentDtos.ExperimentSummary(
+        r.experimentId,
+        r.datasetId,
+        r.provider,
+        r.marketType,
+        r.dataType,
+        r.symbol,
+        r.intervalCode,
+        r.strategyCode,
+        r.strategyVersion,
+        readGrid(r.parameterGridJson),
+        r.candidateCount,
+        Instant.ofEpochMilli(r.trainingStartOpenTimeMs),
+        Instant.ofEpochMilli(r.trainingEndOpenTimeMs),
+        Instant.ofEpochMilli(r.validationStartOpenTimeMs),
+        Instant.ofEpochMilli(r.validationEndOpenTimeMs),
+        r.orderAmount,
+        r.feeRate,
+        r.forceCloseAtEnd,
+        aggregate.status(),
+        aggregate.progressPercent(),
+        aggregate.pendingCandidates(),
+        aggregate.activeCandidates(),
+        aggregate.completedCandidates(),
+        aggregate.failedCandidates(),
+        aggregate.completedLegs(),
+        aggregate.failedLegs(),
+        r.errorCode,
+        r.errorMessage,
+        r.createdAt,
+        r.startedAt,
+        r.finishedAt,
+        r.updatedAt);
+  }
+
+  private BacktestExperimentAggregate.RunState state(BacktestRunRow row) {
+    return row == null
+        ? new BacktestExperimentAggregate.RunState(false, null, BigDecimal.ZERO)
+        : new BacktestExperimentAggregate.RunState(true, row.status, row.progressPercent);
+  }
+
+  private BacktestExperimentDtos.CandidateResult candidate(
+      BacktestExperimentCandidateRow c, BacktestExperimentSnapshot snapshot) {
+    return new BacktestExperimentDtos.CandidateResult(
+        c.candidateId,
+        c.candidateIndex,
+        read(c.parametersJson),
+        c.dispatchStatus,
+        segment(
+            "TRAIN",
+            c.trainingRunId,
+            c.dispatchStatus,
+            c.errorCode,
+            c.errorMessage,
+            snapshot.run(c.trainingRunId)),
+        segment(
+            "VALIDATION",
+            c.validationRunId,
+            c.dispatchStatus,
+            c.errorCode,
+            c.errorMessage,
+            snapshot.run(c.validationRunId)));
+  }
+
+  private BacktestExperimentDtos.SegmentResult segment(
+      String type,
+      String id,
+      String dispatchStatus,
+      String dispatchErrorCode,
+      String dispatchErrorMessage,
+      BacktestRunRow r) {
+    if (r == null) {
+      boolean failed = "FAILED".equals(dispatchStatus);
+      return new BacktestExperimentDtos.SegmentResult(
+          type,
+          id,
+          failed ? "FAILED" : "NOT_CREATED",
+          failed ? BigDecimal.valueOf(100) : BigDecimal.ZERO,
+          failed ? dispatchErrorCode : null,
+          failed ? dispatchErrorMessage : null,
+          null,
+          null,
+          null,
+          null,
+          null);
+    }
+    BacktestDtos.Metrics m =
+        new BacktestDtos.Metrics(
+            r.tradeCount,
+            r.winningTradeCount,
+            r.losingTradeCount,
+            r.breakEvenTradeCount,
+            r.winRate,
+            r.grossProfit,
+            r.grossLoss,
+            r.netProfit,
+            r.totalReturnRatio,
+            r.maximumDrawdownRatio,
+            r.profitFactor,
+            r.averageTradeReturnRatio,
+            r.buyAndHoldReturnRatio,
+            r.totalFees);
+    return new BacktestExperimentDtos.SegmentResult(
+        type,
+        id,
+        r.status,
+        r.progressPercent,
+        r.errorCode,
+        r.errorMessage,
+        r.barCount,
+        r.tradeCount,
+        m,
+        r.startedAt,
+        r.finishedAt);
+  }
+
+  private BacktestExperimentRow require(String id) {
+    BacktestExperimentRow r = experiments.findByExperimentId(id);
+    if (r == null) throw error("BACKTEST_EXPERIMENT_NOT_FOUND", "experimentId not found");
+    return r;
+  }
+
+  private void validateRange(
+      MarketDataset d,
+      BacktestExperimentCreateRequest q,
+      List<Map<String, Integer>> cs,
+      QuantStrategyDefinition def) {
+    Instant ts = q.getTrainingStartOpenTimeInclusive(),
+        te = q.getTrainingEndOpenTimeExclusive(),
+        vs = q.getValidationStartOpenTimeInclusive(),
+        ve = q.getValidationEndOpenTimeExclusive();
+    if (d.getStatus() == null
+        || !"CONTIGUOUS".equals(d.getStatus().name())
+        || d.getInterval() == null
+        || !d.getInterval().isFixedDuration()
+        || d.getEarliestOpenTime() == null
+        || d.getLatestOpenTime() == null
+        || d.getCandleCount() <= 0
+        || d.getGapCount() != 0
+        || d.getGapSegmentCount() != 0
+        || d.getLastValidatedAt() == null
+        || !ts.isBefore(te)
+        || te.isAfter(vs)
+        || !vs.isBefore(ve)
+        || !aligned(d, ts)
+        || !aligned(d, te)
+        || !aligned(d, vs)
+        || !aligned(d, ve)
+        || ts.isBefore(d.getEarliestOpenTime())
+        || ve.isAfter(d.getLatestOpenTime().plusMillis(d.getInterval().durationMillis())))
+      throw error(
+          "BACKTEST_EXPERIMENT_RANGE_INVALID",
+          "experiment range is outside contiguous dataset coverage");
+    long train = bars(d, ts, te), valid = bars(d, vs, ve);
+    int min = cs.stream().mapToInt(def::minimumRequiredBars).max().orElse(Integer.MAX_VALUE);
+    if (train < min || valid < min)
+      throw error(
+          "BACKTEST_EXPERIMENT_RANGE_INVALID", "range has fewer bars than strategy minimum");
+  }
+
+  private boolean aligned(MarketDataset d, Instant i) {
+    return d.getInterval().isFixedDuration() && d.getInterval().alignOpenTime(i).equals(i);
+  }
+
+  private long bars(MarketDataset d, Instant s, Instant e) {
+    return Math.max(0, (e.toEpochMilli() - s.toEpochMilli()) / d.getInterval().durationMillis());
+  }
+
+  private void validateRequest(BacktestExperimentCreateRequest q) {
+    if (q == null
+        || q.getDatasetId() <= 0
+        || blank(q.getStrategyCode())
+        || blank(q.getStrategyVersion())
+        || q.getParameterGrid() == null
+        || q.getTrainingStartOpenTimeInclusive() == null
+        || q.getTrainingEndOpenTimeExclusive() == null
+        || q.getValidationStartOpenTimeInclusive() == null
+        || q.getValidationEndOpenTimeExclusive() == null
+        || q.getOrderAmount() == null
+        || !decimal(q.getOrderAmount())
+        || q.getOrderAmount().signum() <= 0
+        || q.getFeeRate() == null
+        || !decimal(q.getFeeRate())
+        || q.getFeeRate().signum() < 0
+        || q.getFeeRate().compareTo(new BigDecimal("0.01")) > 0
+        || !q.isForceCloseAtEnd())
+      throw error("BACKTEST_EXPERIMENT_REQUEST_INVALID", "invalid experiment request");
+  }
+
+  private boolean decimal(BigDecimal v) {
+    if (v.scale() > 18 || v.precision() > 38) return false;
+    BigDecimal n = v.stripTrailingZeros();
+    return Math.max(0, n.precision() - n.scale()) <= 20;
+  }
+
+  private boolean blank(String s) {
+    return s == null || s.trim().isEmpty();
+  }
+
+  private String clean(String s, boolean upper) {
+    if (s == null || s.isBlank()) return null;
+    String v = s.trim();
+    return upper ? v.toUpperCase(Locale.ROOT) : v;
+  }
+
+  private void validatePage(int p, int s) {
+    if (p < 1 || s < 1 || s > 100)
+      throw error("BACKTEST_EXPERIMENT_REQUEST_INVALID", "page/pageSize invalid");
+  }
+
+  private long offset(int p, int s) {
+    try {
+      long v = Math.multiplyExact((long) p - 1, s);
+      if (v > 10_000_000)
+        throw error("BACKTEST_EXPERIMENT_REQUEST_INVALID", "page offset exceeds limit");
+      return v;
+    } catch (ArithmeticException e) {
+      throw error("BACKTEST_EXPERIMENT_REQUEST_INVALID", "page offset overflow");
+    }
+  }
+
+  private String write(Object v) {
+    try {
+      return json.writeValueAsString(v);
+    } catch (Exception e) {
+      throw error("BACKTEST_EXPERIMENT_REQUEST_INVALID", "JSON serialization failed");
+    }
+  }
+
+  private Map<String, Integer> read(String v) {
+    try {
+      return json.readValue(v, new TypeReference<LinkedHashMap<String, Integer>>() {});
+    } catch (Exception e) {
+      throw error("BACKTEST_PERSISTENCE_FAILED", "stored parameters JSON is invalid");
+    }
+  }
+
+  private Map<String, List<Integer>> readGrid(String v) {
+    try {
+      return json.readValue(v, new TypeReference<LinkedHashMap<String, List<Integer>>>() {});
+    } catch (Exception e) {
+      throw error("BACKTEST_PERSISTENCE_FAILED", "stored grid JSON is invalid");
+    }
+  }
+
+  private BacktestTaskException error(String c, String m) {
+    String text = (m == null ? "experiment failed" : m).replaceAll("[\\r\\n]", " ");
+    return new BacktestTaskException(c, text.substring(0, Math.min(1000, text.length())));
+  }
 }
