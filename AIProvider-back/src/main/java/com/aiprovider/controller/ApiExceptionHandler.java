@@ -148,9 +148,10 @@ public class ApiExceptionHandler {
     public ResponseEntity<Result<Void>> backtest(BacktestTaskException exception) {
         int status;
         switch (exception.getErrorCode()) {
-            case "BACKTEST_RUN_NOT_FOUND": case "BACKTEST_DATASET_NOT_FOUND": status=404; break;
+            case "BACKTEST_RUN_NOT_FOUND": case "BACKTEST_DATASET_NOT_FOUND": case "BACKTEST_EXPERIMENT_NOT_FOUND": status=404; break;
             case "BACKTEST_QUEUE_FULL": status=503; break;
-            case "BACKTEST_STATE_CONFLICT": status=409; break;
+            case "BACKTEST_STATE_CONFLICT": case "BACKTEST_EXPERIMENT_STATE_CONFLICT": case "BACKTEST_RUN_ID_CONFLICT": status=409; break;
+            case "BACKTEST_EXPERIMENT_DISPATCH_FAILED": status=500; break;
             case "BACKTEST_RESULT_INVALID": case "BACKTEST_EXECUTION_FAILED": case "BACKTEST_PERSISTENCE_FAILED": status=500; break;
             default: status=400;
         }

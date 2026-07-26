@@ -32,12 +32,26 @@ public class BacktestRunService {
         runs=r; trades=t; equity=e; datasets=d; snapshots=s; engine=b; strategies=g; persistence=p; failures=f; executor=x; json=j;
     }
     public String create(BacktestCreateRequest q) {
+        return createWithRunId(UUID.randomUUID().toString(), q);
+    }
+    String createWithRunId(String id, BacktestCreateRequest q) {
+        try { UUID.fromString(id); } catch (IllegalArgumentException e) { throw error("BACKTEST_RUN_ID_CONFLICT","runId must be a UUID"); }
         validate(q); String code=q.getStrategyCode().trim(), version=q.getStrategyVersion().trim();
         Map<String,Integer> params=q.getStrategyParameters()==null?Map.of():Map.copyOf(q.getStrategyParameters());
         var dataset=datasets.findById(q.getDatasetId()); if(dataset==null) throw error("BACKTEST_DATASET_NOT_FOUND","datasetId="+q.getDatasetId()+" not found");
         QuantStrategyDefinition def=definition(code); if(!def.version().equals(version)) throw error("BACKTEST_STRATEGY_VERSION_NOT_SUPPORTED","strategyCode="+code+" version="+version);
         try { def.minimumRequiredBars(params); } catch(StrategyException e) { throw error(e.getErrorCode(),e.getMessage()); }
-        String id=UUID.randomUUID().toString(); BacktestRunRow row=new BacktestRunRow(); row.runId=id; row.datasetId=q.getDatasetId();
+        BacktestRunRow existing=runs.findByRunId(id);
+        if(existing!=null) {
+            boolean same=existing.datasetId==q.getDatasetId() && existing.startOpenTimeMs==q.getStartOpenTimeInclusive().toEpochMilli()
+                    && existing.endOpenTimeExclusiveMs==q.getEndOpenTimeExclusive().toEpochMilli() && code.equals(existing.strategyCode)
+                    && version.equals(existing.strategyVersion) && Objects.equals(read(existing.requestedParametersJson),params)
+                    && Objects.equals(existing.orderAmount,q.getOrderAmount()) && Objects.equals(existing.feeRate,q.getFeeRate())
+                    && existing.forceCloseAtEnd==q.isForceCloseAtEnd();
+            if(!same) throw error("BACKTEST_RUN_ID_CONFLICT","runId already belongs to a different request");
+            return id;
+        }
+        BacktestRunRow row=new BacktestRunRow(); row.runId=id; row.datasetId=q.getDatasetId();
         row.provider=dataset.getProvider().name(); row.marketType=dataset.getMarketType().name(); row.dataType=dataset.getDataType().name(); row.symbol=dataset.getSymbol(); row.intervalCode=dataset.getInterval().code();
         row.startOpenTimeMs=q.getStartOpenTimeInclusive().toEpochMilli(); row.endOpenTimeExclusiveMs=q.getEndOpenTimeExclusive().toEpochMilli(); row.strategyCode=code; row.strategyVersion=version;
         row.requestedParametersJson=write(params); row.orderAmount=q.getOrderAmount(); row.feeRate=q.getFeeRate(); row.forceCloseAtEnd=q.isForceCloseAtEnd(); row.queuedAt=Instant.now(); row.updatedAt=row.queuedAt; runs.insert(row);

@@ -5,10 +5,12 @@ import com.aiprovider.quant.strategy.StrategyRegistry;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import java.util.concurrent.*;
 
 @Configuration
-@EnableConfigurationProperties(QuantBacktestProperties.class)
+@EnableScheduling
+@EnableConfigurationProperties({QuantBacktestProperties.class,QuantExperimentProperties.class})
 public class QuantBacktestConfiguration {
     @Bean public StrategyRegistry strategyRegistry() { return new StrategyRegistry(); }
     @Bean public BacktestEngine backtestEngine(StrategyRegistry registry) { return new BacktestEngine(registry); }
