@@ -31,7 +31,7 @@ const datasets = [{
 function setup(props = {}) {
   const onClose = vi.fn();
   const onCreated = vi.fn();
-  render(
+  const rendered = render(
     <QuantExperimentCreatePanel
       strategies={strategies}
       datasets={datasets}
@@ -40,7 +40,7 @@ function setup(props = {}) {
       {...props}
     />,
   );
-  return { onClose, onCreated };
+  return { onClose, onCreated, ...rendered };
 }
 
 function chooseRequiredValues() {
@@ -108,6 +108,7 @@ describe("QuantExperimentCreatePanel", () => {
     fireEvent.click(submit);
     expect(createExperiment).toHaveBeenCalledTimes(1);
     const body = createExperiment.mock.calls[0][0];
+    expect(createExperiment.mock.calls[0][1]).toBeInstanceOf(AbortSignal);
     expect(body).toEqual({
       datasetId: 1,
       strategyCode: "RSI_MEAN_REVERSION_LONG_ONLY",
@@ -135,6 +136,55 @@ describe("QuantExperimentCreatePanel", () => {
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("服务端拒绝该参数网格"));
     expect(screen.getByLabelText("rsiPeriod 候选值").value).toBe("14");
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["BACKTEST_EXPERIMENT_RANGE_INVALID：TRAIN 区间无效"],
+    ["BACKTEST_EXPERIMENT_GRID_INVALID：参数组合不合法"],
+  ])("preserves the backend validation message %s", async (message) => {
+    createExperiment.mockRejectedValue(new Error(message));
+    setup();
+    chooseRequiredValues();
+    fireEvent.click(screen.getByRole("button", { name: "按 70% / 30% 填充" }));
+    fireEvent.click(screen.getByRole("button", { name: "创建异步实验" }));
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(message),
+    );
+  });
+
+  it("shows the default-bars reference without claiming larger candidates are validated", () => {
+    setup();
+    chooseRequiredValues();
+    fireEvent.change(screen.getByLabelText("rsiPeriod 候选值"), {
+      target: { value: "100" },
+    });
+    expect(
+      screen.getByText(/默认参数最低需要 20 根 K 线；参数网格的最终最低 K 线要求由后端逐组合校验/),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "按 70% / 30% 填充" }));
+    expect(screen.getByText(/更大周期候选可能被后端拒绝/)).toBeTruthy();
+  });
+
+  it("aborts creation on unmount and ignores a late success", async () => {
+    let resolveRequest;
+    let requestSignal;
+    createExperiment.mockImplementation((_body, signal) => {
+      requestSignal = signal;
+      return new Promise((resolve) => {
+        resolveRequest = resolve;
+      });
+    });
+    const { onCreated, unmount } = setup();
+    chooseRequiredValues();
+    fireEvent.click(screen.getByRole("button", { name: "按 70% / 30% 填充" }));
+    fireEvent.click(screen.getByRole("button", { name: "创建异步实验" }));
+    expect(requestSignal.aborted).toBe(false);
+    unmount();
+    expect(requestSignal.aborted).toBe(true);
+    resolveRequest({ experimentId: "late", candidateCount: 1, totalLegs: 2 });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onCreated).not.toHaveBeenCalled();
   });
 
   it("rejects overlapping ranges and invalid decimal precision before submit", () => {

@@ -51,6 +51,7 @@ export default function QuantExperimentCreatePanel({
   datasets,
   onClose,
   onCreated,
+  onSavingChange = () => {},
 }) {
   const [datasetId, setDatasetId] = useState("");
   const [strategyCode, setStrategyCode] = useState("");
@@ -66,6 +67,8 @@ export default function QuantExperimentCreatePanel({
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
+  const requestRef = useRef(null);
+  const mountedRef = useRef(true);
 
   const dataset = datasets.find(
     (item) => String(item.id) === String(datasetId),
@@ -97,6 +100,14 @@ export default function QuantExperimentCreatePanel({
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onClose, saving]);
+
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+      requestRef.current?.abort();
+    },
+    [],
+  );
 
   const chooseStrategy = (code) => {
     const selected = strategies.find((item) => item.code === code);
@@ -161,7 +172,6 @@ export default function QuantExperimentCreatePanel({
         validationEnd: toUtcIso(ranges.validationEnd),
       },
       dataset,
-      strategy.minimumRequiredBars || 1,
     );
     if (rangeResult.error) {
       setError(rangeResult.error);
@@ -201,16 +211,30 @@ export default function QuantExperimentCreatePanel({
       forceCloseAtEnd: true,
     };
     savingRef.current = true;
+    const controller = new AbortController();
+    requestRef.current = controller;
     setSaving(true);
+    onSavingChange(true);
     try {
-      const created = await createExperiment(body);
-      onCreated(created);
+      const created = await createExperiment(body, controller.signal);
+      if (!mountedRef.current || controller.signal.aborted) return;
+      await onCreated(created);
+      if (!mountedRef.current || controller.signal.aborted) return;
       onClose();
     } catch (exception) {
-      setError(exception.message || "创建参数实验失败");
+      if (
+        mountedRef.current &&
+        exception.name !== "AbortError" &&
+        !controller.signal.aborted
+      )
+        setError(exception.message || "创建参数实验失败");
     } finally {
       savingRef.current = false;
-      setSaving(false);
+      if (requestRef.current === controller) requestRef.current = null;
+      if (mountedRef.current) {
+        setSaving(false);
+        onSavingChange(false);
+      }
     }
   };
 
@@ -290,6 +314,12 @@ export default function QuantExperimentCreatePanel({
             }
           />
         ))}
+        {strategy && (
+          <p className="backtest-help">
+            默认参数最低需要 {strategy.minimumRequiredBars} 根 K
+            线；参数网格的最终最低 K 线要求由后端逐组合校验。
+          </p>
+        )}
         <div className={`quant-experiment-count ${overLimit ? "invalid" : ""}`}>
           <strong>候选组合：{candidateCount ?? "—"}</strong>
           <span>
@@ -386,7 +416,9 @@ export default function QuantExperimentCreatePanel({
           </label>
         </div>
         <p className="backtest-help">
-          结束时固定强制平仓；TRAIN 用于参数研究，VALIDATION 为样本外区间。
+          结束时固定强制平仓；TRAIN 用于参数研究，VALIDATION
+          为样本外区间。70/30 切分仅按默认参数最低 K
+          线数检查，更大周期候选可能被后端拒绝，最终由后端逐组合校验。
         </p>
         {error && (
           <p className="backtest-inline-error" role="alert">

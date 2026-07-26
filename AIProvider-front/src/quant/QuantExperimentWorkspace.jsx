@@ -95,15 +95,24 @@ export default function QuantExperimentWorkspace() {
   });
   const [errors, setErrors] = useState({});
   const [showCreate, setShowCreate] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [visible, setVisible] = useState(
     () => document.visibilityState === "visible",
   );
   const createButtonRef = useRef(null);
   const aborts = useRef({});
-  const sequence = useRef({ list: 0, detail: 0, candidates: 0 });
+  const sequence = useRef({ shared: 0, list: 0, detail: 0, candidates: 0 });
   const polling = useRef(false);
   const selectedIdRef = useRef(initialRoute.experimentId);
+  const pollRouteRef = useRef({
+    candidatePage: initialRoute.candidatePage,
+    sortBy: initialRoute.sortBy,
+    order: initialRoute.order,
+    listPage: 1,
+  });
+  const loadListRef = useRef(null);
+  pollRouteRef.current = { candidatePage, sortBy, order, listPage };
 
   const strategy = useMemo(
     () => strategies.find((item) => item.code === detail?.strategyCode),
@@ -114,30 +123,42 @@ export default function QuantExperimentWorkspace() {
     aborts.current.shared?.abort();
     const controller = new AbortController();
     aborts.current.shared = controller;
+    const current = ++sequence.current.shared;
     setLoading((value) => ({ ...value, shared: true }));
+    setErrors((value) => ({
+      ...value,
+      strategies: "",
+      datasets: "",
+    }));
     const [strategyResult, datasetResult] = await Promise.allSettled([
       fetchStrategies(controller.signal),
       fetchDatasets(controller.signal),
     ]);
-    if (strategyResult.status === "fulfilled")
+    if (current !== sequence.current.shared || controller.signal.aborted) return;
+    if (strategyResult.status === "fulfilled") {
       setStrategies(strategyResult.value);
+      setErrors((value) => ({ ...value, strategies: "" }));
+    }
     else if (strategyResult.reason?.name !== "AbortError")
       setErrors((value) => ({
         ...value,
-        shared: strategyResult.reason.message,
+        strategies: strategyResult.reason.message,
       }));
-    if (datasetResult.status === "fulfilled")
+    if (datasetResult.status === "fulfilled") {
       setDatasets(datasetResult.value.filter(validDataset));
+      setErrors((value) => ({ ...value, datasets: "" }));
+    }
     else if (datasetResult.reason?.name !== "AbortError")
       setErrors((value) => ({
         ...value,
-        shared: datasetResult.reason.message,
+        datasets: datasetResult.reason.message,
       }));
-    setLoading((value) => ({ ...value, shared: false }));
+    if (current === sequence.current.shared)
+      setLoading((value) => ({ ...value, shared: false }));
   }, []);
 
   const loadList = useCallback(
-    async (page = listPage, options = {}) => {
+    async (page, options = {}) => {
       aborts.current.list?.abort();
       const controller = new AbortController();
       aborts.current.list = controller;
@@ -164,8 +185,9 @@ export default function QuantExperimentWorkspace() {
           setLoading((value) => ({ ...value, list: false }));
       }
     },
-    [filters, listPage],
+    [filters],
   );
+  loadListRef.current = loadList;
 
   const loadDetail = useCallback(async (experimentId, options = {}) => {
     if (!experimentId) return null;
@@ -336,11 +358,22 @@ export default function QuantExperimentWorkspace() {
       if (!active || polling.current || !visible) return;
       polling.current = true;
       const result = await loadDetail(selectedId, { background: true });
+      if (!result || selectedId !== selectedIdRef.current) {
+        polling.current = false;
+        return;
+      }
+      const route = pollRouteRef.current;
       await Promise.all([
-        loadCandidates(selectedId, candidatePage, sortBy, order, {
+        loadCandidates(
+          selectedId,
+          route.candidatePage,
+          route.sortBy,
+          route.order,
+          {
           background: true,
-        }),
-        loadList(listPage, { background: true }),
+          },
+        ),
+        loadListRef.current(route.listPage, { background: true }),
       ]);
       polling.current = false;
       if (result && !NON_TERMINAL.has(result.status))
@@ -348,12 +381,9 @@ export default function QuantExperimentWorkspace() {
     };
     poll();
     const timer = window.setInterval(poll, 3000);
-    const currentAborts = aborts.current;
     return () => {
       active = false;
       window.clearInterval(timer);
-      currentAborts.detail?.abort();
-      currentAborts.candidates?.abort();
     };
   }, [
     candidatePage,
@@ -375,6 +405,7 @@ export default function QuantExperimentWorkspace() {
       if (!nextVisible) {
         aborts.current.detail?.abort();
         aborts.current.candidates?.abort();
+        aborts.current.list?.abort();
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
@@ -447,6 +478,12 @@ export default function QuantExperimentWorkspace() {
     setRefreshing(false);
   };
 
+  const closeCreatePanel = () => {
+    if (creating) return;
+    setShowCreate(false);
+    requestAnimationFrame(() => createButtonRef.current?.focus());
+  };
+
   return (
     <QuantPageScaffold pageClass="quant-backtests-page quant-experiments-page">
       <div className="quant-workspace-head">
@@ -476,10 +513,16 @@ export default function QuantExperimentWorkspace() {
           </button>
         </div>
       </div>
-      {errors.shared && (
+      {errors.strategies && (
         <div className="backtest-notice" role="alert">
           <Warning />
-          策略或数据集不可用：{errors.shared}
+          策略不可用：{errors.strategies}
+        </div>
+      )}
+      {errors.datasets && (
+        <div className="backtest-notice" role="alert">
+          <Warning />
+          数据集不可用：{errors.datasets}
         </div>
       )}
       {errors.list && (
@@ -541,20 +584,15 @@ export default function QuantExperimentWorkspace() {
           className="backtest-modal-backdrop"
           role="presentation"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              setShowCreate(false);
-              requestAnimationFrame(() => createButtonRef.current?.focus());
-            }
+            if (event.target === event.currentTarget) closeCreatePanel();
           }}
         >
           <QuantExperimentCreatePanel
             strategies={strategies}
             datasets={datasets}
-            onClose={() => {
-              setShowCreate(false);
-              requestAnimationFrame(() => createButtonRef.current?.focus());
-            }}
+            onClose={closeCreatePanel}
             onCreated={onCreated}
+            onSavingChange={setCreating}
           />
         </div>
       )}

@@ -189,6 +189,16 @@ describe("quant experiment strict parsers", () => {
   });
 
   it.each([
+    ["terminal progress", summary({ status: "COMPLETED", progressPercent: 99 })],
+    ["non-terminal progress", summary({ status: "RUNNING", progressPercent: 100 })],
+    ["candidate count", summary({ activeCandidates: 3 })],
+    ["completed leg count", summary({ completedLegs: 5 })],
+    ["failed leg count", summary({ failedLegs: 5 })],
+  ])("rejects inconsistent experiment %s", (_label, value) => {
+    expect(() => parseExperimentSummary(value)).toThrow();
+  });
+
+  it.each([
     ["dispatch status", candidate({ dispatchStatus: "CANCELLED" })],
     ["parameters", candidate({ parameters: { rsiPeriod: 14.5 } })],
     [
@@ -216,6 +226,15 @@ describe("quant experiment strict parsers", () => {
         training: {
           ...candidate().training,
           progressPercent: 101,
+        },
+      }),
+    ],
+    [
+      "segment status",
+      candidate({
+        training: {
+          ...candidate().training,
+          status: "PAUSED",
         },
       }),
     ],

@@ -16,6 +16,20 @@ export const DISPATCH_STATUSES = new Set([
   "FAILED",
 ]);
 const SEGMENT_TYPES = new Set(["TRAIN", "VALIDATION"]);
+const SEGMENT_STATUSES = new Set([
+  "NOT_CREATED",
+  "QUEUED",
+  "LOADING_SNAPSHOT",
+  "RUNNING_ENGINE",
+  "PERSISTING",
+  "COMPLETED",
+  "FAILED",
+]);
+const TERMINAL_EXPERIMENT_STATUSES = new Set([
+  "COMPLETED",
+  "COMPLETED_WITH_FAILURES",
+  "FAILED",
+]);
 
 function invalid(message) {
   throw new Error(message);
@@ -112,7 +126,7 @@ export function parseSegment(value, expectedType) {
   )
     invalid("实验区间类型异常");
   nonEmpty(segment.runId, "实验区间缺少 runId");
-  nonEmpty(segment.status, "实验区间状态异常");
+  if (!SEGMENT_STATUSES.has(segment.status)) invalid("实验区间状态异常");
   percent(segment.progressPercent, "实验区间进度格式异常");
   if (segment.barCount != null)
     safeCount(segment.barCount, "实验区间 barCount 格式异常");
@@ -173,6 +187,28 @@ export function parseExperimentSummary(value) {
   ].forEach((key) => safeCount(summary[key], `参数实验 ${key} 格式异常`));
   if (!EXPERIMENT_STATUSES.has(summary.status)) invalid("参数实验状态异常");
   percent(summary.progressPercent, "参数实验进度格式异常");
+  const progress = Number(summary.progressPercent);
+  if (
+    TERMINAL_EXPERIMENT_STATUSES.has(summary.status)
+      ? progress !== 100
+      : progress === 100
+  )
+    invalid("参数实验状态与进度不一致");
+  if (
+    [
+      summary.pendingCandidates,
+      summary.activeCandidates,
+      summary.completedCandidates,
+      summary.failedCandidates,
+    ].some((count) => count > summary.candidateCount)
+  )
+    invalid("参数实验候选计数越界");
+  const maximumLegs = summary.candidateCount * 2;
+  if (
+    summary.completedLegs > maximumLegs ||
+    summary.failedLegs > maximumLegs
+  )
+    invalid("参数实验任务计数越界");
   parseIntegerObject(
     summary.parameterGrid,
     "参数实验 parameterGrid 格式异常",

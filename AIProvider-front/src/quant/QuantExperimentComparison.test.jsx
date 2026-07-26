@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import QuantExperimentComparison from "./QuantExperimentComparison";
 import { fetchEquity } from "./quantBacktestsApi";
 
@@ -40,6 +40,10 @@ const candidate = (overrides = {}) => ({
 });
 
 describe("QuantExperimentComparison", () => {
+  beforeEach(() => {
+    window.history.replaceState({}, "", "/quant/backtests?mode=experiment&experimentId=experiment-1&candidatePage=2&candidateSort=TRAIN_NET_PROFIT&candidateOrder=DESC");
+  });
+
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
@@ -97,5 +101,14 @@ describe("QuantExperimentComparison", () => {
     expect(new URLSearchParams(window.location.search).get("mode")).toBe("single");
     expect(new URLSearchParams(window.location.search).get("runId")).toBe("train-2");
     expect(new URLSearchParams(window.location.search).has("experimentId")).toBe(false);
+    window.history.back();
+    await waitFor(() => {
+      const params = new URLSearchParams(window.location.search);
+      expect(params.get("mode")).toBe("experiment");
+      expect(params.get("experimentId")).toBe("experiment-1");
+      expect(params.get("candidatePage")).toBe("2");
+      expect(params.get("candidateSort")).toBe("TRAIN_NET_PROFIT");
+      expect(params.get("candidateOrder")).toBe("DESC");
+    });
   });
 });

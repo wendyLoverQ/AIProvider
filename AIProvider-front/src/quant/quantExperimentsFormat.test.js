@@ -105,6 +105,21 @@ describe("experiment ranges", () => {
       splitDataset7030({ ...dataset, candleCount: 30 }, 20).error,
     ).toContain("无法切分");
   });
+
+  it("validates manual ranges by known coverage rules instead of claiming the whole grid is valid", () => {
+    expect(
+      validateExperimentRanges(
+        {
+          trainingStart: "2025-01-01T00:00:00Z",
+          trainingEnd: "2025-01-01T01:00:00Z",
+          validationStart: "2025-01-01T01:00:00Z",
+          validationEnd: "2025-01-01T02:00:00Z",
+        },
+        dataset,
+        100,
+      ),
+    ).toEqual({ trainingBars: 1, validationBars: 1 });
+  });
 });
 
 describe("experiment formatting", () => {

@@ -95,7 +95,6 @@ export function calculateCandidateCount(parameterGrid) {
 export function validateExperimentRanges(
   ranges,
   dataset,
-  minimumRequiredBars = 1,
 ) {
   const duration = intervalDurationMs(dataset?.interval);
   const values = [
@@ -131,13 +130,8 @@ export function validateExperimentRanges(
     ranges.validationEnd,
     dataset.interval,
   );
-  if (
-    trainingBars < minimumRequiredBars ||
-    validationBars < minimumRequiredBars
-  )
-    return {
-      error: `TRAIN 与 VALIDATION 都至少需要 ${minimumRequiredBars} 根 K 线`,
-    };
+  if (trainingBars < 1 || validationBars < 1)
+    return { error: "TRAIN 与 VALIDATION 都至少需要 1 根 K 线" };
   return { trainingBars, validationBars };
 }
 

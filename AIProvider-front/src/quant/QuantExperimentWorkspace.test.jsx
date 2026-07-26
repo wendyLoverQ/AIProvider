@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import QuantExperimentWorkspace from "./QuantExperimentWorkspace";
 import { fetchDatasets, fetchStrategies } from "./quantBacktestsApi";
-import { fetchExperiment, fetchExperimentCandidates, fetchExperiments } from "./quantExperimentsApi";
+import { createExperiment, fetchExperiment, fetchExperimentCandidates, fetchExperiments } from "./quantExperimentsApi";
 
 vi.mock("./quantBacktestsApi", () => ({
   fetchStrategies: vi.fn(),
@@ -18,6 +18,7 @@ vi.mock("./quantExperimentsApi", async () => {
     fetchExperiments: vi.fn(),
     fetchExperiment: vi.fn(),
     fetchExperimentCandidates: vi.fn(),
+    createExperiment: vi.fn(),
   };
 });
 
@@ -157,6 +158,124 @@ describe("QuantExperimentWorkspace", () => {
     ));
   });
 
+  it("keeps page two after the debounce and resets only when filters change", async () => {
+    fetchExperiments.mockImplementation(({ page, status }) =>
+      Promise.resolve({
+        records: [],
+        total: 21,
+        page,
+        pageSize: 20,
+        status,
+      }),
+    );
+    render(<QuantExperimentWorkspace />);
+    await waitFor(() => expect(screen.getByText("第 1 / 2 页")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    await waitFor(() =>
+      expect(fetchExperiments).toHaveBeenCalledWith(
+        expect.objectContaining({ page: 2 }),
+        expect.any(AbortSignal),
+      ),
+    );
+    expect(screen.getByText("第 2 / 2 页")).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(screen.getByText("第 2 / 2 页")).toBeTruthy();
+    expect(fetchExperiments.mock.calls.at(-1)[0].page).toBe(2);
+    fireEvent.change(screen.getByLabelText("实验状态筛选"), {
+      target: { value: "FAILED" },
+    });
+    await waitFor(() =>
+      expect(fetchExperiments).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "FAILED", page: 1 }),
+        expect.any(AbortSignal),
+      ),
+    );
+  });
+
+  it("accepts only the last rapid filter response", async () => {
+    let resolveOld;
+    const old = {
+      ...experiment(),
+      experimentId: "old-filter",
+      symbol: "OLD/USDT",
+    };
+    const latest = {
+      ...experiment(),
+      experimentId: "latest-filter",
+      symbol: "ETH/USDT",
+    };
+    fetchExperiments.mockImplementation(({ status, symbol, page }) => {
+      if (status === "FAILED" && !symbol)
+        return new Promise((resolve) => {
+          resolveOld = resolve;
+        });
+      if (symbol === "ETH/USDT")
+        return Promise.resolve({
+          records: [latest],
+          total: 1,
+          page,
+          pageSize: 20,
+        });
+      return Promise.resolve({ records: [], total: 0, page, pageSize: 20 });
+    });
+    render(<QuantExperimentWorkspace />);
+    await waitFor(() => expect(screen.getByText("当前没有参数实验")).toBeTruthy());
+    fireEvent.change(screen.getByLabelText("实验状态筛选"), {
+      target: { value: "FAILED" },
+    });
+    await waitFor(() => expect(resolveOld).toBeTypeOf("function"));
+    fireEvent.change(screen.getByLabelText("交易对筛选"), {
+      target: { value: "ETH/USDT" },
+    });
+    expect(await screen.findByRole("button", { name: /ETH\/USDT/ })).toBeTruthy();
+    await act(async () => {
+      resolveOld({ records: [old], total: 1, page: 1, pageSize: 20 });
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole("button", { name: /OLD\/USDT/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /ETH\/USDT/ })).toBeTruthy();
+  });
+
+  it("clears shared errors on a successful refresh", async () => {
+    fetchStrategies
+      .mockRejectedValueOnce(new Error("旧策略错误"))
+      .mockResolvedValueOnce([strategy]);
+    render(<QuantExperimentWorkspace />);
+    expect(await screen.findByText(/旧策略错误/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(screen.queryByText(/旧策略错误/)).toBeNull());
+  });
+
+  it("does not let an older shared failure overwrite a newer success", async () => {
+    let rejectOld;
+    fetchStrategies
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectOld = reject;
+          }),
+      )
+      .mockResolvedValueOnce([strategy]);
+    render(<QuantExperimentWorkspace />);
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(fetchStrategies).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      rejectOld(new Error("迟到的旧错误"));
+      await Promise.resolve();
+    });
+    expect(screen.queryByText(/迟到的旧错误/)).toBeNull();
+  });
+
+  it("keeps successful strategies when datasets fail", async () => {
+    fetchDatasets.mockRejectedValue(new Error("数据集服务失败"));
+    render(<QuantExperimentWorkspace />);
+    expect(await screen.findByText(/数据集服务失败/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "新建参数实验" }));
+    expect(
+      screen.getByRole("option", { name: "RSI · 1.0.0" }),
+    ).toBeTruthy();
+  });
+
   it("polls a running experiment immediately and every three seconds, then stops at terminal state", async () => {
     vi.useFakeTimers();
     window.history.replaceState({}, "", "/quant/backtests?mode=experiment&experimentId=experiment-1");
@@ -173,11 +292,25 @@ describe("QuantExperimentWorkspace", () => {
       await Promise.resolve();
     });
     expect(fetchExperiment.mock.calls.length).toBeGreaterThanOrEqual(2);
+    const candidatesBeforeTerminal = fetchExperimentCandidates.mock.calls.length;
+    const listsBeforeTerminal = fetchExperiments.mock.calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
     expect(screen.getAllByText("已完成").length).toBeGreaterThan(0);
+    expect(fetchExperimentCandidates.mock.calls.length).toBeGreaterThan(
+      candidatesBeforeTerminal,
+    );
+    expect(fetchExperiments.mock.calls.length).toBeGreaterThan(
+      listsBeforeTerminal,
+    );
     const callsAtTerminal = fetchExperiment.mock.calls.length;
+    const candidateCallsAtTerminal = fetchExperimentCandidates.mock.calls.length;
+    const listCallsAtTerminal = fetchExperiments.mock.calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
     expect(fetchExperiment).toHaveBeenCalledTimes(callsAtTerminal);
+    expect(fetchExperimentCandidates).toHaveBeenCalledTimes(
+      candidateCallsAtTerminal,
+    );
+    expect(fetchExperiments).toHaveBeenCalledTimes(listCallsAtTerminal);
   });
 
   it("aborts active polling while hidden and immediately resumes when visible", async () => {
@@ -191,6 +324,8 @@ describe("QuantExperimentWorkspace", () => {
       "/quant/backtests?mode=experiment&experimentId=experiment-1",
     );
     const detailSignals = [];
+    const candidateSignals = [];
+    const listSignals = [];
     fetchExperiments.mockResolvedValue({
       records: [experiment("RUNNING")],
       total: 1,
@@ -201,6 +336,19 @@ describe("QuantExperimentWorkspace", () => {
       detailSignals.push(signal);
       return Promise.resolve(experiment("RUNNING"));
     });
+    fetchExperimentCandidates.mockImplementation((_id, _filters, signal) => {
+      candidateSignals.push(signal);
+      return Promise.resolve(candidatePage);
+    });
+    fetchExperiments.mockImplementation((_filters, signal) => {
+      listSignals.push(signal);
+      return Promise.resolve({
+        records: [experiment("RUNNING")],
+        total: 1,
+        page: 1,
+        pageSize: 20,
+      });
+    });
     render(<QuantExperimentWorkspace />);
     await waitFor(() =>
       expect(fetchExperiment.mock.calls.length).toBeGreaterThanOrEqual(2),
@@ -210,11 +358,49 @@ describe("QuantExperimentWorkspace", () => {
     await waitFor(() =>
       expect(detailSignals.some((signal) => signal.aborted)).toBe(true),
     );
+    expect(candidateSignals.some((signal) => signal.aborted)).toBe(true);
+    expect(listSignals.some((signal) => signal.aborted)).toBe(true);
     const hiddenCalls = fetchExperiment.mock.calls.length;
     visibility = "visible";
     act(() => document.dispatchEvent(new Event("visibilitychange")));
     await waitFor(() =>
       expect(fetchExperiment.mock.calls.length).toBeGreaterThan(hiddenCalls),
+    );
+    expect(fetchExperimentCandidates.mock.calls.length).toBeGreaterThan(1);
+    expect(fetchExperiments.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it("blocks every close path while creating and sends one abortable POST", async () => {
+    let resolveCreate;
+    createExperiment.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCreate = resolve;
+        }),
+    );
+    render(<QuantExperimentWorkspace />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "新建参数实验" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "新建参数实验" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "连续历史数据集" }), {
+      target: { value: "1" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "策略" }), {
+      target: { value: "RSI" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "按 70% / 30% 填充" }));
+    const submit = screen.getByRole("button", { name: "创建异步实验" });
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+    expect(createExperiment).toHaveBeenCalledTimes(1);
+    expect(createExperiment.mock.calls[0][1]).toBeInstanceOf(AbortSignal);
+    expect(screen.getByRole("button", { name: "关闭新建参数实验" }).disabled).toBe(true);
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.mouseDown(document.querySelector(".backtest-modal-backdrop"));
+    expect(screen.getByRole("dialog", { name: "新建参数实验" })).toBeTruthy();
+    resolveCreate({ experimentId: "created", candidateCount: 1, totalLegs: 2 });
+    fetchExperiment.mockResolvedValue({ ...experiment(), experimentId: "created" });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "新建参数实验" })).toBeNull(),
     );
   });
 
@@ -252,6 +438,79 @@ describe("QuantExperimentWorkspace", () => {
     });
     expect(screen.queryByText(/OLD\/USDT · 1h/)).toBeNull();
     expect(screen.getAllByText(/ETH\/USDT · 1h/).length).toBeGreaterThan(0);
+  });
+
+  it("does not let an old terminal poll disrupt the newly selected experiment", async () => {
+    let resolveOldTerminal;
+    let oldCalls = 0;
+    const newer = {
+      ...experiment(),
+      experimentId: "new-experiment",
+      symbol: "ETH/USDT",
+    };
+    window.history.replaceState(
+      {},
+      "",
+      "/quant/backtests?mode=experiment&experimentId=old-experiment",
+    );
+    fetchExperiments.mockResolvedValue({
+      records: [newer],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    });
+    fetchExperiment.mockImplementation((id) => {
+      if (id === "new-experiment") return Promise.resolve(newer);
+      oldCalls += 1;
+      if (oldCalls === 1)
+        return Promise.resolve({
+          ...experiment("RUNNING"),
+          experimentId: "old-experiment",
+          symbol: "OLD/USDT",
+        });
+      return new Promise((resolve) => {
+        resolveOldTerminal = resolve;
+      });
+    });
+    render(<QuantExperimentWorkspace />);
+    await waitFor(() => expect(resolveOldTerminal).toBeTypeOf("function"));
+    fireEvent.click(await screen.findByRole("button", { name: /ETH\/USDT/ }));
+    await waitFor(() => expect(screen.getByText(/ETH\/USDT · 1h/)).toBeTruthy());
+    const oldCandidateCalls = fetchExperimentCandidates.mock.calls.filter(
+      ([id]) => id === "old-experiment",
+    ).length;
+    await act(async () => {
+      resolveOldTerminal({
+        ...experiment("COMPLETED"),
+        experimentId: "old-experiment",
+        symbol: "OLD/USDT",
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.queryByText(/OLD\/USDT · 1h/)).toBeNull();
+    expect(
+      fetchExperimentCandidates.mock.calls.filter(
+        ([id]) => id === "old-experiment",
+      ),
+    ).toHaveLength(oldCandidateCalls);
+  });
+
+  it("aborts shared strategy and dataset requests on unmount", () => {
+    const signals = [];
+    fetchStrategies.mockImplementation((signal) => {
+      signals.push(signal);
+      return new Promise(() => {});
+    });
+    fetchDatasets.mockImplementation((signal) => {
+      signals.push(signal);
+      return new Promise(() => {});
+    });
+    const { unmount } = render(<QuantExperimentWorkspace />);
+    expect(signals).toHaveLength(2);
+    expect(signals.every((signal) => !signal.aborted)).toBe(true);
+    unmount();
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
   });
 
   it("preserves a selected candidate only while it remains on the refreshed page", async () => {
