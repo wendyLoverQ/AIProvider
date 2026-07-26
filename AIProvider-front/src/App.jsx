@@ -143,7 +143,7 @@ const PAGE_DESCRIPTIONS = {
   videoEditor: "素材、画布与时间线编辑",
   market: "Binance U 本位永续公共只读行情，不经过 CCXT",
   quantOverview: "量化系统阶段、连接状态与模块运行总览",
-  quantStrategies: "策略定义、参数版本、启停状态与信号记录",
+  quantStrategies: "已注册策略、版本参数与回测研究入口",
   quantBacktests: "历史回放、撮合假设、参数实验与结果报告",
   quantRisk: "仓位、杠杆、亏损熔断与交易安全控制",
   quantPortfolio: "账户余额、保证金、仓位与盈亏状态",
