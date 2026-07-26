@@ -1,6 +1,7 @@
 /* @vitest-environment jsdom */
 import {
   cleanup,
+  act,
   fireEvent,
   render,
   screen,
@@ -44,6 +45,25 @@ const walkForwardFold = (foldId, status, progressPercent) => ({ foldId, foldInde
 describe("Quant Walk-forward workspace lifecycle", () => {
   afterEach(() => { cleanup(); vi.restoreAllMocks(); window.history.replaceState({}, "", "/quant/backtests"); });
 
+  const oosEquity = { sampled: false, totalPoints: 1, successfulFolds: 1, missingFolds: 0, hasGaps: false, totalReturnRatio: "0", maximumDrawdownRatio: "0", points: [{ pointIndex: 0, foldIndex: 0, openTime: "2024-01-03T00:00:00Z", indexRatio: "1", drawdownRatio: "0" }] };
+  const detailFor = (id, status) => ({ summary: { ...walkForwardSummary, studyId: id, status, progressPercent: status === "RUNNING" ? 25 : 100, pendingFolds: status === "RUNNING" ? 1 : 0, activeFolds: 0, completedFolds: status === "RUNNING" ? 0 : 1, failedFolds: status === "RUNNING" ? 0 : 1 }, parameterFrequencies: [{ parameters: { fast: 5 }, selectedCount: 1, firstFoldIndex: 0, lastFoldIndex: 0 }] });
+  const setVisibility = (state) => { Object.defineProperty(document, "visibilityState", { configurable: true, value: state }); document.dispatchEvent(new Event("visibilitychange")); };
+
+  function installOosLifecycleFetch({ detailStatus = "COMPLETED_WITH_FAILURES", oosHandler, studyIds = ["wf-1"] } = {}) {
+    const studies = studyIds.map((id) => ({ ...walkForwardSummary, studyId: id, status: detailStatus }));
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options = {}) => {
+      if (url.includes("/strategies")) return result([strategy]);
+      if (url.includes("/datasets")) return result([]);
+      if (url.includes("/oos-equity")) return oosHandler(options.signal);
+      if (url.includes("/folds")) return result({ records: [walkForwardFold("fold-a", "COMPLETED", 100), walkForwardFold("fold-b", "FAILED", 100)], total: 2, page: 1, pageSize: 50 });
+      const id = studyIds.find((item) => url.endsWith(`/${item}`));
+      if (id) return result(detailFor(id, detailStatus));
+      if (url.includes("walk-forward-studies")) return result({ records: studies, total: studies.length, page: 1, pageSize: 20 });
+      throw new Error(`unexpected request ${url}`);
+    });
+    return fetchMock;
+  }
+
   function installWalkForwardFetch() {
     const oos = { sampled: false, totalPoints: 1, successfulFolds: 1, missingFolds: 1, hasGaps: true, totalReturnRatio: "0", maximumDrawdownRatio: "0", points: [{ pointIndex: 0, foldIndex: 0, openTime: "2024-01-03T00:00:00Z", indexRatio: "1", drawdownRatio: "0" }] };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
@@ -73,6 +93,65 @@ describe("Quant Walk-forward workspace lifecycle", () => {
     fireEvent.keyDown(row(1), { key: "Enter" });
     expect(new URLSearchParams(window.location.search).get("foldId")).toBe("fold-b");
     expect(fetchMock.mock.calls.filter(([url]) => url.includes("oos-equity"))).toHaveLength(1);
+  });
+
+  it("retries an aborted terminal OOS request after hidden and visible", async () => {
+    const pending = [];
+    const fetchMock = installOosLifecycleFetch({ oosHandler: (signal) => new Promise((resolve, reject) => { pending.push({ resolve }); signal.addEventListener("abort", () => { const error = new Error("aborted"); error.name = "AbortError"; reject(error); }); }) });
+    window.history.replaceState({}, "", "/quant/backtests?mode=walk-forward&studyId=wf-1");
+    render(<QuantWalkForwardWorkspace />);
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url.includes("oos-equity"))).toHaveLength(1));
+    setVisibility("hidden");
+    setVisibility("visible");
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url.includes("oos-equity"))).toHaveLength(2));
+    await act(async () => pending[1].resolve(result(oosEquity)));
+    await waitFor(() => expect(screen.getByText("Normalized OOS Index")).toBeTruthy());
+  });
+
+  it("does not repeat successful OOS on recovery, but manual refresh forces exactly one reload", async () => {
+    const fetchMock = installOosLifecycleFetch({ oosHandler: async () => result(oosEquity) });
+    window.history.replaceState({}, "", "/quant/backtests?mode=walk-forward&studyId=wf-1");
+    render(<QuantWalkForwardWorkspace />);
+    await waitFor(() => expect(screen.getByText("Normalized OOS Index")).toBeTruthy());
+    setVisibility("hidden");
+    setVisibility("visible");
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url.includes("oos-equity"))).toHaveLength(1));
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url.includes("oos-equity"))).toHaveLength(2));
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes("oos-equity"))).toHaveLength(2);
+  });
+
+  it("clears a failed OOS load so hidden recovery can retry successfully", async () => {
+    let attempts = 0;
+    const fetchMock = installOosLifecycleFetch({ oosHandler: async () => { attempts += 1; if (attempts === 1) { throw new Error("OOS temporary failure"); } return result(oosEquity); } });
+    window.history.replaceState({}, "", "/quant/backtests?mode=walk-forward&studyId=wf-1");
+    render(<QuantWalkForwardWorkspace />);
+    await waitFor(() => expect(screen.getByText(/OOS 指数加载失败：OOS temporary failure/)).toBeTruthy());
+    setVisibility("hidden");
+    setVisibility("visible");
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url.includes("oos-equity"))).toHaveLength(2));
+    await waitFor(() => expect(screen.getByText("Normalized OOS Index")).toBeTruthy());
+    expect(screen.queryByText(/OOS 指数加载失败：OOS temporary failure/)).toBeNull();
+  });
+
+  it("ignores a stale OOS response after switching studies", async () => {
+    const pending = [];
+    const fetchMock = installOosLifecycleFetch({
+      studyIds: ["wf-1", "wf-2"],
+      oosHandler: (signal) => {
+        if (pending.length === 0) return new Promise((resolve, reject) => { pending.push({ resolve }); signal.addEventListener("abort", () => { const error = new Error("aborted"); error.name = "AbortError"; reject(error); }); });
+        return result({ ...oosEquity, missingFolds: 1, hasGaps: true });
+      },
+    });
+    window.history.replaceState({}, "", "/quant/backtests?mode=walk-forward&studyId=wf-1");
+    render(<QuantWalkForwardWorkspace />);
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url.includes("oos-equity"))).toHaveLength(1));
+    window.history.pushState({}, "", "/quant/backtests?mode=walk-forward&studyId=wf-2");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url.includes("oos-equity"))).toHaveLength(2));
+    await waitFor(() => expect(screen.getByText("Normalized OOS Index")).toBeTruthy());
+    await act(async () => pending[0].resolve(result(oosEquity)));
+    expect(screen.getByText("存在失败 Fold；OOS 指数只连接成功 Fold，不补造缺失区间。"));
   });
 });
 const installFetch = () =>

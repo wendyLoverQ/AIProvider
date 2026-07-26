@@ -74,7 +74,9 @@ export default function QuantWalkForwardWorkspace() {
   const sequence = useRef({ shared: 0, list: 0, detail: 0, folds: 0, oos: 0 });
   const selectedStudyRef = useRef(initial.studyId);
   const polling = useRef(false);
-  const terminalOosKey = useRef("");
+  const oosLoadingKeyRef = useRef("");
+  const oosLoadedKeyRef = useRef("");
+  const pollingGeneration = useRef(0);
 
   const abort = useCallback((type) => aborts.current[type]?.abort(), []);
   const closeCreateByUser = useCallback(() => {
@@ -159,44 +161,55 @@ export default function QuantWalkForwardWorkspace() {
     }
   }, [abort]);
 
-  const loadOos = useCallback(async (id) => {
+  const loadOos = useCallback(async (id, key) => {
     if (!id) return null;
     abort("oos");
     const controller = new AbortController(); aborts.current.oos = controller;
     const current = ++sequence.current.oos;
+    oosLoadingKeyRef.current = key;
     setLoading((value) => ({ ...value, oos: true })); setErrors((value) => ({ ...value, oos: "" }));
     try {
       const result = await fetchWalkForwardOosEquity(id, 1200, controller.signal);
-      if (current !== sequence.current.oos || id !== selectedStudyRef.current) return null;
-      setOos(result); return result;
+      if (current !== sequence.current.oos || id !== selectedStudyRef.current || controller.signal.aborted) return null;
+      setOos(result);
+      oosLoadedKeyRef.current = key;
+      oosLoadingKeyRef.current = "";
+      return result;
     } catch (exception) {
       if (exception.name !== "AbortError" && current === sequence.current.oos && id === selectedStudyRef.current) setErrors((value) => ({ ...value, oos: exception.message }));
       return null;
     } finally {
-      if (current === sequence.current.oos) setLoading((value) => ({ ...value, oos: false }));
+      if (current === sequence.current.oos) {
+        oosLoadingKeyRef.current = oosLoadingKeyRef.current === key ? "" : oosLoadingKeyRef.current;
+        setLoading((value) => ({ ...value, oos: false }));
+      }
     }
   }, [abort]);
 
+  const ensureOos = useCallback(async (id, status, options = {}) => {
+    if (!id || !TERMINAL.has(status)) return null;
+    const key = `${id}:${status}`;
+    if (oosLoadedKeyRef.current === key && !options.force) return null;
+    if (oosLoadingKeyRef.current === key) return null;
+    return loadOos(id, key);
+  }, [loadOos]);
+
   useEffect(() => { loadShared(); return () => Object.values(aborts.current).forEach((controller) => controller?.abort()); }, [loadShared]);
-  useEffect(() => { const timer = window.setTimeout(() => loadList(1), 250); return () => window.clearTimeout(timer); }, [filters, loadList]);
+  useEffect(() => { loadList(1); }, [filters, loadList]);
   useEffect(() => {
     selectedStudyRef.current = studyId;
-    terminalOosKey.current = "";
+    abort("oos");
+    oosLoadingKeyRef.current = "";
+    oosLoadedKeyRef.current = "";
     setOos(null); setSelectedFoldId("");
+    setErrors((value) => ({ ...value, oos: "" }));
     if (!studyId) { setDetail(null); setFoldData({ records: [], total: 0, page: 1, pageSize: 50 }); return undefined; }
-    loadDetail(studyId);
+    void loadDetail(studyId).then((result) => ensureOos(studyId, result?.summary?.status));
     return undefined;
-  }, [studyId, loadDetail, loadFolds]);
+  }, [ensureOos, studyId, loadDetail, loadFolds]);
   useEffect(() => { if (studyId) loadFolds(studyId, foldPage); }, [foldPage, studyId, loadFolds]);
 
   const detailStatus = detail?.summary?.status;
-  useEffect(() => {
-    if (!studyId || !TERMINAL.has(detailStatus)) return;
-    const key = `${studyId}:${detailStatus}`;
-    if (terminalOosKey.current === key) return;
-    terminalOosKey.current = key;
-    loadOos(studyId);
-  }, [detailStatus, loadOos, studyId]);
 
   useEffect(() => {
     const onPop = () => { const route = readRoute(); selectedStudyRef.current = route.studyId; setStudyId(route.studyId); setFoldPage(route.foldPage); setSelectedFoldId(route.foldId); };
@@ -207,38 +220,60 @@ export default function QuantWalkForwardWorkspace() {
     polling.current = false;
     if (!studyId || !NON_TERMINAL.has(detailStatus) || !visible) return undefined;
     let active = true;
+    const generation = ++pollingGeneration.current;
     const poll = async () => {
-      if (!active || polling.current || document.visibilityState !== "visible") return;
+      if (!active || generation !== pollingGeneration.current || polling.current || document.visibilityState !== "visible") return;
       polling.current = true;
       try {
         const result = await loadDetail(studyId, { background: true });
-        if (!result || !active || studyId !== selectedStudyRef.current) return;
+        if (!result || !active || generation !== pollingGeneration.current || studyId !== selectedStudyRef.current) return;
         await Promise.all([loadFolds(studyId, foldPage, { background: true }), loadList(listPage, { background: true })]);
-      } finally { polling.current = false; }
+        await ensureOos(studyId, result.summary?.status);
+      } finally {
+        if (generation === pollingGeneration.current) polling.current = false;
+      }
     };
     poll(); const timer = window.setInterval(poll, 3000);
-    return () => { active = false; window.clearInterval(timer); abort("detail"); abort("folds"); abort("list"); };
-  }, [abort, detailStatus, foldPage, listPage, loadDetail, loadFolds, loadList, studyId, visible]);
+    return () => { active = false; ++pollingGeneration.current; polling.current = false; window.clearInterval(timer); abort("detail"); abort("folds"); abort("list"); };
+  }, [abort, detailStatus, ensureOos, foldPage, listPage, loadDetail, loadFolds, loadList, studyId, visible]);
 
   useEffect(() => {
     const onVisibility = () => {
       const next = document.visibilityState === "visible";
       setVisible(next);
-      if (!next) Object.values(aborts.current).forEach((controller) => controller?.abort());
-      else if (selectedStudyRef.current) { loadList(listPage, { background: true }); if (!NON_TERMINAL.has(detailStatus)) { loadDetail(selectedStudyRef.current, { background: true }); loadFolds(selectedStudyRef.current, foldPage, { background: true }); } }
+      if (!next) {
+        Object.values(aborts.current).forEach((controller) => controller?.abort());
+        oosLoadingKeyRef.current = "";
+        polling.current = false;
+      } else if (selectedStudyRef.current) {
+        const id = selectedStudyRef.current;
+        void (async () => {
+          const [, latestDetail] = await Promise.all([
+            loadList(listPage, { background: true }),
+            loadDetail(id, { background: true }),
+            loadFolds(id, foldPage, { background: true }),
+          ]);
+          if (id === selectedStudyRef.current) await ensureOos(id, latestDetail?.summary?.status);
+        })();
+      }
     };
     document.addEventListener("visibilitychange", onVisibility); return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [detailStatus, foldPage, listPage, loadDetail, loadFolds, loadList]);
+  }, [ensureOos, foldPage, listPage, loadDetail, loadFolds, loadList]);
 
   const selectStudy = (id) => { selectedStudyRef.current = id; writeRoute({ studyId: id, foldPage: 1 }); };
   const selectFold = (fold) => writeRoute({ studyId, foldPage, foldId: fold.foldId });
   const onFoldPage = (page) => writeRoute({ studyId, foldPage: page });
 
+  const retryDetail = async () => {
+    const result = await loadDetail(studyId);
+    await ensureOos(studyId, result?.summary?.status);
+  };
+
   const refresh = async () => {
     setRefreshing(true);
     try {
-      await Promise.all([loadShared(), loadList(listPage), studyId ? loadDetail(studyId) : null, studyId ? loadFolds(studyId, foldPage) : null]);
-      if (studyId && TERMINAL.has(detailStatus)) await loadOos(studyId);
+      const [, , latestDetail] = await Promise.all([loadShared(), loadList(listPage), studyId ? loadDetail(studyId) : null, studyId ? loadFolds(studyId, foldPage) : null]);
+      if (studyId) await ensureOos(studyId, latestDetail?.summary?.status, { force: true });
     } finally { setRefreshing(false); }
   };
 
@@ -252,5 +287,5 @@ export default function QuantWalkForwardWorkspace() {
 
   const selectedFold = useMemo(() => foldData.records.find((fold) => fold.foldId === selectedFoldId) || null, [foldData.records, selectedFoldId]);
   const detailData = detail?.summary;
-  return <QuantPageScaffold pageClass="quant-backtests-page quant-walk-forward-page"><div className="quant-workspace-head"><div><span className="eyebrow">QUANT · WALK-FORWARD LAB</span><h3>滚动验证</h3><small>按 TRAIN 指标选择参数，再观察连续样本外 VALIDATION 表现</small></div><div className="backtest-head-actions"><button type="button" className="quant-refresh" onClick={refresh} disabled={refreshing}><ArrowsClockwise className={refreshing ? "spin" : ""} />刷新</button><button ref={openCreateButtonRef} type="button" className="quant-primary-action quant-walk-forward-open" onClick={() => setShowCreate(true)}><Flask />新建滚动验证</button></div></div>{errors.strategies && <div className="backtest-notice" role="alert"><Warning />策略不可用：{errors.strategies}</div>}{errors.datasets && <div className="backtest-notice" role="alert"><Warning />数据集不可用：{errors.datasets}</div>}{errors.list && <div className="backtest-notice" role="alert">Study 列表加载失败：{errors.list}</div>}<div className="quant-walk-forward-main"><QuantWalkForwardStudyList page={listPage} data={listData} filters={filters} loading={loading.list} selectedId={studyId} onFilters={(next) => { setFilters(next); setListPage(1); }} onPage={loadList} onSelect={selectStudy} /><QuantWalkForwardStudyDetail detail={detail} loading={loading.detail} error={errors.detail} onRetry={() => loadDetail(studyId)} /></div>{detailData && <><QuantWalkForwardFolds data={foldData} page={foldPage} selectedFold={selectedFold} loading={loading.folds} error={errors.folds} onPage={onFoldPage} onSelect={selectFold} onOpenExperiment={(id) => jump("experiment", "experimentId", id)} onOpenRun={(id) => jump("single", "runId", id)} /><div className="quant-walk-forward-bottom"><QuantWalkForwardParameterFrequency frequencies={detail.parameterFrequencies} selectedParameterChanges={detailData.selectedParameterChanges} /><QuantWalkForwardOosChart equity={oos} loading={loading.oos} error={errors.oos} /></div></>}{showCreate && <div className="backtest-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCreateByUser(); }}><QuantWalkForwardCreatePanel strategies={strategies} datasets={datasets} onClose={closeCreateByUser} onCreated={completeCreate} onSavingChange={setCreating} /></div>}</QuantPageScaffold>;
+  return <QuantPageScaffold pageClass="quant-backtests-page quant-walk-forward-page"><div className="quant-workspace-head"><div><span className="eyebrow">QUANT · WALK-FORWARD LAB</span><h3>滚动验证</h3><small>按 TRAIN 指标选择参数，再观察连续样本外 VALIDATION 表现</small></div><div className="backtest-head-actions"><button type="button" className="quant-refresh" onClick={refresh} disabled={refreshing}><ArrowsClockwise className={refreshing ? "spin" : ""} />刷新</button><button ref={openCreateButtonRef} type="button" className="quant-primary-action quant-walk-forward-open" onClick={() => setShowCreate(true)}><Flask />新建滚动验证</button></div></div>{errors.strategies && <div className="backtest-notice" role="alert"><Warning />策略不可用：{errors.strategies}</div>}{errors.datasets && <div className="backtest-notice" role="alert"><Warning />数据集不可用：{errors.datasets}</div>}{errors.list && <div className="backtest-notice" role="alert">Study 列表加载失败：{errors.list}</div>}<div className="quant-walk-forward-main"><QuantWalkForwardStudyList page={listPage} data={listData} filters={filters} loading={loading.list} selectedId={studyId} onFilters={(next) => { setFilters(next); setListPage(1); }} onPage={loadList} onSelect={selectStudy} /><QuantWalkForwardStudyDetail detail={detail} loading={loading.detail} error={errors.detail} onRetry={retryDetail} /></div>{detailData && <><QuantWalkForwardFolds data={foldData} page={foldPage} selectedFold={selectedFold} loading={loading.folds} error={errors.folds} onPage={onFoldPage} onSelect={selectFold} onOpenExperiment={(id) => jump("experiment", "experimentId", id)} onOpenRun={(id) => jump("single", "runId", id)} /><div className="quant-walk-forward-bottom"><QuantWalkForwardParameterFrequency frequencies={detail.parameterFrequencies} selectedParameterChanges={detailData.selectedParameterChanges} /><QuantWalkForwardOosChart equity={oos} loading={loading.oos} error={errors.oos} /></div></>}{showCreate && <div className="backtest-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCreateByUser(); }}><QuantWalkForwardCreatePanel strategies={strategies} datasets={datasets} onClose={closeCreateByUser} onCreated={completeCreate} onSavingChange={setCreating} /></div>}</QuantPageScaffold>;
 }
