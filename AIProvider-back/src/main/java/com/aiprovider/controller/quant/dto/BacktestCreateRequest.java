@@ -13,8 +13,8 @@ public class BacktestCreateRequest {
     @NotBlank(message="strategyCode 不能为空") private String strategyCode;
     @NotBlank(message="strategyVersion 不能为空") private String strategyVersion;
     private Map<String,Integer> strategyParameters;
-    @NotNull @DecimalMin(value="0.000000000000000001", inclusive=true) private BigDecimal orderAmount;
-    @NotNull @DecimalMin(value="0", inclusive=true) @DecimalMax(value="0.01", inclusive=true) private BigDecimal feeRate;
+    @NotNull @Digits(integer=20, fraction=18) @DecimalMin(value="0", inclusive=false) private BigDecimal orderAmount;
+    @NotNull @Digits(integer=20, fraction=18) @DecimalMin(value="0", inclusive=true) @DecimalMax(value="0.01", inclusive=true) private BigDecimal feeRate;
     private boolean forceCloseAtEnd;
     @AssertTrue(message="forceCloseAtEnd 必须为 true") public boolean isForceCloseAtEndValid(){return forceCloseAtEnd;}
     @AssertTrue(message="strategyParameters 不得包含 null key/value") public boolean areStrategyParametersValid(){return strategyParameters==null||strategyParameters.entrySet().stream().noneMatch(e->e.getKey()==null||e.getValue()==null);}

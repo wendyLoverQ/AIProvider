@@ -10,15 +10,16 @@ import java.util.concurrent.*;
 @Configuration
 @EnableConfigurationProperties(QuantBacktestProperties.class)
 public class QuantBacktestConfiguration {
-    @Bean public BacktestEngine backtestEngine() { return new BacktestEngine(); }
     @Bean public StrategyRegistry strategyRegistry() { return new StrategyRegistry(); }
+    @Bean public BacktestEngine backtestEngine(StrategyRegistry registry) { return new BacktestEngine(registry); }
     @Bean(name = "quantBacktestExecutor", destroyMethod = "shutdownGracefully")
     public ThreadPoolExecutor quantBacktestExecutor(QuantBacktestProperties p) {
-        if (p.getExecutorMaxPoolSize() < p.getExecutorCorePoolSize()) throw new IllegalArgumentException("quant.backtest max pool must be >= core pool");
+        if (p.getExecutorCorePoolSize() < 1 || p.getExecutorCorePoolSize() > 8 || p.getExecutorMaxPoolSize() < 1 || p.getExecutorMaxPoolSize() > 16 || p.getExecutorQueueCapacity() < 1 || p.getExecutorQueueCapacity() > 1000 || p.getExecutorMaxPoolSize() < p.getExecutorCorePoolSize()) throw new IllegalArgumentException("quant.backtest executor limits invalid");
         return new GracefulBacktestExecutor(p.getExecutorCorePoolSize(),p.getExecutorMaxPoolSize(),p.getExecutorQueueCapacity());
     }
     static final class GracefulBacktestExecutor extends ThreadPoolExecutor {
-        GracefulBacktestExecutor(int core,int max,int capacity){super(core,max,0L,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(capacity),r->{Thread t=new Thread(r,"quant-backtest-");t.setDaemon(false);return t;},new AbortPolicy());}
+        private static final java.util.concurrent.atomic.AtomicInteger IDS = new java.util.concurrent.atomic.AtomicInteger();
+        GracefulBacktestExecutor(int core,int max,int capacity){super(core,max,0L,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(capacity),r->{Thread t=new Thread(r,"quant-backtest-"+IDS.incrementAndGet());t.setDaemon(false);return t;},new AbortPolicy());}
         public void shutdownGracefully(){shutdown();try{if(!awaitTermination(30,TimeUnit.SECONDS))shutdownNow();}catch(InterruptedException e){shutdownNow();Thread.currentThread().interrupt();}}
     }
 }

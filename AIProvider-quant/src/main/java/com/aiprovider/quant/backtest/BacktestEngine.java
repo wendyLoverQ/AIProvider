@@ -3,6 +3,7 @@ package com.aiprovider.quant.backtest;
 import com.aiprovider.quant.market.history.model.HistoricalCandle;
 import com.aiprovider.quant.market.model.KlineInterval;
 import com.aiprovider.quant.ta4j.Ta4jBacktestEngine;
+import com.aiprovider.quant.strategy.StrategyRegistry;
 
 import java.util.List;
 
@@ -10,7 +11,8 @@ import java.util.List;
 public final class BacktestEngine {
     private final Ta4jBacktestEngine delegate;
 
-    public BacktestEngine() { this.delegate = new Ta4jBacktestEngine(); }
+    public BacktestEngine() { this(new StrategyRegistry()); }
+    public BacktestEngine(StrategyRegistry registry) { this.delegate = new Ta4jBacktestEngine(new com.aiprovider.quant.ta4j.Ta4jBarSeriesFactory(), registry); }
     public BacktestResult run(BacktestRequest request, String symbol, KlineInterval interval,
                               List<HistoricalCandle> candles) {
         try {

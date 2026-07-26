@@ -115,7 +115,7 @@ public final class Ta4jBacktestEngine {
         Map<Integer, BigDecimal> sameBarMultipliers = sameBarMultipliers(record);
         BigDecimal peak = ONE;
         for (int bar = 0; bar < candles.size(); bar++) {
-            BigDecimal equity = cashFlow.getValue(bar).bigDecimalValue();
+            BigDecimal equity = requireFinite(cashFlow.getValue(bar), "equity");
             for (Map.Entry<Integer, BigDecimal> sameBar : sameBarMultipliers.entrySet()) {
                 if (sameBar.getKey() <= bar) equity = equity.multiply(sameBar.getValue());
             }
@@ -161,9 +161,11 @@ public final class Ta4jBacktestEngine {
         int wins = 0, losses = 0, breakeven = 0;
         for (BacktestTrade trade : trades) {
             net = net.add(trade.getNetProfit()); fees = fees.add(trade.getFee()); averageReturn = averageReturn.add(trade.getReturnRatio());
-            if (trade.getNetProfit().signum() > 0) { wins++; grossProfit = grossProfit.add(trade.getGrossProfit()); }
-            else if (trade.getNetProfit().signum() < 0) { losses++; grossLoss = grossLoss.add(trade.getGrossProfit().abs()); }
+            if (trade.getNetProfit().signum() > 0) wins++;
+            else if (trade.getNetProfit().signum() < 0) losses++;
             else breakeven++;
+            if (trade.getGrossProfit().signum() > 0) grossProfit = grossProfit.add(trade.getGrossProfit());
+            else if (trade.getGrossProfit().signum() < 0) grossLoss = grossLoss.add(trade.getGrossProfit().abs());
         }
         BigDecimal winRate = trades.isEmpty() ? null : BigDecimal.valueOf(wins).divide(BigDecimal.valueOf(trades.size()), 12, RoundingMode.HALF_UP);
         BigDecimal profitFactor = grossLoss.signum() == 0 ? null : grossProfit.divide(grossLoss, 12, RoundingMode.HALF_UP);
@@ -191,6 +193,12 @@ public final class Ta4jBacktestEngine {
     }
 
     private BigDecimal bd(BigDecimal value) { return value; }
-    private BigDecimal bd(org.ta4j.core.num.Num value) { return value == null || value.isNaN() ? BigDecimal.ZERO : value.bigDecimalValue(); }
+    private BigDecimal bd(org.ta4j.core.num.Num value) { return requireFinite(value, "numericValue"); }
+    private BigDecimal requireFinite(org.ta4j.core.num.Num value, String field) {
+        if (value == null || value.isNaN()) throw new BacktestException("BACKTEST_EXECUTION_FAILED", field + " is null/NaN");
+        BigDecimal result = value.bigDecimalValue();
+        if (result == null) throw new BacktestException("BACKTEST_EXECUTION_FAILED", field + " is null");
+        return result;
+    }
     private void requirePositive(BigDecimal value, String field) { if (value == null || value.signum() <= 0) throw new BacktestException("BACKTEST_DATA_INVALID", field + " must be positive"); }
 }

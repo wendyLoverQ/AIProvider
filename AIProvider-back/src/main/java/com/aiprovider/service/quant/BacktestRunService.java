@@ -1,5 +1,7 @@
 package com.aiprovider.service.quant;
 
+import com.aiprovider.quant.market.history.service.MarketDataSnapshotException;
+
 import com.aiprovider.controller.quant.dto.*; import com.aiprovider.mapper.*; import com.aiprovider.mapper.row.*; import com.aiprovider.quant.backtest.*; import com.aiprovider.quant.market.history.model.MarketDataSnapshot; import com.aiprovider.quant.market.history.port.MarketDatasetRepository; import com.aiprovider.quant.market.history.service.MarketDataSnapshotService; import com.aiprovider.quant.strategy.*; import com.fasterxml.jackson.core.type.TypeReference; import com.fasterxml.jackson.databind.ObjectMapper; import org.springframework.beans.factory.annotation.Qualifier; import org.springframework.stereotype.Service; import java.math.BigDecimal; import java.time.*; import java.util.*; import java.util.concurrent.*;
 
 @Service public class BacktestRunService {
