@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { calculateExpectedBars, compareDecimalStrings, formatRatio, formatRunStatus, intervalCode, intervalDurationMs, normalizeDecimalString, toUtcIso, utcInstantToLocalInput } from "./quantBacktestsFormat";
+import { calculateExpectedBars, compareDecimalStrings, decimalSubtract, formatDecimalString, formatRatio, formatRatioString, formatRunStatus, intervalCode, intervalDurationMs, normalizeDecimalString, toUtcIso, utcInstantToLocalInput, validateEquityResponse } from "./quantBacktestsFormat";
 import { parsePage } from "./quantBacktestsApi";
 
 describe("quant backtest formatting", () => {
   it("formats ratios and status without inventing null values", () => {
     expect(formatRatio("0.12")).toBe("+12.00%");
+    expect(formatRatioString("-0.125")).toBe("-12.50%");
+    expect(decimalSubtract("1.12", "1")).toBe("0.12");
+    expect(formatDecimalString("12345678901234567890.123456789012345678")).toBe("12,345,678,901,234,567,890.1235");
     expect(formatRatio(null)).toBe("—");
     expect(formatRunStatus("RUNNING_ENGINE")).toBe("回测计算");
   });
@@ -27,6 +30,17 @@ describe("quant backtest formatting", () => {
     expect(normalizeDecimalString(`${"9".repeat(39)}`)).toBeNull();
     expect(compareDecimalStrings("0.01", "0.010000")).toBe(0);
     expect(compareDecimalStrings("0.0101", "0.01")).toBe(1);
+    expect(normalizeDecimalString(`${"9".repeat(20)}.${"1".repeat(18)}`, { maxIntegerDigits: 20, maxFractionDigits: 18 })).not.toBeNull();
+    expect(normalizeDecimalString(`${"9".repeat(21)}`, { maxIntegerDigits: 20, maxFractionDigits: 18 })).toBeNull();
+    expect(normalizeDecimalString("1e-3", { maxIntegerDigits: 1, maxFractionDigits: 18 })).toBeNull();
+  });
+  it("accepts sampled equity points with explicit boundary indexes", () => {
+    expect(validateEquityResponse({ sampled: true, totalPoints: 100, points: [
+      { pointIndex: 0, openTime: "2025-01-01T00:00:00Z", equityRatio: "1", drawdownRatio: "0" },
+      { pointIndex: 50, openTime: "2025-01-01T12:30:00Z", equityRatio: "1.12", drawdownRatio: "0.02" },
+      { pointIndex: 99, openTime: "2025-01-02T00:00:00Z", equityRatio: "1.1", drawdownRatio: "0.01" },
+    ] })).toBe(true);
+    expect(validateEquityResponse({ sampled: true, totalPoints: 100, points: [{ pointIndex: 1, openTime: "2025-01-01T00:00:00Z", equityRatio: "1", drawdownRatio: "0" }] })).toBe(false);
   });
   it("accepts only the records page protocol", () => {
     expect(parsePage({ records: [], total: 0, page: 1, pageSize: 20 }).records).toEqual([]);
