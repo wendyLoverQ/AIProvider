@@ -87,6 +87,15 @@ public interface BacktestRunMapper {
           + " VALUES(#{runId},#{datasetId},#{provider},#{marketType},#{dataType},#{symbol},#{intervalCode},#{startOpenTimeMs},#{endOpenTimeExclusiveMs},#{strategyCode},#{strategyVersion},#{requestedParametersJson},#{orderAmount},#{feeRate},#{forceCloseAtEnd},'QUEUED',0,#{queuedAt},#{updatedAt})")
   int insert(BacktestRunRow row);
 
+  @Update(
+      "UPDATE q_backtest_run SET"
+          + " Status='QUEUED',ErrorCode=NULL,ErrorMessage=NULL,FinishedAt=NULL,QueuedAt=#{queuedAt},UpdatedAt=#{updatedAt}"
+          + " WHERE RunId=#{runId} AND Status='FAILED' AND ErrorCode='BACKTEST_QUEUE_FULL'")
+  int retryQueueRejectedRun(
+      @Param("runId") String runId,
+      @Param("queuedAt") Instant queuedAt,
+      @Param("updatedAt") Instant updatedAt);
+
   @ResultMap("backtestRunRow")
   @Select(
       "<script>SELECT "

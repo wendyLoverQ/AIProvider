@@ -89,20 +89,11 @@ public class BacktestRunService {
     }
     BacktestRunRow existing = runs.findByRunId(id);
     if (existing != null) {
-      boolean same =
-          existing.datasetId == q.getDatasetId()
-              && existing.startOpenTimeMs == q.getStartOpenTimeInclusive().toEpochMilli()
-              && existing.endOpenTimeExclusiveMs == q.getEndOpenTimeExclusive().toEpochMilli()
-              && code.equals(existing.strategyCode)
-              && version.equals(existing.strategyVersion)
-              && Objects.equals(read(existing.requestedParametersJson), params)
-              && existing.orderAmount != null
-              && existing.orderAmount.compareTo(q.getOrderAmount()) == 0
-              && existing.feeRate != null
-              && existing.feeRate.compareTo(q.getFeeRate()) == 0
-              && existing.forceCloseAtEnd == q.isForceCloseAtEnd();
-      if (!same)
+      if (!sameRequest(existing, q, code, version, params))
         throw error("BACKTEST_RUN_ID_CONFLICT", "runId already belongs to a different request");
+      if (isQueueRejected(existing)) {
+        retryQueueRejectedRun(id, q, code, version, params);
+      }
       return id;
     }
     BacktestRunRow row = new BacktestRunRow();
@@ -136,6 +127,9 @@ public class BacktestRunService {
       if (!sameRequest(raced, q, code, version, params)) {
         throw error("BACKTEST_RUN_ID_CONFLICT", "runId already belongs to a different request");
       }
+      if (isQueueRejected(raced)) {
+        retryQueueRejectedRun(id, q, code, version, params);
+      }
       return id;
     }
     BacktestRunCommand command =
@@ -150,13 +144,56 @@ public class BacktestRunService {
             q.getOrderAmount(),
             q.getFeeRate(),
             q.isForceCloseAtEnd());
+    enqueue(command);
+    return id;
+  }
+
+  private boolean isQueueRejected(BacktestRunRow row) {
+    return "FAILED".equals(row.status) && "BACKTEST_QUEUE_FULL".equals(row.errorCode);
+  }
+
+  private void retryQueueRejectedRun(
+      String id,
+      BacktestCreateRequest q,
+      String code,
+      String version,
+      Map<String, Integer> params) {
+    Instant now = Instant.now();
+    int affected = runs.retryQueueRejectedRun(id, now, now);
+    if (affected == 1) {
+      enqueue(
+          new BacktestRunCommand(
+              id,
+              q.getDatasetId(),
+              q.getStartOpenTimeInclusive(),
+              q.getEndOpenTimeExclusive(),
+              code,
+              version,
+              params,
+              q.getOrderAmount(),
+              q.getFeeRate(),
+              q.isForceCloseAtEnd()));
+      return;
+    }
+    if (affected > 1) {
+      throw error("BACKTEST_STATE_CONFLICT", "runId=" + id + " retry affected multiple rows");
+    }
+    BacktestRunRow current = runs.findByRunId(id);
+    if (current == null) {
+      throw error("BACKTEST_RUN_PERSISTENCE_FAILED", "runId=" + id + " disappeared during retry");
+    }
+    if (!sameRequest(current, q, code, version, params)) {
+      throw error("BACKTEST_RUN_ID_CONFLICT", "runId already belongs to a different request");
+    }
+  }
+
+  private void enqueue(BacktestRunCommand command) {
     try {
       executor.execute(() -> run(command));
     } catch (RejectedExecutionException ex) {
-      failSafely(id, "BACKTEST_QUEUE_FULL", descriptor(ex.getMessage()));
-      throw error("BACKTEST_QUEUE_FULL", "runId=" + id + " queue is full");
+      failSafely(command.runId(), "BACKTEST_QUEUE_FULL", descriptor(ex.getMessage()));
+      throw error("BACKTEST_QUEUE_FULL", "runId=" + command.runId() + " queue is full");
     }
-    return id;
   }
 
   private boolean sameRequest(
