@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.*;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,6 +44,16 @@ public class BacktestExperimentService {
 
   @Transactional
   public BacktestExperimentDtos.CreateResponse create(BacktestExperimentCreateRequest q) {
+    return createWithExperimentId(UUID.randomUUID().toString(), q);
+  }
+
+  public BacktestExperimentDtos.CreateResponse createWithExperimentId(
+      String experimentId, BacktestExperimentCreateRequest q) {
+    try {
+      UUID.fromString(experimentId);
+    } catch (IllegalArgumentException e) {
+      throw error("WALK_FORWARD_EXPERIMENT_CONFLICT", "experimentId must be a UUID");
+    }
     validateRequest(q);
     MarketDataset dataset = datasets.findById(q.getDatasetId());
     if (dataset == null) throw error("BACKTEST_EXPERIMENT_RANGE_INVALID", "datasetId not found");
@@ -59,9 +70,17 @@ public class BacktestExperimentService {
     Map<String, List<Integer>> grid = gridResult.grid();
     List<Map<String, Integer>> combinations = gridResult.combinations();
     validateRange(dataset, q, combinations, definition);
+    String canonicalGrid = write(grid);
+    BacktestExperimentRow existing = experiments.findByExperimentId(experimentId);
+    if (existing != null) {
+      if (!sameImmutableRequest(existing, q, canonicalGrid))
+        throw error(
+            "WALK_FORWARD_EXPERIMENT_CONFLICT", "experimentId belongs to a different request");
+      return response(existing);
+    }
     Instant now = Instant.now();
     BacktestExperimentRow row = new BacktestExperimentRow();
-    row.experimentId = UUID.randomUUID().toString();
+    row.experimentId = experimentId;
     row.datasetId = q.getDatasetId();
     row.provider = dataset.getProvider().name();
     row.marketType = dataset.getMarketType().name();
@@ -70,7 +89,7 @@ public class BacktestExperimentService {
     row.intervalCode = dataset.getInterval().code();
     row.strategyCode = q.getStrategyCode().trim();
     row.strategyVersion = q.getStrategyVersion().trim();
-    row.parameterGridJson = write(grid);
+    row.parameterGridJson = canonicalGrid;
     row.candidateCount = combinations.size();
     row.trainingStartOpenTimeMs = q.getTrainingStartOpenTimeInclusive().toEpochMilli();
     row.trainingEndOpenTimeMs = q.getTrainingEndOpenTimeExclusive().toEpochMilli();
@@ -81,10 +100,19 @@ public class BacktestExperimentService {
     row.forceCloseAtEnd = true;
     row.createdAt = now;
     row.updatedAt = now;
-    if (experiments.insert(row) != 1)
-      throw error(
-          "BACKTEST_EXPERIMENT_STATE_CONFLICT",
-          "experiment insert affected an unexpected number of rows");
+    try {
+      if (experiments.insert(row) != 1)
+        throw error(
+            "BACKTEST_EXPERIMENT_STATE_CONFLICT",
+            "experiment insert affected an unexpected number of rows");
+    } catch (DataIntegrityViolationException exception) {
+      BacktestExperimentRow raced = experiments.findByExperimentId(experimentId);
+      if (raced == null) throw exception;
+      if (!sameImmutableRequest(raced, q, canonicalGrid))
+        throw error(
+            "WALK_FORWARD_EXPERIMENT_CONFLICT", "experimentId belongs to a different request");
+      return response(raced);
+    }
     List<BacktestExperimentCandidateRow> rows = new ArrayList<>();
     for (int i = 0; i < combinations.size(); i++) {
       BacktestExperimentCandidateRow c = new BacktestExperimentCandidateRow();
@@ -102,8 +130,30 @@ public class BacktestExperimentService {
       throw error(
           "BACKTEST_EXPERIMENT_STATE_CONFLICT",
           "candidate insert affected an unexpected number of rows");
+    return response(row);
+  }
+
+  private BacktestExperimentDtos.CreateResponse response(BacktestExperimentRow row) {
     return new BacktestExperimentDtos.CreateResponse(
         row.experimentId, row.candidateCount, row.candidateCount * 2);
+  }
+
+  private boolean sameImmutableRequest(
+      BacktestExperimentRow row, BacktestExperimentCreateRequest request, String canonicalGrid) {
+    return row.datasetId == request.getDatasetId()
+        && row.strategyCode.equals(request.getStrategyCode().trim())
+        && row.strategyVersion.equals(request.getStrategyVersion().trim())
+        && canonicalGrid.equals(row.parameterGridJson)
+        && row.trainingStartOpenTimeMs == request.getTrainingStartOpenTimeInclusive().toEpochMilli()
+        && row.trainingEndOpenTimeMs == request.getTrainingEndOpenTimeExclusive().toEpochMilli()
+        && row.validationStartOpenTimeMs
+            == request.getValidationStartOpenTimeInclusive().toEpochMilli()
+        && row.validationEndOpenTimeMs == request.getValidationEndOpenTimeExclusive().toEpochMilli()
+        && row.orderAmount != null
+        && row.orderAmount.compareTo(request.getOrderAmount()) == 0
+        && row.feeRate != null
+        && row.feeRate.compareTo(request.getFeeRate()) == 0
+        && row.forceCloseAtEnd == request.isForceCloseAtEnd();
   }
 
   public BacktestDtos.Page<BacktestExperimentDtos.ExperimentSummary> page(

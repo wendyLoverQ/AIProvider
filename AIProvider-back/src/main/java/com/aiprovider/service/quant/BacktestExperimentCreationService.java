@@ -8,8 +8,20 @@ import org.springframework.transaction.annotation.Transactional;
 /** Transaction boundary for experiment and all candidate row creation. */
 @Service
 public class BacktestExperimentCreationService {
-    private final BacktestExperimentService experiments;
-    public BacktestExperimentCreationService(BacktestExperimentService experiments){this.experiments=experiments;}
-    @Transactional
-    public BacktestExperimentDtos.CreateResponse create(BacktestExperimentCreateRequest request){return experiments.create(request);}
+  private final BacktestExperimentService experiments;
+
+  public BacktestExperimentCreationService(BacktestExperimentService experiments) {
+    this.experiments = experiments;
+  }
+
+  @Transactional
+  public BacktestExperimentDtos.CreateResponse create(BacktestExperimentCreateRequest request) {
+    return experiments.create(request);
+  }
+
+  @Transactional
+  public BacktestExperimentDtos.CreateResponse createWithExperimentId(
+      String experimentId, BacktestExperimentCreateRequest request) {
+    return experiments.createWithExperimentId(experimentId, request);
+  }
 }

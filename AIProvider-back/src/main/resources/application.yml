@@ -134,7 +134,12 @@ quant:
     max-candidates: ${QUANT_EXPERIMENT_MAX_CANDIDATES:64}
     max-active-candidates-per-experiment: ${QUANT_EXPERIMENT_MAX_ACTIVE_CANDIDATES:2}
     dispatcher-fixed-delay-ms: ${QUANT_EXPERIMENT_DISPATCHER_DELAY_MS:2000}
-    stale-claim-seconds: ${QUANT_EXPERIMENT_STALE_CLAIM_SECONDS:300}
+      stale-claim-seconds: ${QUANT_EXPERIMENT_STALE_CLAIM_SECONDS:300}
+  walk-forward:
+    max-folds: ${QUANT_WALK_FORWARD_MAX_FOLDS:36}
+    max-total-child-runs: ${QUANT_WALK_FORWARD_MAX_CHILD_RUNS:2048}
+    dispatcher-fixed-delay-ms: ${QUANT_WALK_FORWARD_DISPATCHER_DELAY_MS:3000}
+    stale-claim-seconds: ${QUANT_WALK_FORWARD_STALE_CLAIM_SECONDS:300}
   binance-usdm:
     base-url: ${BINANCE_USDM_BASE_URL:https://fapi.binance.com}
     connect-timeout-ms: ${BINANCE_USDM_CONNECT_TIMEOUT_MS:3000}
