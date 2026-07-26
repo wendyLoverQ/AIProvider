@@ -1,0 +1,439 @@
+.quant-backtests-shell {
+  min-width: 0;
+}
+
+.quant-backtests-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 10px 18px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-page);
+}
+
+.quant-backtests-tabs button {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--control-radius) var(--control-radius) 0 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.quant-backtests-tabs button:hover,
+.quant-backtests-tabs button:focus-visible {
+  color: var(--text-primary);
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
+.quant-backtests-tabs button.active {
+  border-color: var(--border-normal);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.quant-secondary-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border-normal);
+  border-radius: var(--control-radius);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.quant-experiment-main {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.82fr) minmax(0, 1.5fr);
+  gap: 14px;
+  min-width: 0;
+}
+
+.quant-experiment-list {
+  align-self: start;
+}
+
+.quant-experiment-filters {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.7fr) minmax(110px, 1fr) minmax(
+      120px,
+      1fr
+    );
+  gap: 7px;
+  margin: 10px 0;
+}
+
+.quant-experiment-filters select,
+.quant-experiment-filters .ui-search-field {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid var(--border-normal);
+  border-radius: var(--control-radius);
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.quant-experiment-filters select {
+  padding: 0 8px;
+}
+
+.quant-experiment-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 9px;
+  width: 100%;
+  margin-top: 7px;
+  padding: 10px;
+  border: 1px solid var(--border-normal);
+  border-radius: var(--control-radius);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.quant-experiment-row:hover,
+.quant-experiment-row:focus-visible,
+.quant-experiment-row.selected {
+  border-color: var(--border-focus);
+  background: var(--bg-card-hover);
+  outline: none;
+}
+
+.quant-experiment-row .backtest-status {
+  grid-row: 1 / span 2;
+}
+
+.quant-experiment-row strong,
+.quant-experiment-row > span:not(.backtest-status) {
+  grid-column: 2;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quant-experiment-row strong {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.status-running,
+.status-queued {
+  border-color: color-mix(
+    in srgb,
+    var(--accent-primary) 55%,
+    var(--border-normal)
+  );
+  color: var(--accent-primary);
+}
+
+.status-completed_with_failures {
+  border-color: color-mix(
+    in srgb,
+    var(--accent-yellow) 55%,
+    var(--border-normal)
+  );
+  color: var(--accent-yellow);
+}
+
+.copyable-id {
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.quant-experiment-detail .quant-section-head > div {
+  min-width: 0;
+}
+
+.quant-parameter-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 14px;
+}
+
+.quant-parameter-grid > strong {
+  width: 100%;
+  color: var(--text-primary);
+  font-size: 11px;
+}
+
+.quant-parameter-grid span,
+.quant-experiment-chips i {
+  display: inline-flex;
+  gap: 5px;
+  padding: 4px 7px;
+  border: 1px solid var(--border-normal);
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.quant-parameter-grid b {
+  color: var(--text-primary);
+}
+
+.quant-research-warning {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent-primary);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.quant-experiment-create {
+  width: min(620px, 100%);
+}
+
+.quant-experiment-parameter .quant-experiment-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.quant-experiment-parameter .field-error {
+  color: var(--accent-red);
+}
+
+.quant-experiment-count {
+  display: grid;
+  gap: 4px;
+  padding: 11px 12px;
+  border: 1px solid var(--border-normal);
+  border-radius: var(--control-radius);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.quant-experiment-count strong {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.quant-experiment-count.invalid {
+  border-color: var(--accent-red);
+}
+
+.quant-experiment-count.invalid small {
+  color: var(--accent-red);
+}
+
+.quant-candidate-section {
+  margin-top: 14px;
+}
+
+.candidate-sort-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.candidate-sort-control select,
+.candidate-sort-control button {
+  min-height: 30px;
+  border: 1px solid var(--border-normal);
+  border-radius: var(--control-radius);
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.candidate-sort-control select {
+  padding: 0 8px;
+}
+
+.candidate-sort-control button {
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.quant-candidate-table {
+  min-width: 1450px !important;
+}
+
+.quant-candidate-table th button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.quant-candidate-table tbody tr:hover,
+.quant-candidate-table tbody tr:has(.candidate-select-button:focus-visible),
+.quant-candidate-table tbody tr.selected {
+  background: var(--bg-card-hover);
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
+.candidate-select-button {
+  min-width: 30px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-normal);
+  border-radius: var(--control-radius);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.candidate-parameters {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.quant-comparison {
+  margin-top: 14px;
+}
+
+.quant-comparison > .quant-section-head > span {
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.quant-comparison-table {
+  min-width: 480px !important;
+}
+
+.quant-comparison-table th {
+  color: var(--text-muted);
+}
+
+.quant-objective-deltas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.quant-objective-deltas span {
+  padding: 7px 9px;
+  border: 1px solid var(--border-normal);
+  border-radius: var(--control-radius);
+  color: var(--text-primary);
+  font-size: 11px;
+}
+
+.quant-dispatch-state {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.quant-segment-debug {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.quant-segment-debug section {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--border-normal);
+  border-radius: var(--control-radius);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.quant-segment-debug strong {
+  color: var(--text-primary);
+}
+
+.quant-segment-debug button {
+  justify-self: start;
+  margin-top: 3px;
+  padding: 6px 9px;
+  border: 1px solid var(--border-normal);
+  border-radius: var(--control-radius);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.quant-dual-curves {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.quant-equity-panel {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border-normal);
+  border-radius: var(--card-radius);
+  background: var(--bg-card);
+}
+
+.quant-equity-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.quant-equity-panel h5 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.quant-equity-panel small {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.quant-experiment-chart {
+  width: 100%;
+  height: 260px;
+  margin-top: 8px;
+}
+
+@media (max-width: 980px) {
+  .quant-experiment-main,
+  .quant-dual-curves {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .quant-backtests-tabs {
+    padding-inline: 10px;
+  }
+
+  .quant-experiment-filters,
+  .quant-segment-debug {
+    grid-template-columns: 1fr;
+  }
+
+  .candidate-sort-control {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .quant-experiment-row > span:not(.backtest-status) {
+    white-space: normal;
+  }
+}
