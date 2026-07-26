@@ -30,8 +30,8 @@ describe("global UI theme", () => {
     expect(document.documentElement.style.getPropertyValue("--bg-page")).toBe(DEFAULT_UI_THEME["--bg-page"]);
   });
 
-  it("provides ten complete, distinct and readable selectable presets", () => {
-    expect(UI_THEME_PRESETS).toHaveLength(10);
+  it("provides fifteen complete, distinct and readable selectable presets", () => {
+    expect(UI_THEME_PRESETS).toHaveLength(15);
     for (const preset of UI_THEME_PRESETS) {
       expect(Object.keys(preset.theme).sort()).toEqual(Object.keys(DEFAULT_UI_THEME).sort());
       expect(isUiThemePreset({ ...preset.theme }, preset)).toBe(true);
