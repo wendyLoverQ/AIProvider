@@ -135,6 +135,10 @@ public class WalkForwardStudyService {
         sampled);
   }
 
+  WalkForwardStudyDtos.StudySummary refreshAggregate(WalkForwardStudySnapshot snapshot) {
+    return refreshSummary(snapshot);
+  }
+
   private WalkForwardStudyDtos.StudySummary refreshSummary(WalkForwardStudySnapshot snapshot) {
     Aggregate aggregate = aggregate(snapshot);
     WalkForwardStudyRow row = snapshot.study();
@@ -157,7 +161,15 @@ public class WalkForwardStudyService {
               aggregate.errorMessage,
               finished,
               now);
-      if (affected != 1) fail("WALK_FORWARD_STATE_CONFLICT", "study aggregate CAS lost");
+      if (affected > 1) fail("WALK_FORWARD_STATE_CONFLICT", "study aggregate affected multiple rows");
+      if (affected == 0) {
+        WalkForwardStudyRow latest = require(row.studyId);
+        WalkForwardStudySnapshot current =
+            snapshots.load(latest, folds.findAllByStudyId(row.studyId), false);
+        Aggregate currentAggregate = aggregate(current);
+        OosSummary currentOos = terminal(latest.status) ? oosSummary(current) : OosSummary.empty();
+        return summary(latest, currentAggregate, currentOos);
+      }
       row = require(row.studyId);
       snapshot = new WalkForwardStudySnapshot(row, snapshot.folds(), snapshot.experiments(), snapshot.runs(), snapshot.equities());
     }
@@ -214,7 +226,7 @@ public class WalkForwardStudyService {
     progress = clamp(progress);
     if (!terminal(status) && progress.compareTo(HUNDRED) >= 0) progress = NON_TERMINAL_MAX_PROGRESS;
     String errorCode = null, errorMessage = null;
-    if (firstFailure != null) {
+    if (firstFailure != null && ("COMPLETED_WITH_FAILURES".equals(status) || "FAILED".equals(status))) {
       if (firstFailure.errorCode == null)
         fail("WALK_FORWARD_STATE_CONFLICT", "failed fold has no error code");
       errorCode = firstFailure.errorCode;

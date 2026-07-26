@@ -28,6 +28,9 @@ class WalkForwardStudyAggregationTest {
     assertEquals("RUNNING", state("CREATING_EXPERIMENT", "PENDING").status());
     assertEquals("RUNNING", stateWithWaiting().status());
     assertEquals("RUNNING", state("COMPLETED", "PENDING").status());
+    AggregateView runningWithFailure = state("FAILED", "PENDING");
+    assertEquals("RUNNING", runningWithFailure.status());
+    assertNull(runningWithFailure.errorCode());
     assertEquals("COMPLETED", state("COMPLETED", "COMPLETED").status());
     AggregateView mixed = state("FAILED", "COMPLETED");
     assertEquals("COMPLETED_WITH_FAILURES", mixed.status());

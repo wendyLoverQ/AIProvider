@@ -3,6 +3,7 @@ package com.aiprovider.service.quant;
 import com.aiprovider.config.quant.QuantWalkForwardProperties;
 import com.aiprovider.controller.quant.dto.BacktestExperimentCreateRequest;
 import com.aiprovider.controller.quant.dto.BacktestExperimentDtos;
+import com.aiprovider.controller.quant.dto.WalkForwardStudyDtos;
 import com.aiprovider.mapper.BacktestRunMapper;
 import com.aiprovider.mapper.WalkForwardFoldMapper;
 import com.aiprovider.mapper.WalkForwardStudyMapper;
@@ -29,6 +30,7 @@ public class WalkForwardStudyDispatcher {
   private final ObjectMapper json;
   private final QuantWalkForwardProperties properties;
   private final WalkForwardStudySnapshotLoader snapshots;
+  private final WalkForwardStudyService service;
 
   public WalkForwardStudyDispatcher(
       WalkForwardStudyMapper studies,
@@ -37,7 +39,8 @@ public class WalkForwardStudyDispatcher {
       BacktestRunMapper runs,
       ObjectMapper json,
       QuantWalkForwardProperties properties,
-      WalkForwardStudySnapshotLoader snapshots) {
+      WalkForwardStudySnapshotLoader snapshots,
+      WalkForwardStudyService service) {
     this.studies = studies;
     this.folds = folds;
     this.creation = creation;
@@ -45,6 +48,7 @@ public class WalkForwardStudyDispatcher {
     this.json = json;
     this.properties = properties;
     this.snapshots = snapshots;
+    this.service = service;
   }
 
   @Scheduled(fixedDelayString = "${quant.walk-forward.dispatcher-fixed-delay-ms:3000}")
@@ -60,7 +64,13 @@ public class WalkForwardStudyDispatcher {
     List<WalkForwardStudyRow> studyRows = studies.findNonTerminal();
     if (studyRows.isEmpty()) return;
     List<String> studyIds = studyRows.stream().map(row -> row.studyId).toList();
-    List<WalkForwardFoldRow> foldRows = folds.findAllByStudyIds(studyIds);
+    List<WalkForwardFoldRow> foldRows;
+    try {
+      foldRows = folds.findAllByStudyIds(studyIds);
+    } catch (RuntimeException failure) {
+      log.error("operation=walk-forward-fold-batch-load result=retryable", failure);
+      return;
+    }
     Map<String, WalkForwardStudySnapshot> loaded;
     try {
       loaded = snapshots.loadMany(studyRows, foldRows, false);
@@ -68,45 +78,41 @@ public class WalkForwardStudyDispatcher {
       WalkForwardDispatchErrorClassifier.Classification classified =
           WalkForwardDispatchErrorClassifier.classify(failure);
       log.error("operation=walk-forward-batch-load result=" + classified.kind() + " errorCode=" + classified.errorCode(), failure);
-      if (classified.kind() == WalkForwardDispatchErrorClassifier.Kind.PERMANENT) {
-        for (WalkForwardFoldRow fold : foldRows) {
-          if ("CREATING_EXPERIMENT".equals(fold.status) || "WAITING_EXPERIMENT".equals(fold.status)) {
-            WalkForwardStudyRow study = studyRows.stream().filter(row -> row.studyId.equals(fold.studyId)).findFirst().orElse(null);
-            if (study != null) markFailed(study, fold, classified);
-          }
-        }
-      }
-      return;
+      if (classified.kind() == WalkForwardDispatchErrorClassifier.Kind.RETRYABLE) return;
+      loaded = loadStudiesIndependently(studyRows, classified);
     }
 
     List<WaitingWork> waiting = new ArrayList<>();
     for (WalkForwardStudyRow study : studyRows) {
       WalkForwardStudySnapshot snapshot = loaded.get(study.studyId);
       if (snapshot == null) continue;
-      WalkForwardFoldRow creatingFold = snapshot.folds().stream().filter(f -> "CREATING_EXPERIMENT".equals(f.status)).findFirst().orElse(null);
-      if (creatingFold != null) {
-        processCreating(study, creatingFold);
-        continue;
+      try {
+        WalkForwardStudyDtos.StudySummary before = service.refreshAggregate(snapshot);
+        if (terminal(before.status())) continue;
+        processStudy(study, snapshot, waiting);
+      } catch (RuntimeException failure) {
+        handleStudyFailure(study, snapshot, failure);
       }
-      WalkForwardFoldRow waitingFold = snapshot.folds().stream().filter(f -> "WAITING_EXPERIMENT".equals(f.status)).findFirst().orElse(null);
-      if (waitingFold != null) {
-        try {
-          WaitingWork work = prepareWaiting(study, waitingFold, snapshot);
-          if (work != null) waiting.add(work);
-        } catch (RuntimeException failure) {
-          handleFailure(study, waitingFold, failure);
-        }
-        continue;
-      }
-      if (snapshot.folds().stream().anyMatch(f -> "PENDING".equals(f.status))) claimNext(study);
     }
 
     if (!waiting.isEmpty()) {
       List<String> runIds = waiting.stream().map(work -> work.selected.validationRunId).toList();
       Map<String, BacktestRunRow> validationRuns = new LinkedHashMap<>();
-      for (BacktestRunRow run : runs.findByRunIds(runIds)) validationRuns.put(run.runId, run);
-      for (WaitingWork work : waiting) processWaiting(work, validationRuns.get(work.selected.validationRunId));
+      try {
+        for (BacktestRunRow run : runs.findByRunIds(runIds)) validationRuns.put(run.runId, run);
+      } catch (RuntimeException failure) {
+        log.error("operation=walk-forward-validation-batch-load result=retryable", failure);
+        return;
+      }
+      for (WaitingWork work : waiting) {
+        try {
+          processWaiting(work, validationRuns.get(work.selected.validationRunId));
+        } catch (RuntimeException failure) {
+          handleStudyFailure(work.study, work.snapshot, failure);
+        }
+      }
     }
+    refreshAggregatesAfterDispatch(studyRows);
   }
 
   void recoverStaleClaims(long staleClaimSeconds) {
@@ -127,6 +133,111 @@ public class WalkForwardStudyDispatcher {
     }
   }
 
+  private void processStudy(
+      WalkForwardStudyRow study, WalkForwardStudySnapshot snapshot, List<WaitingWork> waiting) {
+    WalkForwardFoldRow creatingFold =
+        snapshot.folds().stream()
+            .filter(f -> "CREATING_EXPERIMENT".equals(f.status))
+            .findFirst()
+            .orElse(null);
+    if (creatingFold != null) {
+      processCreating(study, creatingFold);
+      return;
+    }
+    WalkForwardFoldRow waitingFold =
+        snapshot.folds().stream()
+            .filter(f -> "WAITING_EXPERIMENT".equals(f.status))
+            .findFirst()
+            .orElse(null);
+    if (waitingFold != null) {
+      WaitingWork work = prepareWaiting(study, waitingFold, snapshot);
+      if (work != null) waiting.add(work);
+      return;
+    }
+    if (snapshot.folds().stream().anyMatch(f -> "PENDING".equals(f.status))) claimNext(study);
+  }
+
+  private Map<String, WalkForwardStudySnapshot> loadStudiesIndependently(
+      List<WalkForwardStudyRow> studyRows,
+      WalkForwardDispatchErrorClassifier.Classification batchFailure) {
+    Map<String, WalkForwardStudySnapshot> result = new LinkedHashMap<>();
+    for (WalkForwardStudyRow study : studyRows) {
+      List<WalkForwardFoldRow> rows = List.of();
+      try {
+        rows = folds.findAllByStudyId(study.studyId);
+        result.put(study.studyId, snapshots.load(study, rows, false));
+      } catch (RuntimeException failure) {
+        WalkForwardStudySnapshot fallback =
+            new WalkForwardStudySnapshot(study, rows, Map.of(), Map.of(), Map.of());
+        handleStudyFailure(study, fallback, failure);
+      }
+    }
+    return result;
+  }
+
+  private void refreshAggregatesAfterDispatch(List<WalkForwardStudyRow> studyRows) {
+    List<String> studyIds = studyRows.stream().map(row -> row.studyId).toList();
+    List<WalkForwardFoldRow> rows;
+    try {
+      rows = folds.findAllByStudyIds(studyIds);
+    } catch (RuntimeException failure) {
+      log.error("operation=walk-forward-post-dispatch-fold-load result=retryable", failure);
+      return;
+    }
+    Map<String, WalkForwardStudySnapshot> loaded;
+    try {
+      loaded = snapshots.loadMany(studyRows, rows, false);
+    } catch (RuntimeException failure) {
+      WalkForwardDispatchErrorClassifier.Classification classified =
+          WalkForwardDispatchErrorClassifier.classify(failure);
+      if (classified.kind() == WalkForwardDispatchErrorClassifier.Kind.RETRYABLE) {
+        log.error("operation=walk-forward-post-dispatch-batch-load result=retryable", failure);
+        return;
+      }
+      loaded = loadStudiesIndependently(studyRows, classified);
+    }
+    for (WalkForwardStudyRow study : studyRows) {
+      WalkForwardStudySnapshot snapshot = loaded.get(study.studyId);
+      if (snapshot == null) continue;
+      try {
+        service.refreshAggregate(snapshot);
+      } catch (RuntimeException failure) {
+        handleStudyFailure(study, snapshot, failure);
+      }
+    }
+  }
+
+  private void handleStudyFailure(
+      WalkForwardStudyRow study, WalkForwardStudySnapshot snapshot, RuntimeException failure) {
+    WalkForwardDispatchErrorClassifier.Classification classified =
+        WalkForwardDispatchErrorClassifier.classify(failure);
+    if (classified.kind() == WalkForwardDispatchErrorClassifier.Kind.RETRYABLE) {
+      log.warn(
+          "operation=walk-forward-study studyId={} errorCode={} result=retryable",
+          study.studyId,
+          classified.errorCode(),
+          failure);
+      return;
+    }
+    WalkForwardFoldRow active =
+        snapshot.folds().stream()
+            .filter(
+                fold ->
+                    "CREATING_EXPERIMENT".equals(fold.status)
+                        || "WAITING_EXPERIMENT".equals(fold.status))
+            .findFirst()
+            .orElse(null);
+    if (active == null) {
+      log.error(
+          "operation=walk-forward-study studyId={} errorCode={} result=permanent_without_active_fold",
+          study.studyId,
+          classified.errorCode(),
+          failure);
+      return;
+    }
+    markFailed(study, active, classified);
+  }
+
   private WaitingWork prepareWaiting(
       WalkForwardStudyRow study, WalkForwardFoldRow fold, WalkForwardStudySnapshot snapshot) {
     BacktestExperimentDtos.ExperimentSummary experiment = snapshot.experiment(fold.experimentId);
@@ -139,7 +250,7 @@ public class WalkForwardStudyDispatcher {
     WalkForwardTrainingCandidateRow selected = findBest(fold.experimentId, metric, study.minimumTrainTrades);
     if (selected == null)
       throw new WalkForwardTaskException("WALK_FORWARD_NO_ELIGIBLE_CANDIDATE", "no eligible completed TRAIN candidate");
-    return new WaitingWork(study, fold, selected);
+    return new WaitingWork(study, fold, selected, snapshot);
   }
 
   private void processWaiting(WaitingWork work, BacktestRunRow validation) {
@@ -218,5 +329,13 @@ public class WalkForwardStudyDispatcher {
   }
 
   private WalkForwardTaskException stateConflict(String message) { return new WalkForwardTaskException("WALK_FORWARD_STATE_CONFLICT", message); }
-  private record WaitingWork(WalkForwardStudyRow study, WalkForwardFoldRow fold, WalkForwardTrainingCandidateRow selected) {}
+  private boolean terminal(String status) {
+    return Set.of("COMPLETED", "COMPLETED_WITH_FAILURES", "FAILED").contains(status);
+  }
+
+  private record WaitingWork(
+      WalkForwardStudyRow study,
+      WalkForwardFoldRow fold,
+      WalkForwardTrainingCandidateRow selected,
+      WalkForwardStudySnapshot snapshot) {}
 }
