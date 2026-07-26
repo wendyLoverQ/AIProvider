@@ -6,7 +6,7 @@ import java.util.Map;
 
 public final class StrategyRegistry {
     private final Map<String, QuantStrategyDefinition> definitions = new LinkedHashMap<>();
-    public StrategyRegistry() { register(new EmaCrossLongOnlyDefinition()); }
+    public StrategyRegistry() { register(new EmaCrossLongOnlyDefinition()); register(new RsiMeanReversionLongOnlyDefinition()); register(new MacdTrendLongOnlyDefinition()); }
     public void register(QuantStrategyDefinition definition) {
         if (definition == null || definition.code() == null || definitions.putIfAbsent(definition.code(), definition) != null) throw new StrategyException("STRATEGY_CODE_DUPLICATE", "duplicate strategy code");
     }
