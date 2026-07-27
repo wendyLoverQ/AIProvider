@@ -99,6 +99,53 @@ class QuantResearchOosRecoveryMySqlTest {
     }
   }
 
+  @Test void rejectsIncompleteFoldCoverageWithoutBlockingLaterStudies() {
+    try (TestContext context = open()) {
+      clear(context.jdbc); QuantResearchMySqlFixture fixture = new QuantResearchMySqlFixture(context.jdbc);
+      String broken = UUID.randomUUID().toString(); fixture.insertTerminalWalkForwardStudy(broken, 3, "COMPLETED");
+      fixture.insertTerminalFold(broken, 0, "COMPLETED", "broken-v", "{\"fastPeriod\":5}");
+      fixture.insertTerminalFold(broken, 2, "COMPLETED", "broken-v2", "{\"fastPeriod\":7}");
+      String healthy = UUID.randomUUID().toString(); fixture.insertTerminalWalkForwardStudy(healthy, 1, "COMPLETED");
+      fixture.insertTerminalFold(healthy, 0, "COMPLETED", "healthy-v", "{\"fastPeriod\":5}");
+      fixture.insertCompletedBacktestRun("healthy-v", 2, "0.10", "0.01"); fixture.insertBacktestEquity("healthy-v", List.of("1.0", "1.1"), 0);
+      new WalkForwardOosRecoveryService(context.studies, context.folds, loader(context), new WalkForwardOosCalculator(new ObjectMapper())).recoverBatch(20);
+      assertNull(scalar(context.jdbc, "OosAggregateVersion", broken)); assertNull(scalar(context.jdbc, "SuccessfulOosFolds", broken));
+      assertEquals(Integer.valueOf(1), scalar(context.jdbc, "OosAggregateVersion", healthy));
+    }
+  }
+
+  @Test void rejectsTerminalStudyContainingNonTerminalFold() {
+    try (TestContext context = open()) {
+      clear(context.jdbc); QuantResearchMySqlFixture fixture = new QuantResearchMySqlFixture(context.jdbc);
+      String broken = UUID.randomUUID().toString(); fixture.insertTerminalWalkForwardStudy(broken, 2, "COMPLETED");
+      fixture.insertTerminalFold(broken, 0, "COMPLETED", "waiting-v", "{\"fastPeriod\":5}");
+      fixture.insertTerminalFold(broken, 1, "WAITING_EXPERIMENT", "waiting-v2", "{\"fastPeriod\":7}");
+      String healthy = UUID.randomUUID().toString(); fixture.insertTerminalWalkForwardStudy(healthy, 1, "COMPLETED");
+      fixture.insertTerminalFold(healthy, 0, "COMPLETED", "healthy-v", "{\"fastPeriod\":5}");
+      fixture.insertCompletedBacktestRun("healthy-v", 2, "0.10", "0.01"); fixture.insertBacktestEquity("healthy-v", List.of("1.0", "1.1"), 0);
+      new WalkForwardOosRecoveryService(context.studies, context.folds, loader(context), new WalkForwardOosCalculator(new ObjectMapper())).recoverBatch(20);
+      assertNull(scalar(context.jdbc, "OosAggregateVersion", broken)); assertEquals(Integer.valueOf(1), scalar(context.jdbc, "OosAggregateVersion", healthy));
+    }
+  }
+
+  @Test void doesNotRewriteNormalizedDecimalResults() {
+    try (TestContext context = open()) {
+      clear(context.jdbc); QuantResearchMySqlFixture fixture = new QuantResearchMySqlFixture(context.jdbc);
+      String studyId = UUID.randomUUID().toString(); fixture.insertTerminalWalkForwardStudy(studyId, 1, "COMPLETED");
+      fixture.insertTerminalFold(studyId, 0, "COMPLETED", "precise-v", "{\"fastPeriod\":5}");
+      fixture.insertCompletedBacktestRun("precise-v", 2, "0.10", "0.01");
+      fixture.insertBacktestEquity("precise-v", List.of("1.123456789012345678901", "0.987654321098765432109"), 0);
+      ObjectMapper json = new ObjectMapper(); WalkForwardStudySnapshotLoader loader = loader(context);
+      new WalkForwardOosRecoveryService(context.studies, context.folds, loader, new WalkForwardOosCalculator(json)).recoverBatch(20);
+      Instant updatedAt = context.jdbc.queryForObject("SELECT UpdatedAt FROM q_walk_forward_study WHERE StudyId=?", Instant.class, studyId);
+      BigDecimal totalReturn = decimal(context.jdbc, "OosTotalReturnRatio", studyId);
+      WalkForwardStudyService service = new WalkForwardStudyService(context.studies, context.folds, loader, json, new WalkForwardOosCalculator(json));
+      service.get(studyId); service.page(1, 10, null, null, null); service.oosEquity(studyId, 100);
+      assertEquals(updatedAt, context.jdbc.queryForObject("SELECT UpdatedAt FROM q_walk_forward_study WHERE StudyId=?", Instant.class, studyId));
+      assertEquals(18, totalReturn.scale()); assertEquals(Integer.valueOf(1), scalar(context.jdbc, "OosAggregateVersion", studyId));
+    }
+  }
+
   private WalkForwardStudySnapshotLoader loader(TestContext context) {
     ObjectMapper json = new ObjectMapper();
     BacktestExperimentService experiments = experimentService(context, json);
