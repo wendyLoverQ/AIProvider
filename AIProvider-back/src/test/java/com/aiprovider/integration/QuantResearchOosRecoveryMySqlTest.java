@@ -26,6 +26,13 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import com.aiprovider.quant.execution.BacktestCompatibilityService;
+import com.aiprovider.quant.execution.ExecutionProfileRegistry;
+import com.aiprovider.quant.market.history.model.MarketDataset;
+import com.aiprovider.quant.market.history.port.MarketDatasetRepository;
+import com.aiprovider.quant.market.model.MarketProviderId;
+import com.aiprovider.quant.market.model.MarketType;
+import com.aiprovider.quant.strategy.StrategyRegistry;
 
 @Testcontainers(disabledWithoutDocker = true)
 class QuantResearchOosRecoveryMySqlTest {
@@ -37,7 +44,6 @@ class QuantResearchOosRecoveryMySqlTest {
       clear(context.jdbc);
       QuantResearchMySqlFixture fixture = new QuantResearchMySqlFixture(context.jdbc);
       String studyId = UUID.randomUUID().toString();
-      WalkForwardStudyRow study = study(studyId, 2, "COMPLETED");
       fixture.insertTerminalWalkForwardStudy(studyId, 2, "COMPLETED");
       fixture.insertTerminalFold(studyId, 0, "COMPLETED", "v1", "{\"fastPeriod\":5}");
       fixture.insertTerminalFold(studyId, 1, "COMPLETED", "v2", "{\"fastPeriod\":7}");
@@ -47,8 +53,7 @@ class QuantResearchOosRecoveryMySqlTest {
       fixture.insertBacktestEquity("v2", List.of("1.0", "0.9"), 3);
 
       ObjectMapper json = new ObjectMapper();
-      BacktestExperimentService experiments = new BacktestExperimentService(context.experiments, context.candidates,
-          context.runs, null, null, null, json, new QuantExperimentProperties());
+      BacktestExperimentService experiments = experimentService(context, json);
       WalkForwardStudySnapshotLoader loader = new WalkForwardStudySnapshotLoader(context.folds, experiments, context.runs, context.equity);
       WalkForwardOosCalculator calculator = new WalkForwardOosCalculator(json);
       WalkForwardOosRecoveryService recovery = new WalkForwardOosRecoveryService(context.studies, context.folds, loader, calculator);
@@ -96,8 +101,23 @@ class QuantResearchOosRecoveryMySqlTest {
 
   private WalkForwardStudySnapshotLoader loader(TestContext context) {
     ObjectMapper json = new ObjectMapper();
-    BacktestExperimentService experiments = new BacktestExperimentService(context.experiments, context.candidates, context.runs, null, null, null, json, new QuantExperimentProperties());
+    BacktestExperimentService experiments = experimentService(context, json);
     return new WalkForwardStudySnapshotLoader(context.folds, experiments, context.runs, context.equity);
+  }
+
+  private BacktestExperimentService experimentService(TestContext context, ObjectMapper json) {
+    return new BacktestExperimentService(context.experiments, context.candidates, context.runs,
+        new EmptyMarketDatasetRepository(), new StrategyRegistry(), new BacktestCompatibilityService(new ExecutionProfileRegistry()),
+        json, new QuantExperimentProperties());
+  }
+
+  private static final class EmptyMarketDatasetRepository implements MarketDatasetRepository {
+    public MarketDataset findByKey(MarketProviderId provider, MarketType marketType, String dataType, String symbol, String intervalCode) { return null; }
+    public MarketDataset findById(long datasetId) { return null; }
+    public List<MarketDataset> findPage(MarketProviderId provider, String symbol, String intervalCode, String status, int limit, int offset) { return List.of(); }
+    public long insert(MarketDataset dataset) { throw new UnsupportedOperationException("creation is not part of this recovery fixture"); }
+    public int updateStats(MarketDataset dataset) { throw new UnsupportedOperationException("creation is not part of this recovery fixture"); }
+    public int updateLastSync(long datasetId, String lastSyncTaskId, Instant lastSuccessfulSyncAt) { throw new UnsupportedOperationException("creation is not part of this recovery fixture"); }
   }
 
   private static TestContext open() {
@@ -114,56 +134,6 @@ class QuantResearchOosRecoveryMySqlTest {
     jdbc.update("DELETE FROM q_backtest_trade");
     jdbc.update("DELETE FROM q_backtest_run"); jdbc.update("DELETE FROM q_backtest_experiment_candidate");
     jdbc.update("DELETE FROM q_backtest_experiment");
-  }
-
-  private static WalkForwardStudyRow study(String id, int foldCount, String status) {
-    WalkForwardStudyRow row = new WalkForwardStudyRow(); row.studyId = id; row.datasetId = 1; row.provider = "BINANCE_USDM";
-    row.marketType = "USDM_PERPETUAL"; row.dataType = "CANDLE"; row.symbol = "BTCUSDT"; row.intervalCode = "1m";
-    row.strategyCode = "EMA_CROSS_LONG_ONLY"; row.strategyVersion = "1.0.0"; row.executionProfileCode = "PROFILE";
-    row.directionMode = "LONG_ONLY"; row.orderSizingMode = "BASE_QUANTITY"; row.parameterGridJson = "{\"fastPeriod\":[5,7]}";
-    row.windowMode = "ROLLING"; row.studyStartOpenTimeMs = 0; row.studyEndOpenTimeMs = 10000; row.trainingBars = 1;
-    row.validationBars = 1; row.stepBars = 1; row.foldCount = foldCount; row.candidateCountPerFold = 1; row.totalChildRuns = 2;
-    row.selectionMetric = "TRAIN_TOTAL_RETURN_RATIO"; row.minimumTrainTrades = 0; row.orderAmount = BigDecimal.ONE;
-    row.feeRate = new BigDecimal("0.001"); row.forceCloseAtEnd = true; row.status = status; row.progressPercent = BigDecimal.valueOf(100);
-    row.createdAt = Instant.EPOCH; row.updatedAt = Instant.EPOCH; row.startedAt = Instant.EPOCH; row.finishedAt = Instant.EPOCH; return row;
-  }
-
-  private static WalkForwardFoldRow fold(String studyId, int index, String status, String validation, String parameters) {
-    WalkForwardFoldRow row = new WalkForwardFoldRow(); row.foldId = UUID.randomUUID().toString(); row.studyId = studyId; row.foldIndex = index;
-    row.trainingStartOpenTimeMs = index * 1000L; row.trainingEndOpenTimeMs = index * 1000L + 500;
-    row.validationStartOpenTimeMs = row.trainingEndOpenTimeMs; row.validationEndOpenTimeMs = row.trainingEndOpenTimeMs + 500;
-    row.experimentId = UUID.randomUUID().toString(); row.status = status; row.selectedCandidateId = "candidate-" + index;
-    row.selectedParametersJson = parameters; row.selectedTrainingRunId = "t" + index; row.selectedValidationRunId = validation;
-    row.createdAt = Instant.EPOCH; row.updatedAt = Instant.EPOCH; row.startedAt = Instant.EPOCH; row.finishedAt = Instant.EPOCH; return row;
-  }
-
-  private static void insertRun(BacktestRunMapper runs, String id, int trades, String returns, String fees) {
-    BacktestRunRow row = new BacktestRunRow(); row.runId = id; row.datasetId = 1; row.provider = "BINANCE_USDM";
-    row.marketType = "USDM_PERPETUAL"; row.dataType = "CANDLE"; row.symbol = "BTCUSDT"; row.intervalCode = "1m";
-    row.startOpenTimeMs = 0; row.endOpenTimeExclusiveMs = 10000; row.strategyCode = "EMA_CROSS_LONG_ONLY"; row.strategyVersion = "1.0.0";
-    row.executionProfileCode = "PROFILE"; row.directionMode = "LONG_ONLY"; row.orderSizingMode = "BASE_QUANTITY";
-    row.requestedParametersJson = "{}"; row.orderAmount = BigDecimal.ONE; row.feeRate = new BigDecimal("0.001"); row.forceCloseAtEnd = true;
-    row.status = "COMPLETED"; row.progressPercent = BigDecimal.valueOf(100); row.tradeCount = trades; row.totalReturnRatio = new BigDecimal(returns);
-    row.maximumDrawdownRatio = new BigDecimal("0.1"); row.totalFees = new BigDecimal(fees); row.queuedAt = Instant.EPOCH; row.finishedAt = Instant.EPOCH; row.updatedAt = Instant.EPOCH;
-    assertEquals(1, runs.insert(row));
-  }
-
-  private static void insertEquity(BacktestEquityMapper equity, String runId, List<String> values, long offset) {
-    List<BacktestEquityRow> rows = new java.util.ArrayList<>();
-    for (int i = 0; i < values.size(); i++) { BacktestEquityRow row = new BacktestEquityRow(); row.runId = runId; row.pointIndex = i; row.openTimeMs = offset + i; row.equityRatio = new BigDecimal(values.get(i)); row.drawdownRatio = BigDecimal.ZERO; rows.add(row); }
-    assertEquals(values.size(), equity.insertBatch(rows));
-  }
-
-  private static ResearchStudyRow research(String id, String child) {
-    ResearchStudyRow row = new ResearchStudyRow(); row.researchStudyId = id; row.name = "research"; row.datasetId = 1;
-    row.provider = "BINANCE_USDM"; row.marketType = "USDM_PERPETUAL"; row.dataType = "CANDLE"; row.symbol = "BTCUSDT"; row.intervalCode = "1m";
-    row.strategyCode = "EMA_CROSS_LONG_ONLY"; row.strategyVersion = "1.0.0"; row.executionProfileCode = "PROFILE";
-    row.directionMode = "LONG_ONLY"; row.orderSizingMode = "BASE_QUANTITY"; row.evaluationMode = "WALK_FORWARD"; row.parameterSpaceMode = "STRATEGY_DEFAULT";
-    row.parameterSpaceJson = "{\"fastPeriod\":{\"min\":5,\"max\":7,\"step\":2}}"; row.expandedParameterGridJson = "{\"fastPeriod\":[5,7]}";
-    row.candidateCount = 2; row.studyStartOpenTimeMs = 0; row.studyEndOpenTimeMs = 10000; row.trainingBars = 1; row.validationBars = 1;
-    row.selectionMetric = "TRAIN_TOTAL_RETURN_RATIO"; row.minimumTrainTrades = 0; row.orderAmount = BigDecimal.ONE; row.feeRate = new BigDecimal("0.001");
-    row.forceCloseAtEnd = true; row.comparisonGroupKey = "a".repeat(64); row.walkForwardStudyId = child; row.status = "COMPLETED"; row.progressPercent = BigDecimal.valueOf(100);
-    row.createdAt = Instant.EPOCH; row.updatedAt = Instant.EPOCH; row.startedAt = Instant.EPOCH; row.finishedAt = Instant.EPOCH; return row;
   }
 
   private static Integer scalar(JdbcTemplate jdbc, String column, String id) { return jdbc.queryForObject("SELECT " + column + " FROM q_walk_forward_study WHERE StudyId=?", Integer.class, id); }
