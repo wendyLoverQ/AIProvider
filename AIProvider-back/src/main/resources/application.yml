@@ -134,7 +134,7 @@ quant:
     max-candidates: ${QUANT_EXPERIMENT_MAX_CANDIDATES:64}
     max-active-candidates-per-experiment: ${QUANT_EXPERIMENT_MAX_ACTIVE_CANDIDATES:2}
     dispatcher-fixed-delay-ms: ${QUANT_EXPERIMENT_DISPATCHER_DELAY_MS:2000}
-      stale-claim-seconds: ${QUANT_EXPERIMENT_STALE_CLAIM_SECONDS:300}
+    stale-claim-seconds: ${QUANT_EXPERIMENT_STALE_CLAIM_SECONDS:300}
   walk-forward:
     max-folds: ${QUANT_WALK_FORWARD_MAX_FOLDS:36}
     max-total-child-runs: ${QUANT_WALK_FORWARD_MAX_CHILD_RUNS:2048}
