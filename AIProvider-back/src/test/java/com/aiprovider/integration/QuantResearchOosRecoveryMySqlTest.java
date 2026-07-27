@@ -35,16 +35,16 @@ class QuantResearchOosRecoveryMySqlTest {
   @Test void realRecoveryWritesGlobalOosAndResearchReadsIt() {
     try (TestContext context = open()) {
       clear(context.jdbc);
+      QuantResearchMySqlFixture fixture = new QuantResearchMySqlFixture(context.jdbc);
       String studyId = UUID.randomUUID().toString();
       WalkForwardStudyRow study = study(studyId, 2, "COMPLETED");
-      assertEquals(1, context.studies.insert(study));
-      WalkForwardFoldRow first = fold(studyId, 0, "COMPLETED", "v1", "{\"fastPeriod\":5}");
-      WalkForwardFoldRow second = fold(studyId, 1, "COMPLETED", "v2", "{\"fastPeriod\":7}");
-      assertEquals(2, context.folds.insertBatch(List.of(first, second)));
-      insertRun(context.runs, "v1", 2, "0.10", "0.10");
-      insertRun(context.runs, "v2", 3, "0.20", "0.20");
-      insertEquity(context.equity, "v1", List.of("1.0", "2.5", "2.0"), 0);
-      insertEquity(context.equity, "v2", List.of("1.0", "0.9"), 3);
+      fixture.insertTerminalWalkForwardStudy(studyId, 2, "COMPLETED");
+      fixture.insertTerminalFold(studyId, 0, "COMPLETED", "v1", "{\"fastPeriod\":5}");
+      fixture.insertTerminalFold(studyId, 1, "COMPLETED", "v2", "{\"fastPeriod\":7}");
+      fixture.insertCompletedBacktestRun("v1", 2, "0.10", "0.10");
+      fixture.insertCompletedBacktestRun("v2", 3, "0.20", "0.20");
+      fixture.insertBacktestEquity("v1", List.of("1.0", "2.5", "2.0"), 0);
+      fixture.insertBacktestEquity("v2", List.of("1.0", "0.9"), 3);
 
       ObjectMapper json = new ObjectMapper();
       BacktestExperimentService experiments = new BacktestExperimentService(context.experiments, context.candidates,
@@ -70,12 +70,34 @@ class QuantResearchOosRecoveryMySqlTest {
       assertEquals(18, equity.maximumDrawdownRatio().scale());
 
       String researchId = UUID.randomUUID().toString();
-      ResearchStudyRow research = research(researchId, studyId);
-      assertEquals(1, context.research.insert(research));
+      fixture.insertResearchStudySnapshot(researchId, studyId, "COMPLETED", "a".repeat(64));
       ResearchStudyService researchService = new ResearchStudyService(context.research, json);
       assertEquals(0, researchService.get(researchId).summary().oosMaximumDrawdownRatio().compareTo(drawdown));
       assertEquals(18, researchService.get(researchId).summary().oosMaximumDrawdownRatio().scale());
     }
+  }
+
+  @Test void realRecoveryPersistsCompletedWithFailuresAndFailedWithoutSuccess() {
+    try (TestContext context = open()) {
+      clear(context.jdbc); QuantResearchMySqlFixture fixture = new QuantResearchMySqlFixture(context.jdbc);
+      String mixed = UUID.randomUUID().toString(); fixture.insertTerminalWalkForwardStudy(mixed, 2, "COMPLETED_WITH_FAILURES");
+      fixture.insertTerminalFold(mixed, 0, "COMPLETED", "mv", "{\"fastPeriod\":5}"); fixture.insertTerminalFold(mixed, 1, "FAILED", "missing", null);
+      fixture.insertCompletedBacktestRun("mv", 4, "0.25", "0.04"); fixture.insertBacktestEquity("mv", List.of("1.0", "1.25"), 0);
+      String failed = UUID.randomUUID().toString(); fixture.insertTerminalWalkForwardStudy(failed, 2, "FAILED");
+      fixture.insertTerminalFold(failed, 0, "FAILED", "missing-0", null); fixture.insertTerminalFold(failed, 1, "FAILED", "missing-1", null);
+      new WalkForwardOosRecoveryService(context.studies, context.folds, loader(context), new WalkForwardOosCalculator(new ObjectMapper())).recoverBatch(20);
+      assertEquals(Integer.valueOf(1), scalar(context.jdbc, "SuccessfulOosFolds", mixed)); assertEquals(Integer.valueOf(1), scalar(context.jdbc, "FailedFolds", mixed));
+      assertEquals(Integer.valueOf(1), scalar(context.jdbc, "OosAggregateVersion", mixed)); assertEquals(Integer.valueOf(1), scalar(context.jdbc, "OosAggregateVersion", failed));
+      assertNull(decimal(context.jdbc, "OosTotalReturnRatio", failed)); assertNull(decimal(context.jdbc, "OosMaximumDrawdownRatio", failed));
+      String researchId = UUID.randomUUID().toString(); fixture.insertResearchStudySnapshot(researchId, failed, "FAILED", "b".repeat(64));
+      assertEquals(Integer.valueOf(0), new ResearchStudyService(context.research, new ObjectMapper()).get(researchId).summary().successfulOosFolds());
+    }
+  }
+
+  private WalkForwardStudySnapshotLoader loader(TestContext context) {
+    ObjectMapper json = new ObjectMapper();
+    BacktestExperimentService experiments = new BacktestExperimentService(context.experiments, context.candidates, context.runs, null, null, null, json, new QuantExperimentProperties());
+    return new WalkForwardStudySnapshotLoader(context.folds, experiments, context.runs, context.equity);
   }
 
   private static TestContext open() {
@@ -89,6 +111,7 @@ class QuantResearchOosRecoveryMySqlTest {
   private static void clear(JdbcTemplate jdbc) {
     jdbc.update("DELETE FROM q_research_study"); jdbc.update("DELETE FROM q_walk_forward_fold");
     jdbc.update("DELETE FROM q_walk_forward_study"); jdbc.update("DELETE FROM q_backtest_equity");
+    jdbc.update("DELETE FROM q_backtest_trade");
     jdbc.update("DELETE FROM q_backtest_run"); jdbc.update("DELETE FROM q_backtest_experiment_candidate");
     jdbc.update("DELETE FROM q_backtest_experiment");
   }
@@ -143,7 +166,7 @@ class QuantResearchOosRecoveryMySqlTest {
     row.createdAt = Instant.EPOCH; row.updatedAt = Instant.EPOCH; row.startedAt = Instant.EPOCH; row.finishedAt = Instant.EPOCH; return row;
   }
 
-  private static int scalar(JdbcTemplate jdbc, String column, String id) { return jdbc.queryForObject("SELECT " + column + " FROM q_walk_forward_study WHERE StudyId=?", Integer.class, id); }
+  private static Integer scalar(JdbcTemplate jdbc, String column, String id) { return jdbc.queryForObject("SELECT " + column + " FROM q_walk_forward_study WHERE StudyId=?", Integer.class, id); }
   private static BigDecimal decimal(JdbcTemplate jdbc, String column, String id) { return jdbc.queryForObject("SELECT " + column + " FROM q_walk_forward_study WHERE StudyId=?", BigDecimal.class, id); }
 
   private record TestContext(AnnotationConfigApplicationContext app, JdbcTemplate jdbc, WalkForwardStudyMapper studies,
