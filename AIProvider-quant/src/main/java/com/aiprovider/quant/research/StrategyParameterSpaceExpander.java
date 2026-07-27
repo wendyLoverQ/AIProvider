@@ -4,7 +4,6 @@ import com.aiprovider.quant.strategy.QuantStrategyDefinition;
 import com.aiprovider.quant.strategy.StrategyException;
 import com.aiprovider.quant.strategy.StrategyParameterDefinition;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,7 +27,7 @@ public final class StrategyParameterSpaceExpander {
             require(range.parameterName().equals(parameter.name()), "parameter order does not match definition");
             grid.put(range.parameterName(), range.values());
         }
-        return expandGrid(definition, space, grid, maximumCandidates);
+        return expandNormalizedGrid(definition, ParameterSpaceKind.INTEGER_RANGE, space, grid, maximumCandidates);
     }
 
     public ParameterSpaceExpansion expandExplicitGrid(QuantStrategyDefinition definition, Map<String, List<Integer>> input, int maximumCandidates) {
@@ -41,8 +40,21 @@ public final class StrategyParameterSpaceExpander {
         for (StrategyParameterDefinition parameter : definitions) {
             require(input.containsKey(parameter.name()), "parameter grid keys do not match definition");
             List<Integer> values = input.get(parameter.name());
-            require(values != null && !values.isEmpty() && values.size() <= MAXIMUM_VALUES_PER_PARAMETER, "invalid values for " + parameter.name());
-            require(new HashSet<>(values).size() == values.size(), "duplicate values for " + parameter.name());
+            require(values != null, "invalid values for " + parameter.name());
+            grid.put(parameter.name(), values);
+        }
+        require(new ArrayList<>(input.keySet()).equals(new ArrayList<>(grid.keySet())), "parameter order does not match definition");
+        return expandNormalizedGrid(definition, ParameterSpaceKind.EXPLICIT_GRID, null, grid, maximumCandidates);
+    }
+
+    private ParameterSpaceExpansion expandNormalizedGrid(QuantStrategyDefinition definition, ParameterSpaceKind kind,
+                                                         StrategyResearchSpace rangeSpace, LinkedHashMap<String, List<Integer>> input,
+                                                         int maximumCandidates) {
+        LinkedHashMap<String, List<Integer>> grid = new LinkedHashMap<>();
+        for (StrategyParameterDefinition parameter : definition.parameters()) {
+            List<Integer> values = input.get(parameter.name());
+            require(values != null && !values.isEmpty(), "invalid values for " + parameter.name());
+            if (values.size() > MAXIMUM_VALUES_PER_PARAMETER) throw tooLarge("too many values for " + parameter.name());
             Integer previous = null;
             for (Integer value : values) {
                 require(value != null && value >= parameter.minValue() && value <= parameter.maxValue(), "invalid values for " + parameter.name());
@@ -51,15 +63,6 @@ public final class StrategyParameterSpaceExpander {
             }
             grid.put(parameter.name(), List.copyOf(values));
         }
-        require(new ArrayList<>(input.keySet()).equals(new ArrayList<>(grid.keySet())), "parameter order does not match definition");
-        StrategyResearchSpace space = new StrategyResearchSpace(definition.code(), definition.version(),
-                definitions.stream().map(parameter -> new IntegerParameterRange(parameter.name(), grid.get(parameter.name()).get(0),
-                        grid.get(parameter.name()).get(grid.get(parameter.name()).size() - 1), 1)).toList());
-        return expandGrid(definition, space, grid, maximumCandidates);
-    }
-
-    private ParameterSpaceExpansion expandGrid(QuantStrategyDefinition definition, StrategyResearchSpace space,
-                                                LinkedHashMap<String, List<Integer>> grid, int maximumCandidates) {
         long count = 1;
         try { for (List<Integer> values : grid.values()) count = Math.multiplyExact(count, values.size()); }
         catch (ArithmeticException exception) { throw tooLarge("candidate count overflow"); }
@@ -85,7 +88,7 @@ public final class StrategyParameterSpaceExpander {
             }
             combinations.add(java.util.Collections.unmodifiableMap(new LinkedHashMap<>(ordered)));
         }
-        return new ParameterSpaceExpansion(space, grid, combinations, combinations.size(), maximumRequiredBars);
+        return new ParameterSpaceExpansion(kind, rangeSpace, grid, combinations, combinations.size(), maximumRequiredBars);
     }
 
     private static void require(boolean condition, String message) { if (!condition) throw invalid(message); }
