@@ -51,6 +51,7 @@ public final class WalkForwardStudyDtos {
       Integer totalOosTradeCount,
       BigDecimal totalOosFees,
       BigDecimal totalOosReturnRatio,
+      BigDecimal oosMaximumDrawdownRatio,
       String errorCode,
       String errorMessage,
       Instant createdAt,

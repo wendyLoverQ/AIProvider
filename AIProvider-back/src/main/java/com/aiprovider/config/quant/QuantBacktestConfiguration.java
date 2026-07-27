@@ -14,7 +14,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableConfigurationProperties({
   QuantBacktestProperties.class,
   QuantExperimentProperties.class,
-  QuantWalkForwardProperties.class
+  QuantWalkForwardProperties.class,
+  QuantResearchProperties.class
 })
 public class QuantBacktestConfiguration {
   @Bean

@@ -1,76 +1,47 @@
 package com.aiprovider.service.quant;
 
+import com.aiprovider.quant.research.ParameterSpaceExpansion;
+import com.aiprovider.quant.research.StrategyParameterSpaceExpander;
+import com.aiprovider.quant.research.StrategyResearchException;
 import com.aiprovider.quant.strategy.QuantStrategyDefinition;
-import com.aiprovider.quant.strategy.StrategyException;
+import java.util.List;
+import java.util.Map;
 import com.aiprovider.quant.strategy.StrategyParameterDefinition;
-import java.util.*;
 
-/** Deterministic, side-effect-free expansion of an experiment parameter grid. */
+/** Backward-compatible adapter over the Quant research-space expander. */
 final class BacktestExperimentGrid {
-    private BacktestExperimentGrid() {}
+  private BacktestExperimentGrid() {}
 
-    static int candidateCount(Map<String,List<Integer>> input, QuantStrategyDefinition definition, int maxCandidates) {
-        if (input == null || input.size() != definition.parameters().size()) invalid("parameter grid keys do not match strategy definition");
-        long total = 1;
-        for (StrategyParameterDefinition parameter : definition.parameters()) {
-            List<Integer> values = input.get(parameter.name());
-            if (values == null || values.isEmpty() || values.size() > 20
-                    || new HashSet<>(values).size() != values.size()
-                    || values.stream().anyMatch(value -> value == null || value < parameter.minValue() || value > parameter.maxValue())) {
-                invalid("invalid values for " + parameter.name());
-            }
-            try { total = Math.multiplyExact(total, values.size()); }
-            catch (ArithmeticException e) { tooLarge("candidate count overflow"); }
-        }
-        if (!new HashSet<>(input.keySet()).equals(new HashSet<>(definition.parameters().stream().map(StrategyParameterDefinition::name).toList())))
-            invalid("parameter grid keys do not match strategy definition");
-        if (total > maxCandidates || total > 64) tooLarge("candidate count exceeds capacity");
-        return (int) total;
+  static int candidateCount(Map<String, List<Integer>> input, QuantStrategyDefinition definition, int maxCandidates) {
+    try {
+      return new StrategyParameterSpaceExpander().expandExplicitGrid(definition, normalize(input, definition), maxCandidates).candidateCount();
+    } catch (StrategyResearchException exception) {
+      throw map(exception);
     }
+  }
 
-    static Result expand(Map<String,List<Integer>> input, QuantStrategyDefinition definition, int maxCandidates) {
-        if (input == null || input.size() != definition.parameters().size()) invalid("parameter grid keys do not match strategy definition");
-        LinkedHashMap<String,List<Integer>> grid = new LinkedHashMap<>();
-        for (StrategyParameterDefinition parameter : definition.parameters()) {
-            List<Integer> values = input.get(parameter.name());
-            if (values == null || values.isEmpty() || values.size() > 20
-                    || new HashSet<>(values).size() != values.size()
-                    || values.stream().anyMatch(value -> value == null || value < parameter.minValue() || value > parameter.maxValue())) {
-                invalid("invalid values for " + parameter.name());
-            }
-            grid.put(parameter.name(), List.copyOf(values));
-        }
-        if (!grid.keySet().equals(input.keySet())) invalid("parameter grid keys do not match strategy definition");
-        long total = 1;
-        try {
-            for (List<Integer> values : grid.values()) total = Math.multiplyExact(total, values.size());
-        } catch (ArithmeticException e) {
-            invalid("candidate count overflow");
-        }
-        long totalLegs;
-        try { totalLegs=Math.multiplyExact(total,2); } catch (ArithmeticException e) { invalid("leg count overflow"); return null; }
-        if (total > maxCandidates || total > 64 || totalLegs > 128) invalid("candidate count exceeds limit");
-        List<Map<String,Integer>> combinations = new ArrayList<>();
-        for (int index = 0; index < total; index++) {
-            int cursor = index;
-            Map<String,Integer> selected = new HashMap<>();
-            List<StrategyParameterDefinition> parameters = definition.parameters();
-            for (int parameterIndex = parameters.size() - 1; parameterIndex >= 0; parameterIndex--) {
-                StrategyParameterDefinition parameter = parameters.get(parameterIndex);
-                List<Integer> values = grid.get(parameter.name());
-                selected.put(parameter.name(), values.get(cursor % values.size()));
-                cursor /= values.size();
-            }
-            LinkedHashMap<String,Integer> candidate = new LinkedHashMap<>();
-            for (StrategyParameterDefinition parameter : parameters) candidate.put(parameter.name(), selected.get(parameter.name()));
-            try { definition.minimumRequiredBars(candidate); }
-            catch (StrategyException e) { invalid(e.getMessage()); }
-            combinations.add(Collections.unmodifiableMap(candidate));
-        }
-        return new Result(Collections.unmodifiableMap(grid), List.copyOf(combinations));
+  static Result expand(Map<String, List<Integer>> input, QuantStrategyDefinition definition, int maxCandidates) {
+    try {
+      ParameterSpaceExpansion expansion = new StrategyParameterSpaceExpander().expandExplicitGrid(definition, normalize(input, definition), maxCandidates);
+      return new Result(expansion.grid(), expansion.combinations());
+    } catch (StrategyResearchException exception) {
+      throw map(exception);
     }
+  }
 
-    private static void invalid(String message) { throw new BacktestTaskException("BACKTEST_EXPERIMENT_GRID_INVALID", message); }
-    private static void tooLarge(String message) { throw new BacktestTaskException("WALK_FORWARD_TOO_LARGE", message); }
-    record Result(Map<String,List<Integer>> grid, List<Map<String,Integer>> combinations) {}
+  private static Map<String, List<Integer>> normalize(Map<String, List<Integer>> input, QuantStrategyDefinition definition) {
+    if (input == null) return null;
+    java.util.LinkedHashMap<String, List<Integer>> ordered = new java.util.LinkedHashMap<>();
+    for (StrategyParameterDefinition parameter : definition.parameters()) ordered.put(parameter.name(), input.get(parameter.name()));
+    for (String key : input.keySet()) if (!ordered.containsKey(key)) ordered.put(key, input.get(key));
+    return ordered;
+  }
+
+  private static BacktestTaskException map(StrategyResearchException exception) {
+    String code = "STRATEGY_RESEARCH_SPACE_TOO_LARGE".equals(exception.getErrorCode())
+        ? "WALK_FORWARD_TOO_LARGE" : "BACKTEST_EXPERIMENT_GRID_INVALID";
+    return new BacktestTaskException(code, exception.getMessage());
+  }
+
+  record Result(Map<String, List<Integer>> grid, List<Map<String, Integer>> combinations) {}
 }

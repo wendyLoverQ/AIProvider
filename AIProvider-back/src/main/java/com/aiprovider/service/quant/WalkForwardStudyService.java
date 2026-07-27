@@ -139,6 +139,19 @@ public class WalkForwardStudyService {
     return refreshSummary(snapshot);
   }
 
+  /** Batch result view used by Research Study; it never performs one child GET per study. */
+  public Map<String, WalkForwardStudyDtos.StudySummary> batchSummary(List<WalkForwardStudyRow> rows) {
+    if (rows == null || rows.isEmpty()) return Map.of();
+    Map<String, WalkForwardStudySnapshot> loaded = snapshots.loadMany(rows, false);
+    Map<String, WalkForwardStudyDtos.StudySummary> result = new LinkedHashMap<>();
+    for (WalkForwardStudyRow row : rows) {
+      WalkForwardStudySnapshot snapshot = loaded.get(row.studyId);
+      if (snapshot == null) fail("WALK_FORWARD_STATE_CONFLICT", "study snapshot missing");
+      result.put(row.studyId, refreshSummary(snapshot));
+    }
+    return Map.copyOf(result);
+  }
+
   private WalkForwardStudyDtos.StudySummary refreshSummary(WalkForwardStudySnapshot snapshot) {
     Aggregate aggregate = aggregate(snapshot);
     WalkForwardStudyRow row = snapshot.study();
@@ -246,7 +259,7 @@ public class WalkForwardStudyService {
         row.totalChildRuns, row.selectionMetric, row.minimumTrainTrades, row.orderAmount, row.feeRate,
         row.forceCloseAtEnd, row.status, row.progressPercent, aggregate.pending, aggregate.active,
         aggregate.completed, aggregate.failed, oos.parameterChanges, oos.successfulFolds,
-        terminal(row.status) ? oos.hasGaps : null, oos.tradeCount, oos.fees, oos.returnRatio,
+        terminal(row.status) ? oos.hasGaps : null, oos.tradeCount, oos.fees, oos.returnRatio, oos.maximumDrawdown,
         row.errorCode, row.errorMessage, row.createdAt, row.startedAt, row.finishedAt, row.updatedAt);
   }
 
@@ -280,8 +293,8 @@ public class WalkForwardStudyService {
 
   private OosSummary oosSummary(WalkForwardStudySnapshot snapshot) {
     List<WalkForwardFoldRow> selected = successfulFolds(snapshot.folds());
-    if (selected.isEmpty()) return new OosSummary(0, !snapshot.folds().isEmpty(), 0, null, null, 0);
-    BigDecimal compound = BigDecimal.ONE, fees = BigDecimal.ZERO;
+    if (selected.isEmpty()) return new OosSummary(0, !snapshot.folds().isEmpty(), 0, null, null, null, 0);
+    BigDecimal compound = BigDecimal.ONE, fees = BigDecimal.ZERO, maximumDrawdown = BigDecimal.ZERO;
     int trades = 0, changes = 0;
     Map<String, Integer> previous = null;
     for (WalkForwardFoldRow fold : selected) {
@@ -294,12 +307,13 @@ public class WalkForwardStudyService {
       if (factor.signum() <= 0) fail("WALK_FORWARD_OOS_INVALID", "validation return makes compound invalid");
       compound = compound.multiply(factor, MC);
       fees = fees.add(run.totalFees, MC);
+      if (run.maximumDrawdownRatio != null) maximumDrawdown = maximumDrawdown.max(run.maximumDrawdownRatio);
       trades = Math.addExact(trades, run.tradeCount);
       Map<String, Integer> current = readParameters(fold.selectedParametersJson);
       if (previous != null && !previous.equals(current)) changes++;
       previous = current;
     }
-    return new OosSummary(selected.size(), snapshot.folds().size() != selected.size(), trades, fees, compound.subtract(BigDecimal.ONE, MC), changes);
+    return new OosSummary(selected.size(), snapshot.folds().size() != selected.size(), trades, fees, compound.subtract(BigDecimal.ONE, MC), maximumDrawdown, changes);
   }
 
   private void validateSelectedFields(WalkForwardFoldRow fold) {
@@ -365,5 +379,5 @@ public class WalkForwardStudyService {
   private void fail(String code, String message) { throw new WalkForwardTaskException(code, message); }
 
   private record Aggregate(String status, BigDecimal progress, int pending, int active, int completed, int failed, String errorCode, String errorMessage) {}
-  private record OosSummary(int successfulFolds, boolean hasGaps, int tradeCount, BigDecimal fees, BigDecimal returnRatio, int parameterChanges) { static OosSummary empty() { return new OosSummary(0, false, 0, null, null, 0); } }
+  private record OosSummary(int successfulFolds, boolean hasGaps, int tradeCount, BigDecimal fees, BigDecimal returnRatio, BigDecimal maximumDrawdown, int parameterChanges) { static OosSummary empty() { return new OosSummary(0, false, 0, null, null, null, 0); } }
 }

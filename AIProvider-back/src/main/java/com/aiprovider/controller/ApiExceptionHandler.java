@@ -14,6 +14,7 @@ import com.aiprovider.service.XiaohongshuAutomationException;
 import com.aiprovider.service.quant.BacktestTaskException;
 import com.aiprovider.service.quant.MarketHistoryTaskException;
 import com.aiprovider.service.quant.WalkForwardTaskException;
+import com.aiprovider.service.quant.ResearchStudyTaskException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -203,6 +204,7 @@ public class ApiExceptionHandler {
         break;
       case "WALK_FORWARD_STATE_CONFLICT":
       case "WALK_FORWARD_EXPERIMENT_CONFLICT":
+      case "WALK_FORWARD_STUDY_ID_CONFLICT":
       case "WALK_FORWARD_NOT_TERMINAL":
         status = 409;
         break;
@@ -224,5 +226,16 @@ public class ApiExceptionHandler {
       this.status = status;
       this.message = message;
     }
+  }
+
+  @ExceptionHandler(ResearchStudyTaskException.class)
+  public ResponseEntity<Result<Void>> researchStudy(ResearchStudyTaskException exception) {
+    int status = switch (exception.getErrorCode()) {
+      case "RESEARCH_NOT_FOUND" -> 404;
+      case "RESEARCH_STATE_CONFLICT", "RESEARCH_CHILD_CONFLICT", "WALK_FORWARD_STUDY_ID_CONFLICT" -> 409;
+      case "RESEARCH_RESULT_INVALID", "RESEARCH_PERSISTENCE_FAILED" -> 500;
+      default -> 400;
+    };
+    return ResponseEntity.status(status).body(Result.error(status, exception.getMessage()));
   }
 }

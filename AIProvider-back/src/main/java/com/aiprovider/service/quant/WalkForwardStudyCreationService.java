@@ -17,6 +17,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -51,6 +52,17 @@ public class WalkForwardStudyCreationService {
 
   @Transactional
   public WalkForwardStudyDtos.CreateResponse create(WalkForwardStudyCreateRequest request) {
+    return createWithStudyId(UUID.randomUUID().toString(), request);
+  }
+
+  @Transactional
+  public WalkForwardStudyDtos.CreateResponse createWithStudyId(
+      String studyId, WalkForwardStudyCreateRequest request) {
+    try {
+      UUID.fromString(studyId);
+    } catch (IllegalArgumentException exception) {
+      throw error("WALK_FORWARD_STUDY_ID_CONFLICT", "studyId must be a UUID");
+    }
     validateRequest(request);
     MarketDataset dataset = datasets.findById(request.getDatasetId());
     validateDataset(dataset, request);
@@ -69,6 +81,14 @@ public class WalkForwardStudyCreationService {
     } catch (BacktestTaskException e) {
       if ("WALK_FORWARD_TOO_LARGE".equals(e.getErrorCode())) throw e;
       throw error("WALK_FORWARD_REQUEST_INVALID", e.getMessage());
+    }
+    String canonicalGrid = write(grid.grid());
+    WalkForwardStudyRow existing = studies.findByStudyId(studyId);
+    if (existing != null) {
+      if (!sameImmutableRequest(existing, request, canonicalGrid, dataset))
+        throw error("WALK_FORWARD_STUDY_ID_CONFLICT", "studyId belongs to a different request");
+      return new WalkForwardStudyDtos.CreateResponse(
+          existing.studyId, existing.foldCount, existing.candidateCountPerFold, existing.totalChildRuns);
     }
     try {
       for (var parameters : grid.combinations()) {
@@ -92,7 +112,6 @@ public class WalkForwardStudyCreationService {
             definition,
             properties.getMaxFolds(),
             properties.getMaxTotalChildRuns());
-    String studyId = UUID.randomUUID().toString();
     Instant now = Instant.now();
     WalkForwardStudyRow study = new WalkForwardStudyRow();
     study.studyId = studyId;
@@ -107,7 +126,7 @@ public class WalkForwardStudyCreationService {
     study.executionProfileCode = request.getExecutionProfileCode();
     study.directionMode = request.getDirectionMode();
     study.orderSizingMode = request.getOrderSizingMode();
-    study.parameterGridJson = write(grid.grid());
+    study.parameterGridJson = canonicalGrid;
     study.windowMode = "ROLLING";
     study.studyStartOpenTimeMs = request.getStudyStartOpenTimeInclusive().toEpochMilli();
     study.studyEndOpenTimeMs = request.getStudyEndOpenTimeExclusive().toEpochMilli();
@@ -138,6 +157,33 @@ public class WalkForwardStudyCreationService {
           "WALK_FORWARD_STATE_CONFLICT", "fold insert affected an unexpected number of rows");
     return new WalkForwardStudyDtos.CreateResponse(
         studyId, study.foldCount, study.candidateCountPerFold, study.totalChildRuns);
+  }
+
+  private boolean sameImmutableRequest(
+      WalkForwardStudyRow row, WalkForwardStudyCreateRequest request, String canonicalGrid, MarketDataset dataset) {
+    return row.datasetId == request.getDatasetId()
+        && Objects.equals(row.provider, dataset.getProvider().name())
+        && Objects.equals(row.marketType, dataset.getMarketType().name())
+        && Objects.equals(row.dataType, dataset.getDataType().name())
+        && Objects.equals(row.symbol, dataset.getSymbol())
+        && Objects.equals(row.intervalCode, dataset.getInterval().code())
+        && Objects.equals(row.strategyCode, request.getStrategyCode().trim())
+        && Objects.equals(row.strategyVersion, request.getStrategyVersion().trim())
+        && Objects.equals(row.executionProfileCode, request.getExecutionProfileCode())
+        && Objects.equals(row.directionMode, request.getDirectionMode())
+        && Objects.equals(row.orderSizingMode, request.getOrderSizingMode())
+        && Objects.equals(row.parameterGridJson, canonicalGrid)
+        && Objects.equals(row.windowMode, "ROLLING")
+        && row.studyStartOpenTimeMs == request.getStudyStartOpenTimeInclusive().toEpochMilli()
+        && row.studyEndOpenTimeMs == request.getStudyEndOpenTimeExclusive().toEpochMilli()
+        && row.trainingBars == request.getTrainingBars()
+        && row.validationBars == request.getValidationBars()
+        && row.stepBars == request.getValidationBars()
+        && Objects.equals(row.selectionMetric, request.getSelectionMetric().trim().toUpperCase())
+        && row.minimumTrainTrades == request.getMinimumTrainTrades()
+        && row.orderAmount != null && row.orderAmount.compareTo(request.getOrderAmount()) == 0
+        && row.feeRate != null && row.feeRate.compareTo(request.getFeeRate()) == 0
+        && row.forceCloseAtEnd == request.isForceCloseAtEnd();
   }
 
   private void validateRequest(WalkForwardStudyCreateRequest request) {
