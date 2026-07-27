@@ -24,6 +24,7 @@ public final class BacktestCompatibilityService {
             BigDecimal orderAmount,
             BigDecimal feeRate) {
         ExecutionProfileDefinition profile = profiles.get(profileCode);
+        validateProfileMarket(profile, market);
         DirectionMode direction = parseDirection(directionMode);
         OrderSizingMode sizing = parseSizing(orderSizingMode);
         return validate(profile, direction, sizing, strategy, market, parameters, orderAmount, feeRate);
@@ -61,14 +62,7 @@ public final class BacktestCompatibilityService {
             Map<String, Integer> parameters,
             BigDecimal orderAmount,
             BigDecimal feeRate) {
-        if (market == null || market.marketType() == null) {
-            throw error("BACKTEST_MARKET_EXECUTION_INCOMPATIBLE", "market context is required");
-        }
-        if (profile.marketType() != market.marketType()) {
-            throw error(
-                    "BACKTEST_MARKET_EXECUTION_INCOMPATIBLE",
-                    "profileMarketType=" + profile.marketType() + " datasetMarketType=" + market.marketType());
-        }
+        validateProfileMarket(profile, market);
         if (direction == null || direction != profile.directionMode()) {
             throw error("BACKTEST_DIRECTION_INCOMPATIBLE", "directionMode=" + direction);
         }
@@ -111,6 +105,19 @@ public final class BacktestCompatibilityService {
                     exception.getErrorCode(), exception.getMessage(), exception);
         }
         return new ValidatedExecutionContext(profile, direction, sizing);
+    }
+
+    private void validateProfileMarket(
+            ExecutionProfileDefinition profile, BacktestMarketContext market) {
+        if (market == null || market.marketType() == null) {
+            throw error("BACKTEST_MARKET_EXECUTION_INCOMPATIBLE", "market context is required");
+        }
+        if (profile.marketType() != market.marketType()) {
+            throw error(
+                    "BACKTEST_MARKET_EXECUTION_INCOMPATIBLE",
+                    "profileMarketType=" + profile.marketType()
+                            + " datasetMarketType=" + market.marketType());
+        }
     }
 
     private DirectionMode parseDirection(String value) {

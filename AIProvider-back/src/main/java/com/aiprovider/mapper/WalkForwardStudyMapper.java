@@ -96,7 +96,7 @@ public interface WalkForwardStudyMapper {
   @Insert(
       "INSERT INTO"
           + " q_walk_forward_study(StudyId,DatasetId,Provider,MarketType,DataType,Symbol,IntervalCode,StrategyCode,StrategyVersion,ExecutionProfileCode,DirectionMode,OrderSizingMode,ParameterGridJson,WindowMode,StudyStartOpenTimeMs,StudyEndOpenTimeMs,TrainingBars,ValidationBars,StepBars,FoldCount,CandidateCountPerFold,TotalChildRuns,SelectionMetric,MinimumTrainTrades,OrderAmount,FeeRate,ForceCloseAtEnd,Status,CreatedAt,UpdatedAt)"
-          + " VALUES(#{studyId},#{datasetId},#{provider},#{marketType},#{dataType},#{symbol},#{intervalCode},#{strategyCode},#{strategyVersion},#{executionProfileCode},#{directionMode},#{orderSizingMode},#{parameterGridJson},#{windowMode},#{studyStart},#{studyEnd},#{trainingBars},#{validationBars},#{stepBars},#{foldCount},#{candidateCountPerFold},#{totalChildRuns},#{selectionMetric},#{minimumTrainTrades},#{orderAmount},#{feeRate},#{forceCloseAtEnd},'QUEUED',#{createdAt},#{updatedAt})")
+          + " VALUES(#{studyId},#{datasetId},#{provider},#{marketType},#{dataType},#{symbol},#{intervalCode},#{strategyCode},#{strategyVersion},#{executionProfileCode},#{directionMode},#{orderSizingMode},#{parameterGridJson},#{windowMode},#{studyStartOpenTimeMs},#{studyEndOpenTimeMs},#{trainingBars},#{validationBars},#{stepBars},#{foldCount},#{candidateCountPerFold},#{totalChildRuns},#{selectionMetric},#{minimumTrainTrades},#{orderAmount},#{feeRate},#{forceCloseAtEnd},'QUEUED',#{createdAt},#{updatedAt})")
   int insert(WalkForwardStudyRow row);
 
   @Update(

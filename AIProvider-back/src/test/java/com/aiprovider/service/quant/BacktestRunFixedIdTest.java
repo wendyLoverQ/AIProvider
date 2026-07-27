@@ -6,6 +6,7 @@ import com.aiprovider.mapper.row.BacktestRunRow;
 import com.aiprovider.quant.market.history.port.MarketDatasetRepository;
 import com.aiprovider.quant.strategy.StrategyRegistry;
 import com.aiprovider.quant.execution.*;
+import com.aiprovider.service.quant.model.BacktestRunCommand;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
@@ -29,6 +30,67 @@ class BacktestRunFixedIdTest {
         verify(runs,never()).insert(any());verifyNoInteractions(executor);
         request.setOrderAmount(new BigDecimal("2"));BacktestTaskException conflict=assertThrows(BacktestTaskException.class,()->service.createWithRunId(existing.runId,request));assertEquals("BACKTEST_RUN_ID_CONFLICT",conflict.getErrorCode());
         request.setOrderAmount(BigDecimal.ONE);request.setDirectionMode("long_only");BacktestTaskException executionConflict=assertThrows(BacktestTaskException.class,()->service.createWithRunId(existing.runId,request));assertEquals("BACKTEST_RUN_ID_CONFLICT",executionConflict.getErrorCode());
+    }
+
+    @Test
+    void recoveryCommandPreservesAllExecutionFieldsAndCorruptionKeepsItsRealErrorCode() {
+        BacktestFailureService failures = mock(BacktestFailureService.class);
+        ThreadPoolExecutor executor = mock(ThreadPoolExecutor.class);
+        BacktestRunService service = service(mock(BacktestRunMapper.class), failures, executor);
+        BacktestRunRow row = recoveryRow();
+
+        BacktestRunCommand command = service.recoveryCommand(row);
+        assertEquals(ExecutionProfileCode.USDM_PERPETUAL_LONG_ONLY_1X_V1, command.executionProfileCode());
+        assertEquals(DirectionMode.LONG_ONLY, command.directionMode());
+        assertEquals(OrderSizingMode.BASE_QUANTITY, command.orderSizingMode());
+
+        row.directionMode = "long_only";
+        service.resubmitQueued(row);
+        verify(failures)
+            .markFailed(
+                eq(row.runId),
+                eq("BACKTEST_DIRECTION_INCOMPATIBLE"),
+                contains("stored directionMode=long_only"));
+        verifyNoInteractions(executor);
+    }
+
+    private BacktestRunService service(
+        BacktestRunMapper runs, BacktestFailureService failures, ThreadPoolExecutor executor) {
+        MarketDatasetRepository datasets = mock(MarketDatasetRepository.class);
+        return new BacktestRunService(
+            runs,
+            mock(BacktestTradeMapper.class),
+            mock(BacktestEquityMapper.class),
+            datasets,
+            new com.aiprovider.quant.market.history.service.MarketDataSnapshotService(
+                datasets,
+                mock(com.aiprovider.quant.market.history.port.MarketCandleRepository.class),
+                100),
+            new com.aiprovider.quant.backtest.BacktestEngine(new StrategyRegistry()),
+            new StrategyRegistry(),
+            new BacktestCompatibilityService(new ExecutionProfileRegistry()),
+            mock(BacktestPersistenceService.class),
+            failures,
+            executor,
+            new ObjectMapper());
+    }
+
+    private BacktestRunRow recoveryRow() {
+        BacktestRunRow row = new BacktestRunRow();
+        row.runId = "00000000-0000-0000-0000-000000000002";
+        row.datasetId = 1;
+        row.startOpenTimeMs = 0;
+        row.endOpenTimeExclusiveMs = 60_000;
+        row.strategyCode = "EMA_CROSS_LONG_ONLY";
+        row.strategyVersion = "1.0.0";
+        row.executionProfileCode = "USDM_PERPETUAL_LONG_ONLY_1X_V1";
+        row.directionMode = "LONG_ONLY";
+        row.orderSizingMode = "BASE_QUANTITY";
+        row.requestedParametersJson = "{\"fastPeriod\":5,\"slowPeriod\":20}";
+        row.orderAmount = BigDecimal.ONE;
+        row.feeRate = BigDecimal.ZERO;
+        row.forceCloseAtEnd = true;
+        return row;
     }
     private BacktestCreateRequest request(){BacktestCreateRequest q=new BacktestCreateRequest();q.setDatasetId(1);q.setStartOpenTimeInclusive(Instant.EPOCH);q.setEndOpenTimeExclusive(Instant.ofEpochMilli(60000));q.setStrategyCode("EMA_CROSS_LONG_ONLY");q.setStrategyVersion("1.0.0");q.setExecutionProfileCode("USDM_PERPETUAL_LONG_ONLY_1X_V1");q.setDirectionMode("LONG_ONLY");q.setOrderSizingMode("BASE_QUANTITY");q.setStrategyParameters(Map.of("fastPeriod",5,"slowPeriod",20));q.setOrderAmount(new BigDecimal("1"));q.setFeeRate(new BigDecimal("0.001"));q.setForceCloseAtEnd(true);return q;}
 }

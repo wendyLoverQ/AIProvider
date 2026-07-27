@@ -5,12 +5,14 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import com.aiprovider.config.quant.QuantExperimentProperties;
+import com.aiprovider.controller.quant.dto.BacktestCreateRequest;
 import com.aiprovider.mapper.*;
 import com.aiprovider.mapper.row.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 class BacktestExperimentDispatcherTest {
   @Test
@@ -65,8 +67,14 @@ class BacktestExperimentDispatcherTest {
             properties(1),
             new ObjectMapper())
         .tick();
-    verify(runs).createWithRunId(eq("t"), any());
-    verify(runs).createWithRunId(eq("v"), any());
+    ArgumentCaptor<BacktestCreateRequest> request = ArgumentCaptor.forClass(BacktestCreateRequest.class);
+    verify(runs).createWithRunId(eq("t"), request.capture());
+    verify(runs).createWithRunId(eq("v"), request.capture());
+    for (BacktestCreateRequest child : request.getAllValues()) {
+      assertEquals("USDM_PERPETUAL_LONG_ONLY_1X_V1", child.getExecutionProfileCode());
+      assertEquals("LONG_ONLY", child.getDirectionMode());
+      assertEquals("BASE_QUANTITY", child.getOrderSizingMode());
+    }
     verify(candidates).markDispatched(eq("c"), anyString(), any());
   }
 
@@ -149,6 +157,45 @@ class BacktestExperimentDispatcherTest {
     verify(candidates)
         .markDispatchFailed(
             eq("c"), anyString(), eq("BACKTEST_EXPERIMENT_DISPATCH_FAILED"), anyString(), any());
+    verify(candidates, never()).releaseClaimToPending(anyString(), anyString(), any());
+  }
+
+  @Test
+  void executionCompatibilityFailureIsPermanentAndDoesNotReleaseClaim() {
+    BacktestExperimentMapper experiments = mock(BacktestExperimentMapper.class);
+    BacktestExperimentCandidateMapper candidates = mock(BacktestExperimentCandidateMapper.class);
+    BacktestRunService runs = mock(BacktestRunService.class);
+    BacktestExperimentRow experiment = row();
+    BacktestExperimentCandidateRow candidate = candidate(experiment, "c", "t", "v");
+    when(experiments.findNonTerminal()).thenReturn(List.of(experiment));
+    when(candidates.findAll(anyString())).thenReturn(List.of());
+    when(candidates.claimNextPending(anyString(), anyString(), any())).thenReturn(1, 0);
+    when(candidates.findClaimed(anyString(), anyString())).thenReturn(candidate);
+    when(candidates.markDispatchFailed(anyString(), anyString(), any(), any(), any()))
+        .thenReturn(1);
+    doThrow(
+            new BacktestTaskException(
+                "BACKTEST_STRATEGY_EXECUTION_INCOMPATIBLE", "execution profile is unsupported"))
+        .when(runs)
+        .createWithRunId(eq("t"), any());
+
+    new BacktestExperimentDispatcher(
+            experiments,
+            candidates,
+            mock(BacktestRunMapper.class),
+            runs,
+            mock(BacktestExperimentService.class),
+            properties(1),
+            new ObjectMapper())
+        .tick();
+
+    verify(candidates)
+        .markDispatchFailed(
+            eq("c"),
+            anyString(),
+            eq("BACKTEST_STRATEGY_EXECUTION_INCOMPATIBLE"),
+            anyString(),
+            any());
     verify(candidates, never()).releaseClaimToPending(anyString(), anyString(), any());
   }
 

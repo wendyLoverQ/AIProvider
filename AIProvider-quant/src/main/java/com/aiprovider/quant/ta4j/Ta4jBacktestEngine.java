@@ -74,13 +74,51 @@ public final class Ta4jBacktestEngine {
             }
             StrategyBuildResult build = definition.build(request.getStrategyParameters(), series.getBarCount());
             Strategy strategy = strategyFactory.create(definition.code(), series, build);
-            LinearTransactionCostModel feeModel = new LinearTransactionCostModel(request.getFeeRate().doubleValue());
-            BarSeriesManager manager = new BarSeriesManager(series, feeModel, new ZeroCostModel(), new TradeOnNextOpenModel());
-            TradingRecord record = manager.run(strategy, tradeType(profile.entryOrderSide()), series.numOf(request.getOrderAmount()),
+            if (profile.leverage().compareTo(BigDecimal.ONE) != 0) {
+                throw new BacktestException(
+                        "BACKTEST_STRATEGY_EXECUTION_INCOMPATIBLE",
+                        "unsupported leverage=" + profile.leverage());
+            }
+            LinearTransactionCostModel feeModel =
+                    switch (profile.transactionCostModel()) {
+                        case "LINEAR_FEE_RATE" ->
+                                new LinearTransactionCostModel(request.getFeeRate().doubleValue());
+                        default ->
+                                throw new BacktestException(
+                                        "BACKTEST_STRATEGY_EXECUTION_INCOMPATIBLE",
+                                        "unsupported transactionCostModel="
+                                                + profile.transactionCostModel());
+                    };
+            ZeroCostModel holdingCostModel =
+                    switch (profile.holdingCostModel()) {
+                        case "ZERO" -> new ZeroCostModel();
+                        default ->
+                                throw new BacktestException(
+                                        "BACKTEST_STRATEGY_EXECUTION_INCOMPATIBLE",
+                                        "unsupported holdingCostModel=" + profile.holdingCostModel());
+                    };
+            TradeOnNextOpenModel executionModel =
+                    switch (profile.fillModel()) {
+                        case "TA4J_TRADE_ON_NEXT_OPEN" -> new TradeOnNextOpenModel();
+                        default ->
+                                throw new BacktestException(
+                                        "BACKTEST_STRATEGY_EXECUTION_INCOMPATIBLE",
+                                        "unsupported fillModel=" + profile.fillModel());
+                    };
+            var amount =
+                    switch (profile.orderSizingMode()) {
+                        case BASE_QUANTITY -> series.numOf(request.getOrderAmount());
+                    };
+            BarSeriesManager manager =
+                    new BarSeriesManager(series, feeModel, holdingCostModel, executionModel);
+            TradingRecord record = manager.run(strategy, tradeType(profile.entryOrderSide()), amount,
                     series.getBeginIndex(), series.getEndIndex());
             boolean forcedClose = request.isForceCloseAtEnd() && !record.isClosed();
             if (forcedClose) {
-                record.exit(series.getEndIndex(), series.getBar(series.getEndIndex()).getClosePrice(), series.numOf(request.getOrderAmount()));
+                record.exit(
+                        series.getEndIndex(),
+                        series.getBar(series.getEndIndex()).getClosePrice(),
+                        amount);
             }
             List<BacktestTrade> trades = toTrades(record, series, candles, forcedClose, profile);
             List<EquityPoint> equity = equityCurve(record, series, trades, candles, profile);

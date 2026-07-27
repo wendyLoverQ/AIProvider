@@ -574,26 +574,63 @@ public class BacktestRunService {
   }
 
   public void resubmitQueued(BacktestRunRow row) {
+    BacktestRunCommand command;
     try {
-      BacktestRunCommand c =
-          new BacktestRunCommand(
-              row.runId,
-              row.datasetId,
-              Instant.ofEpochMilli(row.startOpenTimeMs),
-              Instant.ofEpochMilli(row.endOpenTimeExclusiveMs),
-              row.strategyCode,
-              row.strategyVersion,
-              ExecutionProfileCode.valueOf(row.executionProfileCode),
-              DirectionMode.valueOf(row.directionMode),
-              OrderSizingMode.valueOf(row.orderSizingMode),
-              read(row.requestedParametersJson),
-              row.orderAmount,
-              row.feeRate,
-              row.forceCloseAtEnd);
-      executor.execute(() -> run(c));
-    } catch (RuntimeException e) {
+      command = recoveryCommand(row);
+    } catch (BacktestTaskException e) {
+      failSafely(row.runId, e.getErrorCode(), descriptor(e.getMessage()));
+      return;
+    }
+    try {
+      executor.execute(() -> run(command));
+    } catch (RejectedExecutionException e) {
       failSafely(row.runId, "BACKTEST_QUEUE_FULL", descriptor(e.getMessage()));
     }
+  }
+
+  BacktestRunCommand recoveryCommand(BacktestRunRow row) {
+    if (row == null) {
+      throw error("BACKTEST_PERSISTENCE_FAILED", "stored run is missing");
+    }
+    ExecutionProfileCode profile;
+    DirectionMode direction;
+    OrderSizingMode sizing;
+    try {
+      profile = ExecutionProfileCode.valueOf(row.executionProfileCode);
+    } catch (RuntimeException e) {
+      throw error(
+          row.executionProfileCode == null
+              ? "BACKTEST_EXECUTION_PROFILE_REQUIRED"
+              : "BACKTEST_EXECUTION_PROFILE_NOT_SUPPORTED",
+          "stored executionProfileCode=" + row.executionProfileCode);
+    }
+    try {
+      direction = DirectionMode.valueOf(row.directionMode);
+    } catch (RuntimeException e) {
+      throw error(
+          "BACKTEST_DIRECTION_INCOMPATIBLE", "stored directionMode=" + row.directionMode);
+    }
+    try {
+      sizing = OrderSizingMode.valueOf(row.orderSizingMode);
+    } catch (RuntimeException e) {
+      throw error(
+          "BACKTEST_ORDER_SIZING_INCOMPATIBLE",
+          "stored orderSizingMode=" + row.orderSizingMode);
+    }
+    return new BacktestRunCommand(
+        row.runId,
+        row.datasetId,
+        Instant.ofEpochMilli(row.startOpenTimeMs),
+        Instant.ofEpochMilli(row.endOpenTimeExclusiveMs),
+        row.strategyCode,
+        row.strategyVersion,
+        profile,
+        direction,
+        sizing,
+        read(row.requestedParametersJson),
+        row.orderAmount,
+        row.feeRate,
+        row.forceCloseAtEnd);
   }
 
   public void markInterruptedOnRestart(String runId, String previousStatus) {

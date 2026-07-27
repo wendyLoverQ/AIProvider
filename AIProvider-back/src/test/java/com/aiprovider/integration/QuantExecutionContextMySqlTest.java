@@ -11,6 +11,9 @@ import java.util.UUID;
 import javax.sql.DataSource;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mybatis.spring.SqlSessionFactoryBean;
 import org.mybatis.spring.annotation.MapperScan;
@@ -20,32 +23,54 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.DockerClientFactory;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 class QuantExecutionContextMySqlTest {
     private static final String PROFILE = "USDM_PERPETUAL_LONG_ONLY_1X_V1";
+    private static MySQLContainer<?> mysql;
+    private static String jdbcUrl;
+    private static String username;
+    private static String password;
 
-    @Container
-    static final MySQLContainer<?> MYSQL =
-            new MySQLContainer<>("mysql:8.0.36")
-                    .withDatabaseName("aiprovider_test")
-                    .withUsername("test")
-                    .withPassword("test");
+    @BeforeAll
+    static void startMySql8() {
+        String externalUrl = System.getProperty("quant.test.mysql.jdbcUrl");
+        if (externalUrl != null && !externalUrl.isBlank()) {
+            jdbcUrl = externalUrl;
+            username = System.getProperty("quant.test.mysql.username", "root");
+            password = System.getProperty("quant.test.mysql.password", "");
+            return;
+        }
+        Assumptions.assumeTrue(
+                DockerClientFactory.instance().isDockerAvailable(),
+                "Docker or quant.test.mysql.jdbcUrl is required for MySQL 8 execution");
+        mysql =
+                new MySQLContainer<>("mysql:8.0.36")
+                        .withDatabaseName("aiprovider_test")
+                        .withUsername("test")
+                        .withPassword("test");
+        mysql.start();
+        jdbcUrl = mysql.getJdbcUrl();
+        username = mysql.getUsername();
+        password = mysql.getPassword();
+    }
+
+    @AfterAll
+    static void stopMySql8() {
+        if (mysql != null) {
+            mysql.stop();
+        }
+    }
 
     @Test
     void v71BackfillsHistoricalRowsEnforcesNotNullAndMapsAllFields() {
         DriverManagerDataSource dataSource = dataSource();
         Flyway flyway = flyway(dataSource);
         flyway.clean();
-        Flyway.configure()
-                .dataSource(dataSource)
-                .locations("classpath:db/migration")
-                .target("70")
-                .cleanDisabled(false)
-                .load()
-                .migrate();
+        bootstrapLegacySchema(dataSource);
+        migrateLegacySchemaToV70(dataSource);
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
         String runId = UUID.randomUUID().toString();
         String experimentId = UUID.randomUUID().toString();
@@ -89,15 +114,27 @@ class QuantExecutionContextMySqlTest {
 
         try (AnnotationConfigApplicationContext context = context(dataSource)) {
             BacktestRunMapper runs = context.getBean(BacktestRunMapper.class);
+            BacktestExperimentMapper experiments = context.getBean(BacktestExperimentMapper.class);
+            WalkForwardStudyMapper studies = context.getBean(WalkForwardStudyMapper.class);
             BacktestTradeMapper trades = context.getBean(BacktestTradeMapper.class);
             BacktestRunRow storedRun = runs.findByRunId(runId);
-            assertEquals(PROFILE, storedRun.executionProfileCode);
-            assertEquals("LONG_ONLY", storedRun.directionMode);
-            assertEquals("BASE_QUANTITY", storedRun.orderSizingMode);
+            assertRowContext(storedRun.executionProfileCode, storedRun.directionMode, storedRun.orderSizingMode);
+            BacktestExperimentRow storedExperiment =
+                    experiments.findByExperimentId(experimentId);
+            assertRowContext(
+                    storedExperiment.executionProfileCode,
+                    storedExperiment.directionMode,
+                    storedExperiment.orderSizingMode);
+            WalkForwardStudyRow storedStudy = studies.findByStudyId(studyId);
+            assertRowContext(
+                    storedStudy.executionProfileCode,
+                    storedStudy.directionMode,
+                    storedStudy.orderSizingMode);
             BacktestTradeRow storedTrade = trades.findPage(runId, 10, 0).get(0);
             assertEquals("LONG", storedTrade.positionSide);
             assertEquals("BUY", storedTrade.entryOrderSide);
             assertEquals("SELL", storedTrade.exitOrderSide);
+            assertMapperWritesAndReadsAllExecutionFields(runs, experiments, studies, trades);
         }
     }
 
@@ -106,13 +143,8 @@ class QuantExecutionContextMySqlTest {
         DriverManagerDataSource dataSource = dataSource();
         Flyway flyway = flyway(dataSource);
         flyway.clean();
-        Flyway.configure()
-                .dataSource(dataSource)
-                .locations("classpath:db/migration")
-                .target("70")
-                .cleanDisabled(false)
-                .load()
-                .migrate();
+        bootstrapLegacySchema(dataSource);
+        migrateLegacySchemaToV70(dataSource);
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
         jdbc.update(
                 "INSERT INTO q_backtest_run(RunId,DatasetId,Provider,MarketType,DataType,Symbol,"
@@ -255,6 +287,75 @@ class QuantExecutionContextMySqlTest {
                 "STRATEGY_EXIT");
     }
 
+    private static void bootstrapLegacySchema(DataSource dataSource) {
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        for (String table :
+                List.of(
+                        "TimerRecords",
+                        "ChatMessages",
+                        "LlmChatConversations",
+                        "LlmChatMessages",
+                        "DesktopContextSnapshots",
+                        "ProactiveBroadcastTriggerLogs",
+                        "NotebookNotes",
+                        "Reminders")) {
+            jdbc.execute(
+                    "CREATE TABLE " + table
+                            + " (Id BIGINT NOT NULL PRIMARY KEY) ENGINE=InnoDB"
+                            + " DEFAULT CHARSET=utf8mb4");
+        }
+        jdbc.execute(
+                "CREATE TABLE MaidStates (Id BIGINT NOT NULL PRIMARY KEY,"
+                        + " MaidId VARCHAR(128) NOT NULL, InteractionCount INT NOT NULL DEFAULT 0)"
+                        + " ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        jdbc.execute(
+                "CREATE TABLE LlmCallLogs (Id BIGINT NOT NULL PRIMARY KEY,"
+                        + " CreatedAt VARCHAR(64) NULL, ResponseStatusCode INT NULL,"
+                        + " Provider VARCHAR(128) NULL, Model VARCHAR(256) NULL)"
+                        + " ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        jdbc.execute(
+                "CREATE TABLE AppRuntimeStates (Id BIGINT NOT NULL PRIMARY KEY,"
+                        + " LastRole VARCHAR(128) NULL, UpdatedAt DATETIME(6) NULL)"
+                        + " ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        jdbc.execute(
+                "CREATE TABLE AgentToolCalls (Id BIGINT NOT NULL PRIMARY KEY,"
+                        + " ParentToolCallId BIGINT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        for (String table :
+                List.of(
+                        "VoiceRoleAudioCaches",
+                        "VoiceRoleBindings",
+                        "VoiceTriggerLogs")) {
+            jdbc.execute(
+                    "CREATE TABLE " + table
+                            + " (Id BIGINT NOT NULL PRIMARY KEY) ENGINE=InnoDB"
+                            + " DEFAULT CHARSET=utf8mb4");
+        }
+        jdbc.execute(
+                "CREATE TABLE AppSettings (Id BIGINT NOT NULL PRIMARY KEY,"
+                        + " `Key` VARCHAR(128) NOT NULL, `Value` LONGTEXT NULL)"
+                + " ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    }
+
+    private static void migrateLegacySchemaToV70(DataSource dataSource) {
+        Flyway.configure()
+                .dataSource(dataSource)
+                .locations("classpath:db/migration")
+                .baselineOnMigrate(true)
+                .baselineVersion("0")
+                .target("58")
+                .cleanDisabled(false)
+                .load()
+                .migrate();
+        new JdbcTemplate(dataSource).update("DELETE FROM c_PromptOptions");
+        Flyway.configure()
+                .dataSource(dataSource)
+                .locations("classpath:db/migration")
+                .target("70")
+                .cleanDisabled(false)
+                .load()
+                .migrate();
+    }
+
     private static void assertContext(
             JdbcTemplate jdbc, String table, String idColumn, String idValue) {
         assertEquals(
@@ -277,9 +378,157 @@ class QuantExecutionContextMySqlTest {
                         idValue));
     }
 
+    private static void assertMapperWritesAndReadsAllExecutionFields(
+            BacktestRunMapper runs,
+            BacktestExperimentMapper experiments,
+            WalkForwardStudyMapper studies,
+            BacktestTradeMapper trades) {
+        Instant now = Instant.now();
+        String runId = UUID.randomUUID().toString();
+        BacktestRunRow run = new BacktestRunRow();
+        run.runId = runId;
+        run.datasetId = 2;
+        run.provider = "BINANCE_USDM";
+        run.marketType = "USDM_PERPETUAL";
+        run.dataType = "CANDLE";
+        run.symbol = "ETHUSDT";
+        run.intervalCode = "1m";
+        run.startOpenTimeMs = 0;
+        run.endOpenTimeExclusiveMs = 60_000;
+        run.strategyCode = "EMA_CROSS_LONG_ONLY";
+        run.strategyVersion = "1.0.0";
+        setContext(run);
+        run.requestedParametersJson = "{}";
+        run.orderAmount = BigDecimal.ONE;
+        run.feeRate = BigDecimal.ZERO;
+        run.forceCloseAtEnd = true;
+        run.queuedAt = now;
+        run.updatedAt = now;
+        assertEquals(1, runs.insert(run));
+        BacktestRunRow readRun = runs.findByRunId(runId);
+        assertRowContext(
+                readRun.executionProfileCode, readRun.directionMode, readRun.orderSizingMode);
+
+        String experimentId = UUID.randomUUID().toString();
+        BacktestExperimentRow experiment = new BacktestExperimentRow();
+        experiment.experimentId = experimentId;
+        experiment.datasetId = 2;
+        experiment.provider = "BINANCE_USDM";
+        experiment.marketType = "USDM_PERPETUAL";
+        experiment.dataType = "CANDLE";
+        experiment.symbol = "ETHUSDT";
+        experiment.intervalCode = "1m";
+        experiment.strategyCode = "EMA_CROSS_LONG_ONLY";
+        experiment.strategyVersion = "1.0.0";
+        setContext(experiment);
+        experiment.parameterGridJson = "{}";
+        experiment.candidateCount = 1;
+        experiment.trainingStartOpenTimeMs = 0;
+        experiment.trainingEndOpenTimeMs = 60_000;
+        experiment.validationStartOpenTimeMs = 60_000;
+        experiment.validationEndOpenTimeMs = 120_000;
+        experiment.orderAmount = BigDecimal.ONE;
+        experiment.feeRate = BigDecimal.ZERO;
+        experiment.forceCloseAtEnd = true;
+        experiment.createdAt = now;
+        experiment.updatedAt = now;
+        assertEquals(1, experiments.insert(experiment));
+        BacktestExperimentRow readExperiment =
+                experiments.findByExperimentId(experimentId);
+        assertRowContext(
+                readExperiment.executionProfileCode,
+                readExperiment.directionMode,
+                readExperiment.orderSizingMode);
+
+        String studyId = UUID.randomUUID().toString();
+        WalkForwardStudyRow study = new WalkForwardStudyRow();
+        study.studyId = studyId;
+        study.datasetId = 2;
+        study.provider = "BINANCE_USDM";
+        study.marketType = "USDM_PERPETUAL";
+        study.dataType = "CANDLE";
+        study.symbol = "ETHUSDT";
+        study.intervalCode = "1m";
+        study.strategyCode = "EMA_CROSS_LONG_ONLY";
+        study.strategyVersion = "1.0.0";
+        setContext(study);
+        study.parameterGridJson = "{}";
+        study.windowMode = "ROLLING";
+        study.studyStartOpenTimeMs = 0;
+        study.studyEndOpenTimeMs = 120_000;
+        study.trainingBars = 1;
+        study.validationBars = 1;
+        study.stepBars = 1;
+        study.foldCount = 1;
+        study.candidateCountPerFold = 1;
+        study.totalChildRuns = 2;
+        study.selectionMetric = "TRAIN_TOTAL_RETURN_RATIO";
+        study.orderAmount = BigDecimal.ONE;
+        study.feeRate = BigDecimal.ZERO;
+        study.forceCloseAtEnd = true;
+        study.createdAt = now;
+        study.updatedAt = now;
+        assertEquals(1, studies.insert(study));
+        WalkForwardStudyRow readStudy = studies.findByStudyId(studyId);
+        assertRowContext(
+                readStudy.executionProfileCode,
+                readStudy.directionMode,
+                readStudy.orderSizingMode);
+
+        BacktestTradeRow trade = new BacktestTradeRow();
+        trade.runId = runId;
+        trade.tradeNo = 1;
+        trade.entrySignalIndex = 0;
+        trade.entryIndex = 1;
+        trade.entryTimeMs = 0;
+        trade.entryPrice = BigDecimal.ONE;
+        trade.exitSignalIndex = 1;
+        trade.exitIndex = 2;
+        trade.exitTimeMs = 60_000;
+        trade.exitPrice = BigDecimal.ONE;
+        trade.amount = BigDecimal.ONE;
+        trade.grossProfit = BigDecimal.ZERO;
+        trade.fee = BigDecimal.ZERO;
+        trade.netProfit = BigDecimal.ZERO;
+        trade.returnRatio = BigDecimal.ZERO;
+        trade.barsHeld = 1;
+        trade.exitReason = "STRATEGY_EXIT";
+        trade.positionSide = "LONG";
+        trade.entryOrderSide = "BUY";
+        trade.exitOrderSide = "SELL";
+        assertEquals(1, trades.insertBatch(List.of(trade)));
+        BacktestTradeRow readTrade = trades.findPage(runId, 10, 0).get(0);
+        assertEquals("LONG", readTrade.positionSide);
+        assertEquals("BUY", readTrade.entryOrderSide);
+        assertEquals("SELL", readTrade.exitOrderSide);
+    }
+
+    private static void setContext(BacktestRunRow row) {
+        row.executionProfileCode = PROFILE;
+        row.directionMode = "LONG_ONLY";
+        row.orderSizingMode = "BASE_QUANTITY";
+    }
+
+    private static void setContext(BacktestExperimentRow row) {
+        row.executionProfileCode = PROFILE;
+        row.directionMode = "LONG_ONLY";
+        row.orderSizingMode = "BASE_QUANTITY";
+    }
+
+    private static void setContext(WalkForwardStudyRow row) {
+        row.executionProfileCode = PROFILE;
+        row.directionMode = "LONG_ONLY";
+        row.orderSizingMode = "BASE_QUANTITY";
+    }
+
+    private static void assertRowContext(String profile, String direction, String sizing) {
+        assertEquals(PROFILE, profile);
+        assertEquals("LONG_ONLY", direction);
+        assertEquals("BASE_QUANTITY", sizing);
+    }
+
     private static DriverManagerDataSource dataSource() {
-        return new DriverManagerDataSource(
-                MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
+        return new DriverManagerDataSource(jdbcUrl, username, password);
     }
 
     private static Flyway flyway(DataSource dataSource) {

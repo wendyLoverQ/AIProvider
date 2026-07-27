@@ -1,10 +1,11 @@
 package com.aiprovider.service.quant;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import com.aiprovider.config.quant.QuantWalkForwardProperties;
+import com.aiprovider.controller.quant.dto.BacktestExperimentCreateRequest;
 import com.aiprovider.controller.quant.dto.WalkForwardStudyDtos;
 import com.aiprovider.mapper.*;
 import com.aiprovider.mapper.row.*;
@@ -13,9 +14,51 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.*;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataAccessResourceFailureException;
 
 class WalkForwardStudyDispatcherTest {
+  @Test
+  void creatingFoldPropagatesStoredExecutionContextToItsFixedExperiment() {
+    WalkForwardStudyMapper studies = mock(WalkForwardStudyMapper.class);
+    WalkForwardFoldMapper folds = mock(WalkForwardFoldMapper.class);
+    WalkForwardStudySnapshotLoader loader = mock(WalkForwardStudySnapshotLoader.class);
+    BacktestExperimentCreationService creation = mock(BacktestExperimentCreationService.class);
+    WalkForwardStudyService service = realService(studies, folds, loader);
+    WalkForwardStudyRow study = executableStudy();
+    WalkForwardFoldRow fold = fold("CREATING_EXPERIMENT", 0);
+    fold.claimToken = "claim";
+    fold.trainingStartOpenTimeMs = 0;
+    fold.trainingEndOpenTimeMs = 300_000;
+    fold.validationStartOpenTimeMs = 300_000;
+    fold.validationEndOpenTimeMs = 600_000;
+    WalkForwardStudySnapshot snapshot =
+        new WalkForwardStudySnapshot(study, List.of(fold), Map.of(), Map.of(), Map.of());
+    when(studies.findNonTerminal()).thenReturn(List.of(study));
+    when(folds.findAllByStudyIds(any())).thenReturn(List.of(fold));
+    when(loader.loadMany(anyList(), anyList(), eq(false))).thenReturn(Map.of("s", snapshot));
+    when(folds.markWaitingExperiment(eq("f0"), eq("claim"), any())).thenReturn(1);
+
+    new WalkForwardStudyDispatcher(
+            studies,
+            folds,
+            creation,
+            mock(BacktestRunMapper.class),
+            new ObjectMapper(),
+            new QuantWalkForwardProperties(),
+            loader,
+            service)
+        .tick();
+
+    ArgumentCaptor<BacktestExperimentCreateRequest> request =
+        ArgumentCaptor.forClass(BacktestExperimentCreateRequest.class);
+    verify(creation).createWithExperimentId(eq("e0"), request.capture());
+    assertEquals(
+        "USDM_PERPETUAL_LONG_ONLY_1X_V1", request.getValue().getExecutionProfileCode());
+    assertEquals("LONG_ONLY", request.getValue().getDirectionMode());
+    assertEquals("BASE_QUANTITY", request.getValue().getOrderSizingMode());
+  }
+
   @Test
   void aggregatesBeforeAndAfterOnePhaseWithoutCallingPublicReads() {
     WalkForwardStudyMapper studies = mock(WalkForwardStudyMapper.class);
@@ -107,6 +150,31 @@ class WalkForwardStudyDispatcherTest {
 
   private WalkForwardStudyRow study(String status, BigDecimal progress, String errorCode, Instant finished) {
     WalkForwardStudyRow row = new WalkForwardStudyRow(); row.studyId = "s"; row.foldCount = 1; row.status = status; row.progressPercent = progress; row.errorCode = errorCode; row.createdAt = Instant.EPOCH; row.updatedAt = Instant.EPOCH; row.finishedAt = finished; row.parameterGridJson = "{}"; return row;
+  }
+
+  private WalkForwardStudyRow executableStudy() {
+    WalkForwardStudyRow row = study("RUNNING", BigDecimal.ZERO, null, null);
+    row.datasetId = 1;
+    row.strategyCode = "EMA_CROSS_LONG_ONLY";
+    row.strategyVersion = "1.0.0";
+    row.executionProfileCode = "USDM_PERPETUAL_LONG_ONLY_1X_V1";
+    row.directionMode = "LONG_ONLY";
+    row.orderSizingMode = "BASE_QUANTITY";
+    row.parameterGridJson = "{\"fastPeriod\":[2],\"slowPeriod\":[4]}";
+    row.windowMode = "ROLLING";
+    row.studyStartOpenTimeMs = 0;
+    row.studyEndOpenTimeMs = 600_000;
+    row.trainingBars = 5;
+    row.validationBars = 5;
+    row.stepBars = 5;
+    row.candidateCountPerFold = 1;
+    row.totalChildRuns = 2;
+    row.selectionMetric = "TRAIN_TOTAL_RETURN_RATIO";
+    row.orderAmount = BigDecimal.ONE;
+    row.feeRate = BigDecimal.ZERO;
+    row.forceCloseAtEnd = true;
+    row.startedAt = Instant.EPOCH;
+    return row;
   }
 
   private WalkForwardFoldRow fold(String status, int index) { WalkForwardFoldRow row = new WalkForwardFoldRow(); row.studyId = "s"; row.foldId = "f" + index; row.foldIndex = index; row.status = status; row.experimentId = "e" + index; return row; }

@@ -81,6 +81,9 @@ class BacktestRunRetryMySqlIT {
       assertEquals(null, queued.errorCode);
       assertEquals(null, queued.errorMessage);
       assertEquals(null, queued.finishedAt);
+      assertEquals("USDM_PERPETUAL_LONG_ONLY_1X_V1", queued.executionProfileCode);
+      assertEquals("LONG_ONLY", queued.directionMode);
+      assertEquals("BASE_QUANTITY", queued.orderSizingMode);
       assertEquals(2, executor.attempts.get());
       assertEquals(1, executor.acceptedCount.get() - 1);
       assertEquals(1, context.count(runId));
