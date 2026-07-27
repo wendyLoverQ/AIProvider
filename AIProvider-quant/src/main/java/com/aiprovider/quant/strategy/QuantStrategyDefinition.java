@@ -4,11 +4,12 @@ import com.aiprovider.quant.execution.DirectionMode;
 import com.aiprovider.quant.execution.ExecutionProfileCode;
 import com.aiprovider.quant.execution.MarketFeature;
 import com.aiprovider.quant.market.model.MarketType;
+import com.aiprovider.quant.research.StrategyParameterSpaceProvider;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-public interface QuantStrategyDefinition {
+public interface QuantStrategyDefinition extends StrategyParameterSpaceProvider {
     String code();
     String name();
     String version();

@@ -1,5 +1,7 @@
 package com.aiprovider.quant.strategy;
 
+import com.aiprovider.quant.research.IntegerParameterRange;
+import com.aiprovider.quant.research.StrategyResearchSpace;
 import java.util.Map;
 
 public final class RsiMeanReversionLongOnlyDefinition implements QuantStrategyDefinition {
@@ -17,6 +19,7 @@ public final class RsiMeanReversionLongOnlyDefinition implements QuantStrategyDe
                 new StrategyParameterDefinition("entryThreshold", DEFAULT_ENTRY, 1, 49),
                 new StrategyParameterDefinition("exitThreshold", DEFAULT_EXIT, 51, 99));
     }
+    @Override public StrategyResearchSpace researchSpace() { return new StrategyResearchSpace(code(), version(), java.util.List.of(new IntegerParameterRange("rsiPeriod", 7, 21, 7), new IntegerParameterRange("entryThreshold", 20, 40, 10), new IntegerParameterRange("exitThreshold", 55, 75, 10))); }
     @Override public int minimumRequiredBars(Map<String, Integer> values) { return calculateMinimumRequiredBars(resolve(values)); }
     @Override public StrategyBuildResult build(Map<String, Integer> values, int barCount) {
         Map<String, Integer> resolved = resolve(values);

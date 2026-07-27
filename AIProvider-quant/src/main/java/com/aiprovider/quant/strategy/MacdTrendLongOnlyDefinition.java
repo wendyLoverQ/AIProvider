@@ -1,5 +1,7 @@
 package com.aiprovider.quant.strategy;
 
+import com.aiprovider.quant.research.IntegerParameterRange;
+import com.aiprovider.quant.research.StrategyResearchSpace;
 import java.util.Map;
 
 public final class MacdTrendLongOnlyDefinition implements QuantStrategyDefinition {
@@ -17,6 +19,7 @@ public final class MacdTrendLongOnlyDefinition implements QuantStrategyDefinitio
                 new StrategyParameterDefinition("slowPeriod", DEFAULT_SLOW, 3, 1000),
                 new StrategyParameterDefinition("signalPeriod", DEFAULT_SIGNAL, 2, 500));
     }
+    @Override public StrategyResearchSpace researchSpace() { return new StrategyResearchSpace(code(), version(), java.util.List.of(new IntegerParameterRange("fastPeriod", 8, 16, 4), new IntegerParameterRange("slowPeriod", 24, 40, 8), new IntegerParameterRange("signalPeriod", 6, 12, 3))); }
     @Override public int minimumRequiredBars(Map<String, Integer> values) { return calculateMinimumRequiredBars(resolve(values)); }
     @Override public StrategyBuildResult build(Map<String, Integer> values, int barCount) {
         Map<String, Integer> resolved = resolve(values);

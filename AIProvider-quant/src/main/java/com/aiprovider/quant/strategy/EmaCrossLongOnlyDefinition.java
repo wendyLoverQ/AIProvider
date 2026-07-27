@@ -1,5 +1,7 @@
 package com.aiprovider.quant.strategy;
 
+import com.aiprovider.quant.research.IntegerParameterRange;
+import com.aiprovider.quant.research.StrategyResearchSpace;
 import java.util.List;
 import java.util.Map;
 
@@ -10,6 +12,7 @@ public final class EmaCrossLongOnlyDefinition implements QuantStrategyDefinition
     public String version() { return "1.0.0"; }
     public String description() { return "仅用于验证指标、规则和回测链路，不代表盈利能力。"; }
     public List<StrategyParameterDefinition> parameters() { return List.of(new StrategyParameterDefinition("fastPeriod", 12, 2, 1000), new StrategyParameterDefinition("slowPeriod", 26, 2, 1000)); }
+    public StrategyResearchSpace researchSpace() { return new StrategyResearchSpace(code(), version(), List.of(new IntegerParameterRange("fastPeriod", 5, 20, 5), new IntegerParameterRange("slowPeriod", 30, 70, 20))); }
     public int minimumRequiredBars(Map<String, Integer> values) { return calculateMinimumRequiredBars(resolve(values)); }
     public StrategyBuildResult build(Map<String, Integer> values, int barCount) {
         Map<String, Integer> resolved = resolve(values);
