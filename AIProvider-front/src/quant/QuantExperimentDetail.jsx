@@ -51,18 +51,6 @@ export default function QuantExperimentDetail({
     <section className="backtest-card quant-experiment-detail">
       <header className="quant-section-head">
         <div>
-          <dt>执行模型</dt>
-          <dd>{executionProfile?.name || experiment.executionProfileCode}</dd>
-        </div>
-        <div>
-          <dt>方向</dt>
-          <dd>{formatDirectionMode(experiment.directionMode)}</dd>
-        </div>
-        <div>
-          <dt>规模模式</dt>
-          <dd>{formatOrderSizingMode(experiment.orderSizingMode)}</dd>
-        </div>
-        <div>
           <h4>实验详情</h4>
           <small className="copyable-id">{experiment.experimentId}</small>
         </div>
@@ -86,6 +74,18 @@ export default function QuantExperimentDetail({
             {experiment.strategyCode || "—"} ·{" "}
             {experiment.strategyVersion || "—"}
           </dd>
+        </div>
+        <div>
+          <dt>执行模型</dt>
+          <dd>{executionProfile?.name || experiment.executionProfileCode}</dd>
+        </div>
+        <div>
+          <dt>方向</dt>
+          <dd>{formatDirectionMode(experiment.directionMode)}</dd>
+        </div>
+        <div>
+          <dt>规模模式</dt>
+          <dd>{formatOrderSizingMode(experiment.orderSizingMode)}</dd>
         </div>
         <div>
           <dt>候选 / 总任务</dt>

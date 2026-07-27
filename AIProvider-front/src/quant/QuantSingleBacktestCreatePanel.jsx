@@ -13,6 +13,7 @@ import {
 import { createBacktestRun } from "./quantBacktestsApi";
 import QuantExecutionContextFields from "./QuantExecutionContextFields";
 import {
+  compatibleStrategies,
   executionContextPayload,
   validateExecutionSelection,
 } from "./quantExecutionContext";
@@ -97,10 +98,8 @@ export default function QuantSingleBacktestCreatePanel({
       !initialStrategyCode ||
       !dataset ||
       executionContext.strategyCode ||
-      !strategies.some(
-        (item) =>
-          item.code === initialStrategyCode &&
-          item.supportedMarketTypes.includes(dataset.marketType),
+      !compatibleStrategies(strategies, dataset).some(
+        (item) => item.code === initialStrategyCode,
       )
     )
       return;

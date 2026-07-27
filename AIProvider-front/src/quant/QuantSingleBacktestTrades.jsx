@@ -99,7 +99,7 @@ export default function QuantSingleBacktestTrades({
                     <td>{trade.barsHeld ?? "—"}</td>
                     <td>
                       {trade.exitReason === "END_OF_SERIES" || trade.forcedExit
-                        ? "期末强平"
+                        ? "期末强制平仓"
                         : "策略退出"}
                     </td>
                   </tr>

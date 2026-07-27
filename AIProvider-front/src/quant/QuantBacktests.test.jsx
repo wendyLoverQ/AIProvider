@@ -112,11 +112,139 @@ describe("Quant Walk-forward workspace lifecycle", () => {
     return fetchMock;
   }
 
+  it("shows a profile failure independently while the Study list still loads", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url.includes("/execution-profiles"))
+        return {
+          ok: false,
+          status: 500,
+          json: async () => ({ code: 500, message: "执行模型服务失败" }),
+        };
+      if (url.includes("/strategies")) return result([strategy]);
+      if (url.includes("/datasets")) return result([]);
+      if (url.includes("walk-forward-studies"))
+        return result({
+          records: [walkForwardSummary],
+          total: 1,
+          page: 1,
+          pageSize: 20,
+        });
+      throw new Error(`unexpected request ${url}`);
+    });
+    window.history.replaceState(
+      {},
+      "",
+      "/quant/backtests?mode=walk-forward",
+    );
+    render(<QuantWalkForwardWorkspace />);
+    expect(await screen.findByText(/执行模型服务失败/)).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: /BTCUSDT/ }),
+    ).toBeTruthy();
+  });
+
+  it("closes once, deep-links, and restores focus after creating a Study", async () => {
+    const createdSummary = {
+      ...walkForwardSummary,
+      studyId: "wf-created",
+      strategyCode: strategy.code,
+      strategyVersion: strategy.version,
+      parameterGrid: { period: [14] },
+      status: "QUEUED",
+      progressPercent: 0,
+      foldCount: 1,
+      candidateCountPerFold: 1,
+      totalChildRuns: 2,
+      pendingFolds: 1,
+      activeFolds: 0,
+      completedFolds: 0,
+      failedFolds: 0,
+      selectedParameterChanges: null,
+      successfulOosFolds: null,
+      totalOosTradeCount: null,
+      totalOosFees: null,
+      totalOosReturnRatio: null,
+      hasOosGaps: null,
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (url, options = {}) => {
+        if (url.includes("/execution-profiles"))
+          return result([executionProfile]);
+        if (url.includes("/strategies")) return result([strategy]);
+        if (url.includes("/datasets")) return result([dataset]);
+        if (
+          url.endsWith("/walk-forward-studies") &&
+          options.method === "POST"
+        )
+          return result({
+            studyId: "wf-created",
+            foldCount: 1,
+            candidateCountPerFold: 1,
+            totalChildRuns: 2,
+          });
+        if (url.includes("/wf-created/folds"))
+          return result({
+            records: [],
+            total: 0,
+            page: 1,
+            pageSize: 50,
+          });
+        if (url.endsWith("/wf-created"))
+          return result({
+            summary: createdSummary,
+            parameterFrequencies: [],
+          });
+        if (url.includes("walk-forward-studies"))
+          return result({
+            records: [createdSummary],
+            total: 1,
+            page: 1,
+            pageSize: 20,
+          });
+        throw new Error(`unexpected request ${url}`);
+      },
+    );
+    window.history.replaceState(
+      {},
+      "",
+      "/quant/backtests?mode=walk-forward",
+    );
+    render(<QuantWalkForwardWorkspace />);
+    const openButton = await screen.findByRole("button", {
+      name: "新建滚动验证",
+    });
+    fireEvent.click(openButton);
+    fireEvent.change(screen.getByRole("combobox", { name: "数据集 / 交易对" }), {
+      target: { value: "1" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "策略" }), {
+      target: { value: strategy.code },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "按 70% / 30% 填充窗口" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "创建滚动验证" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "新建滚动验证" }),
+      ).toBeNull(),
+    );
+    expect(new URLSearchParams(window.location.search).get("studyId")).toBe(
+      "wf-created",
+    );
+    await waitFor(() => expect(document.activeElement).toBe(openButton));
+  });
+
   it("keeps foldId in history, restores same-page selection, and exposes failed folds with keyboard semantics", async () => {
     const fetchMock = installWalkForwardFetch();
     window.history.replaceState({}, "", "/quant/backtests?mode=walk-forward&studyId=wf-1&foldPage=1&foldId=fold-a");
     render(<QuantWalkForwardWorkspace />);
     await waitFor(() => expect(screen.getAllByRole("button").filter((item) => item.getAttribute("role") === "button")).toHaveLength(2));
+    expect(
+      screen.getByText("USDT 本位永续·只做多·1× V1"),
+    ).toBeTruthy();
+    expect(screen.getByText("只做多")).toBeTruthy();
+    expect(screen.getByText("基础资产数量")).toBeTruthy();
     const foldRows = () => screen.getAllByRole("button").filter((row) => row.getAttribute("role") === "button");
     const row = (index) => foldRows().find((item) => item.textContent.trim().startsWith(String(index)));
     expect(row(0).getAttribute("aria-selected")).toBe("true");
@@ -231,6 +359,26 @@ describe("Quant backtest strategy handoff", () => {
     expect(screen.getByDisplayValue("14")).toBeTruthy();
     expect(window.location.pathname).toBe("/quant/backtests");
     expect(window.location.search).toBe("");
+  });
+
+  it("shows a profile failure independently while the run list still loads", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url.includes("/execution-profiles"))
+        return {
+          ok: false,
+          status: 500,
+          json: async () => ({ code: 500, message: "执行模型服务失败" }),
+        };
+      if (url.includes("/strategies")) return result([strategy]);
+      if (url.includes("/datasets")) return result([dataset]);
+      if (url.includes("/runs"))
+        return result({ records: [], total: 0, page: 1, pageSize: 20 });
+      throw new Error(`unexpected request ${url}`);
+    });
+    render(<QuantBacktests />);
+    expect(await screen.findByText(/执行模型服务失败/)).toBeTruthy();
+    expect(await screen.findByText("还没有创建回测")).toBeTruthy();
+    expect(screen.queryByText(/策略不可用|数据集不可用/)).toBeNull();
   });
 
   it("does not select another strategy when the requested code is unavailable", async () => {

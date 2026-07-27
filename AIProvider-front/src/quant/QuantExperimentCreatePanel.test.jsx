@@ -213,6 +213,21 @@ describe("QuantExperimentCreatePanel", () => {
     expect(onCreated).not.toHaveBeenCalled();
   });
 
+  it("does not show AbortError as a business failure", async () => {
+    const aborted = new Error("aborted");
+    aborted.name = "AbortError";
+    createExperiment.mockRejectedValue(aborted);
+    setup();
+    chooseRequiredValues();
+    fireEvent.click(
+      screen.getByRole("button", { name: "按 70% / 30% 填充" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "创建异步实验" }));
+    await waitFor(() => expect(createExperiment).toHaveBeenCalled());
+    expect(screen.queryByText("aborted")).toBeNull();
+    expect(screen.getByRole("dialog", { name: "新建参数实验" })).toBeTruthy();
+  });
+
   it("rejects overlapping ranges and invalid decimal precision before submit", () => {
     setup();
     chooseRequiredValues();
@@ -234,5 +249,20 @@ describe("QuantExperimentCreatePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "创建异步实验" }));
     expect(screen.getByRole("alert").textContent).toContain("最多 18 位小数");
     expect(createExperiment).not.toHaveBeenCalled();
+  });
+
+  it("does not submit without a compatible execution profile", () => {
+    setup({
+      executionProfiles: [
+        { ...executionProfiles[0], marketType: "SPOT" },
+      ],
+    });
+    chooseRequiredValues();
+    fireEvent.click(
+      screen.getByRole("button", { name: "按 70% / 30% 填充" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "创建异步实验" }));
+    expect(createExperiment).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("执行模型");
   });
 });

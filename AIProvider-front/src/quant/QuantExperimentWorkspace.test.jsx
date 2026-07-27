@@ -154,6 +154,12 @@ describe("QuantExperimentWorkspace", () => {
     fetchExperimentCandidates.mockResolvedValue({ ...candidatePage, page: 2 });
     render(<QuantExperimentWorkspace />);
     await waitFor(() => expect(screen.getByText("实验详情")).toBeTruthy());
+    expect(screen.getByText("USDT 本位永续·只做多·1× V1")).toBeTruthy();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /BTC\/USDT/ }).textContent,
+      ).toContain("USDT 本位永续·只做多·1× V1"),
+    );
     expect(screen.getByText("period")).toBeTruthy();
     expect(screen.getByText("7, 14")).toBeTruthy();
     expect(screen.getByText(/待处理 0 · 活跃 0 · 完成 2 · 失败 0/)).toBeTruthy();
@@ -270,24 +276,34 @@ describe("QuantExperimentWorkspace", () => {
     await waitFor(() => expect(screen.queryByText(/旧策略错误/)).toBeNull());
   });
 
-  it("does not let an older shared failure overwrite a newer success", async () => {
+  it("does not let an older profile failure overwrite a newer success", async () => {
     let rejectOld;
-    fetchStrategies
+    fetchExecutionProfiles
       .mockImplementationOnce(
         () =>
           new Promise((_resolve, reject) => {
             rejectOld = reject;
           }),
       )
-      .mockResolvedValueOnce([strategy]);
+      .mockResolvedValueOnce([executionProfile]);
     render(<QuantExperimentWorkspace />);
     fireEvent.click(screen.getByRole("button", { name: "刷新" }));
-    await waitFor(() => expect(fetchStrategies).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(fetchExecutionProfiles).toHaveBeenCalledTimes(2),
+    );
     await act(async () => {
       rejectOld(new Error("迟到的旧错误"));
       await Promise.resolve();
     });
     expect(screen.queryByText(/迟到的旧错误/)).toBeNull();
+  });
+
+  it("shows a profile failure independently while list loading still succeeds", async () => {
+    fetchExecutionProfiles.mockRejectedValue(new Error("执行模型服务失败"));
+    render(<QuantExperimentWorkspace />);
+    expect(await screen.findByText(/执行模型服务失败/)).toBeTruthy();
+    expect(await screen.findByText("当前没有参数实验")).toBeTruthy();
+    expect(screen.queryByText(/策略不可用|数据集不可用/)).toBeNull();
   });
 
   it("keeps the dataset failure isolated and does not expose strategies without a dataset", async () => {
@@ -424,6 +440,14 @@ describe("QuantExperimentWorkspace", () => {
     fetchExperiment.mockResolvedValue({ ...experiment(), experimentId: "created" });
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: "新建参数实验" })).toBeNull(),
+    );
+    expect(new URLSearchParams(window.location.search).get("experimentId")).toBe(
+      "created",
+    );
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "新建参数实验" }),
+      ),
     );
   });
 

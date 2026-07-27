@@ -16,6 +16,7 @@ export default function QuantExperimentList({
   filters,
   selectedId,
   loading,
+  executionProfiles = [],
   onFilters,
   onPage,
   onSelect,
@@ -85,7 +86,13 @@ export default function QuantExperimentList({
               {experiment.strategyVersion || "—"}
             </span>
             <span>
-              {experiment.executionProfileCode || "—"} ·{" "}
+              {executionProfiles.find(
+                (profile) =>
+                  profile.code === experiment.executionProfileCode,
+              )?.name ||
+                experiment.executionProfileCode ||
+                "—"}{" "}
+              ·{" "}
               {formatDirectionMode(experiment.directionMode)} ·{" "}
               {formatOrderSizingMode(experiment.orderSizingMode)}
             </span>

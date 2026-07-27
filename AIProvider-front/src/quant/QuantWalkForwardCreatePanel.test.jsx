@@ -122,4 +122,66 @@ describe("QuantWalkForwardCreatePanel", () => {
     expect(screen.queryByText("aborted")).toBeNull();
     expect(screen.getByRole("dialog", { name: "新建滚动验证" })).toBeTruthy();
   });
+
+  it("does not submit without a compatible profile", async () => {
+    render(
+      <QuantWalkForwardCreatePanel
+        strategies={[strategy]}
+        datasets={[dataset]}
+        executionProfiles={[{ ...profile, marketType: "SPOT" }]}
+        onClose={vi.fn()}
+        onCreated={vi.fn()}
+      />,
+    );
+    fireEvent.change(screen.getByRole("combobox", { name: "数据集 / 交易对" }), {
+      target: { value: "1" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "策略" }), {
+      target: { value: "RSI" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "按 70% / 30% 填充窗口" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "创建滚动验证" }));
+    expect(createWalkForwardStudy).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("执行模型");
+  });
+
+  it("blocks close while pending and keeps the panel after a business failure", async () => {
+    let rejectRequest;
+    createWalkForwardStudy.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectRequest = reject;
+        }),
+    );
+    const onClose = vi.fn();
+    render(
+      <QuantWalkForwardCreatePanel
+        strategies={[strategy]}
+        datasets={[dataset]}
+        executionProfiles={[profile]}
+        onClose={onClose}
+        onCreated={vi.fn()}
+      />,
+    );
+    fireEvent.change(screen.getByRole("combobox", { name: "数据集 / 交易对" }), {
+      target: { value: "1" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "策略" }), {
+      target: { value: "RSI" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "按 70% / 30% 填充窗口" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "创建滚动验证" }));
+    expect(
+      screen.getByRole("button", { name: "关闭新建滚动验证" }).disabled,
+    ).toBe(true);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    rejectRequest(new Error("Study 创建失败"));
+    expect(await screen.findByText("Study 创建失败")).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "新建滚动验证" })).toBeTruthy();
+  });
 });

@@ -561,6 +561,7 @@ export default function QuantExperimentWorkspace() {
           filters={filters}
           selectedId={selectedId}
           loading={loading.list}
+          executionProfiles={executionProfiles}
           onFilters={(next) => {
             setFilters(next);
             setListPage(1);
