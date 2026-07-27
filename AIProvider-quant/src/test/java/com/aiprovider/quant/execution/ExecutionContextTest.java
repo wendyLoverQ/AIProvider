@@ -11,6 +11,8 @@ import com.aiprovider.quant.strategy.StrategyBuildResult;
 import com.aiprovider.quant.strategy.StrategyParameterDefinition;
 import com.aiprovider.quant.strategy.StrategyRegistry;
 import java.math.BigDecimal;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -36,6 +38,7 @@ class ExecutionContextTest {
                 .isEqualTo("BACKTEST_EXECUTION_PROFILE_NOT_SUPPORTED");
         ExecutionProfileDefinition profile = profiles.list().get(0);
         assertThat(profile.marketType()).isEqualTo(MarketType.USDM_PERPETUAL);
+        assertThat(profile.name()).isEqualTo("USDT 本位永续·只做多·1× V1");
         assertThat(profile.directionMode()).isEqualTo(DirectionMode.LONG_ONLY);
         assertThat(profile.orderSizingMode()).isEqualTo(OrderSizingMode.BASE_QUANTITY);
         assertThat(profile.positionSide()).isEqualTo(PositionSide.LONG);
@@ -58,6 +61,178 @@ class ExecutionContextTest {
                         "orderAmount 按基础资产数量解释");
         assertThatThrownBy(() -> new ExecutionProfileRegistry(java.util.List.of(profile, profile)))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void profileDefinitionEnforcesCompleteConstructionInvariants() {
+        assertThatThrownBy(
+                        () ->
+                                definition(
+                                        " ",
+                                        "description",
+                                        BigDecimal.ONE,
+                                        Set.of(MarketFeature.OHLCV),
+                                        List.of("limit"),
+                                        DirectionMode.LONG_ONLY,
+                                        PositionSide.LONG,
+                                        OrderSide.BUY,
+                                        OrderSide.SELL))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("name");
+        assertThatThrownBy(
+                        () ->
+                                definition(
+                                        "name",
+                                        " ",
+                                        BigDecimal.ONE,
+                                        Set.of(MarketFeature.OHLCV),
+                                        List.of("limit"),
+                                        DirectionMode.LONG_ONLY,
+                                        PositionSide.LONG,
+                                        OrderSide.BUY,
+                                        OrderSide.SELL))
+                .hasMessageContaining("description");
+        assertThatThrownBy(
+                        () ->
+                                definition(
+                                        "name",
+                                        "description",
+                                        BigDecimal.ZERO,
+                                        Set.of(MarketFeature.OHLCV),
+                                        List.of("limit"),
+                                        DirectionMode.LONG_ONLY,
+                                        PositionSide.LONG,
+                                        OrderSide.BUY,
+                                        OrderSide.SELL))
+                .hasMessageContaining("leverage");
+        assertThatThrownBy(
+                        () ->
+                                definition(
+                                        "name",
+                                        "description",
+                                        BigDecimal.ONE,
+                                        Set.of(),
+                                        List.of("limit"),
+                                        DirectionMode.LONG_ONLY,
+                                        PositionSide.LONG,
+                                        OrderSide.BUY,
+                                        OrderSide.SELL))
+                .hasMessageContaining("requiredMarketFeatures");
+        Set<MarketFeature> featuresWithNull = new HashSet<>();
+        featuresWithNull.add(null);
+        assertThatThrownBy(
+                        () ->
+                                definition(
+                                        "name",
+                                        "description",
+                                        BigDecimal.ONE,
+                                        featuresWithNull,
+                                        List.of("limit"),
+                                        DirectionMode.LONG_ONLY,
+                                        PositionSide.LONG,
+                                        OrderSide.BUY,
+                                        OrderSide.SELL))
+                .hasMessageContaining("requiredMarketFeatures");
+        assertThatThrownBy(
+                        () ->
+                                definition(
+                                        "name",
+                                        "description",
+                                        BigDecimal.ONE,
+                                        Set.of(MarketFeature.OHLCV),
+                                        List.of(),
+                                        DirectionMode.LONG_ONLY,
+                                        PositionSide.LONG,
+                                        OrderSide.BUY,
+                                        OrderSide.SELL))
+                .hasMessageContaining("limitations");
+        assertThatThrownBy(
+                        () ->
+                                definition(
+                                        "name",
+                                        "description",
+                                        BigDecimal.ONE,
+                                        Set.of(MarketFeature.OHLCV),
+                                        List.of(" "),
+                                        DirectionMode.LONG_ONLY,
+                                        PositionSide.LONG,
+                                        OrderSide.BUY,
+                                        OrderSide.SELL))
+                .hasMessageContaining("limitations[0]");
+        assertThatThrownBy(
+                        () ->
+                                definition(
+                                        "name",
+                                        "description",
+                                        BigDecimal.ONE,
+                                        Set.of(MarketFeature.OHLCV),
+                                        List.of("same", "same"),
+                                        DirectionMode.LONG_ONLY,
+                                        PositionSide.LONG,
+                                        OrderSide.BUY,
+                                        OrderSide.SELL))
+                .hasMessageContaining("duplicates");
+        assertThatThrownBy(
+                        () ->
+                                definition(
+                                        "name",
+                                        "description",
+                                        BigDecimal.ONE,
+                                        Set.of(MarketFeature.OHLCV),
+                                        List.of("limit"),
+                                        DirectionMode.LONG_ONLY,
+                                        PositionSide.LONG,
+                                        OrderSide.SELL,
+                                        OrderSide.SELL))
+                .hasMessageContaining("entryOrderSide");
+        assertThatThrownBy(
+                        () ->
+                                definition(
+                                        "name",
+                                        "description",
+                                        BigDecimal.ONE,
+                                        Set.of(MarketFeature.OHLCV),
+                                        List.of("limit"),
+                                        DirectionMode.LONG_ONLY,
+                                        PositionSide.LONG,
+                                        OrderSide.BUY,
+                                        OrderSide.BUY))
+                .hasMessageContaining("exitOrderSide");
+        assertThatThrownBy(
+                        () ->
+                                definition(
+                                        "name",
+                                        "description",
+                                        BigDecimal.ONE,
+                                        Set.of(MarketFeature.OHLCV),
+                                        List.of("limit"),
+                                        DirectionMode.LONG_ONLY,
+                                        null,
+                                        OrderSide.BUY,
+                                        OrderSide.SELL))
+                .hasMessageContaining("positionSide");
+    }
+
+    @Test
+    void registryRejectsNullCollectionsAndDefinitionsWithoutOverwriting() {
+        ExecutionProfileDefinition profile = profiles.list().get(0);
+        assertThatThrownBy(() -> new ExecutionProfileRegistry(null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("profiles");
+        assertThatThrownBy(
+                        () ->
+                                new ExecutionProfileRegistry(
+                                        Arrays.asList(profile, null)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("definition");
+        assertThatThrownBy(() -> profiles.get(" usdm_perpetual_long_only_1x_v1 "))
+                .isInstanceOf(BacktestException.class)
+                .extracting(error -> ((BacktestException) error).getErrorCode())
+                .isEqualTo("BACKTEST_EXECUTION_PROFILE_NOT_SUPPORTED");
+        assertThatThrownBy(() -> profiles.get(" "))
+                .isInstanceOf(BacktestException.class)
+                .extracting(error -> ((BacktestException) error).getErrorCode())
+                .isEqualTo("BACKTEST_EXECUTION_PROFILE_REQUIRED");
     }
 
     @Test
@@ -198,5 +373,36 @@ class ExecutionContextTest {
                 "BTCUSDT",
                 KlineInterval.M1,
                 features);
+    }
+
+    private ExecutionProfileDefinition definition(
+            String name,
+            String description,
+            BigDecimal leverage,
+            Set<MarketFeature> features,
+            List<String> limitations,
+            DirectionMode direction,
+            PositionSide position,
+            OrderSide entry,
+            OrderSide exit) {
+        return new ExecutionProfileDefinition(
+                ExecutionProfileCode.USDM_PERPETUAL_LONG_ONLY_1X_V1,
+                name,
+                description,
+                MarketType.USDM_PERPETUAL,
+                direction,
+                OrderSizingMode.BASE_QUANTITY,
+                position,
+                entry,
+                exit,
+                leverage,
+                "TA4J_TRADE_ON_NEXT_OPEN",
+                "LINEAR_FEE_RATE",
+                "ZERO",
+                "ZERO_NOT_MODELED",
+                "NONE_NOT_MODELED",
+                "NONE_NOT_MODELED",
+                features,
+                limitations);
     }
 }

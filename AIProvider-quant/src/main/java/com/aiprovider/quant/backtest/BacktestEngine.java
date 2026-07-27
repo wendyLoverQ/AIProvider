@@ -2,6 +2,7 @@ package com.aiprovider.quant.backtest;
 
 import com.aiprovider.quant.market.history.model.HistoricalCandle;
 import com.aiprovider.quant.execution.BacktestMarketContext;
+import com.aiprovider.quant.execution.ExecutionProfileRegistry;
 import com.aiprovider.quant.ta4j.Ta4jBacktestEngine;
 import com.aiprovider.quant.strategy.StrategyRegistry;
 
@@ -11,8 +12,22 @@ import java.util.List;
 public final class BacktestEngine {
     private final Ta4jBacktestEngine delegate;
 
-    public BacktestEngine() { this(new StrategyRegistry()); }
-    public BacktestEngine(StrategyRegistry registry) { this.delegate = new Ta4jBacktestEngine(new com.aiprovider.quant.ta4j.Ta4jBarSeriesFactory(), registry); }
+    public BacktestEngine() {
+        this(new StrategyRegistry(), new ExecutionProfileRegistry());
+    }
+
+    public BacktestEngine(StrategyRegistry registry) {
+        this(registry, new ExecutionProfileRegistry());
+    }
+
+    public BacktestEngine(
+            StrategyRegistry registry, ExecutionProfileRegistry executionProfiles) {
+        this.delegate =
+                new Ta4jBacktestEngine(
+                        new com.aiprovider.quant.ta4j.Ta4jBarSeriesFactory(),
+                        registry,
+                        executionProfiles);
+    }
     public BacktestResult run(BacktestRequest request, BacktestMarketContext market,
                               List<HistoricalCandle> candles) {
         try {

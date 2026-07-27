@@ -28,6 +28,7 @@ class QuantBacktestControllerContractTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.length()").value(1))
                     .andExpect(jsonPath("$.data[0].code").value("USDM_PERPETUAL_LONG_ONLY_1X_V1"))
+                    .andExpect(jsonPath("$.data[0].name").value("USDT 本位永续·只做多·1× V1"))
                     .andExpect(jsonPath("$.data[0].marketType").value("USDM_PERPETUAL"))
                     .andExpect(jsonPath("$.data[0].directionMode").value("LONG_ONLY"))
                     .andExpect(jsonPath("$.data[0].orderSizingMode").value("BASE_QUANTITY"))

@@ -17,11 +17,65 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class Ta4jQuantCoreTest {
+    @Test
+    void injectedExecutionProfileRegistryIsUsedByTheActualTa4jRun() {
+        ExecutionProfileDefinition builtIn = new ExecutionProfileRegistry().list().get(0);
+        ExecutionProfileDefinition custom =
+                new ExecutionProfileDefinition(
+                        builtIn.code(),
+                        builtIn.name(),
+                        builtIn.description(),
+                        builtIn.marketType(),
+                        builtIn.directionMode(),
+                        builtIn.orderSizingMode(),
+                        builtIn.positionSide(),
+                        builtIn.entryOrderSide(),
+                        builtIn.exitOrderSide(),
+                        builtIn.leverage(),
+                        "TEST_UNSUPPORTED_FILL_MODEL",
+                        builtIn.transactionCostModel(),
+                        builtIn.holdingCostModel(),
+                        builtIn.fundingCostModel(),
+                        builtIn.liquidationModel(),
+                        builtIn.marginModel(),
+                        builtIn.requiredMarketFeatures(),
+                        builtIn.limitations());
+        ExecutionProfileRegistry injected = new ExecutionProfileRegistry(List.of(custom));
+
+        assertThatThrownBy(
+                        () ->
+                                new BacktestEngine(
+                                                new com.aiprovider.quant.strategy.StrategyRegistry(),
+                                                injected)
+                                        .run(
+                                                request(
+                                                        "EMA_CROSS_LONG_ONLY",
+                                                        "1.0.0",
+                                                        Map.of(
+                                                                "fastPeriod",
+                                                                2,
+                                                                "slowPeriod",
+                                                                4),
+                                                        BigDecimal.ONE,
+                                                        BigDecimal.ZERO,
+                                                        true),
+                                                market(),
+                                                candles(40)))
+                .isInstanceOf(com.aiprovider.quant.backtest.BacktestException.class)
+                .hasMessageContaining("unsupported fillModel=TEST_UNSUPPORTED_FILL_MODEL")
+                .extracting(
+                        error ->
+                                ((com.aiprovider.quant.backtest.BacktestException) error)
+                                        .getErrorCode())
+                .isEqualTo("BACKTEST_STRATEGY_EXECUTION_INCOMPATIBLE");
+    }
+
     @Test
     void indicatorHasStableBigDecimalPointsAndRejectsGaps() {
         List<HistoricalCandle> candles = candles(12);

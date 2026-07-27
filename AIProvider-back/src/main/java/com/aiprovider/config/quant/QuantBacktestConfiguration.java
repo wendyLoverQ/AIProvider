@@ -1,6 +1,7 @@
 package com.aiprovider.config.quant;
 
 import com.aiprovider.quant.backtest.BacktestEngine;
+import com.aiprovider.quant.execution.ExecutionProfileRegistry;
 import com.aiprovider.quant.strategy.StrategyRegistry;
 import java.util.concurrent.*;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -22,8 +23,9 @@ public class QuantBacktestConfiguration {
   }
 
   @Bean
-  public BacktestEngine backtestEngine(StrategyRegistry registry) {
-    return new BacktestEngine(registry);
+  public BacktestEngine backtestEngine(
+      StrategyRegistry registry, ExecutionProfileRegistry executionProfiles) {
+    return new BacktestEngine(registry, executionProfiles);
   }
 
   @Bean(name = "quantBacktestExecutor", destroyMethod = "shutdownGracefully")

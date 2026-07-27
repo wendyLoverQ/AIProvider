@@ -136,6 +136,8 @@ class QuantExecutionContextMySqlTest {
             assertEquals("SELL", storedTrade.exitOrderSide);
             assertMapperWritesAndReadsAllExecutionFields(runs, experiments, studies, trades);
         }
+        assertEquals(0, flyway.migrate().migrationsExecuted);
+        assertDoesNotThrow(flyway::validate);
     }
 
     @Test
@@ -170,7 +172,74 @@ class QuantExecutionContextMySqlTest {
                 BigDecimal.ZERO,
                 Instant.now(),
                 Instant.now());
-        assertThrows(RuntimeException.class, flyway::migrate);
+        RuntimeException failure = assertThrows(RuntimeException.class, flyway::migrate);
+
+        assertTrue(
+                exceptionText(failure)
+                        .contains(
+                                "quant_execution_context_V71_preflight_unsupported_market"));
+        assertNoV71Objects(jdbc);
+        assertEquals(
+                "UNKNOWN",
+                jdbc.queryForObject(
+                        "SELECT MarketType FROM q_backtest_run LIMIT 1", String.class));
+        assertFalse(v71Succeeded(jdbc));
+    }
+
+    @Test
+    void v71RejectsPartialStateAndDoesNotAddOrRemoveOtherObjects() {
+        DriverManagerDataSource dataSource = dataSource();
+        Flyway flyway = flyway(dataSource);
+        flyway.clean();
+        bootstrapLegacySchema(dataSource);
+        migrateLegacySchemaToV70(dataSource);
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        jdbc.execute(
+                "ALTER TABLE q_backtest_run ADD COLUMN ExecutionProfileCode VARCHAR(64) NULL");
+
+        RuntimeException failure = assertThrows(RuntimeException.class, flyway::migrate);
+
+        assertTrue(exceptionText(failure).contains("partial_V71_manual_repair_required"));
+        assertTrue(columnExists(jdbc, "q_backtest_run", "ExecutionProfileCode"));
+        assertFalse(columnExists(jdbc, "q_backtest_run", "DirectionMode"));
+        assertFalse(columnExists(jdbc, "q_backtest_experiment", "ExecutionProfileCode"));
+        assertFalse(columnExists(jdbc, "q_walk_forward_study", "ExecutionProfileCode"));
+        assertFalse(columnExists(jdbc, "q_backtest_trade", "PositionSide"));
+        assertFalse(indexExists(jdbc, "q_backtest_run", "idx_backtest_run_execution_profile"));
+        assertFalse(
+                indexExists(
+                        jdbc,
+                        "q_backtest_experiment",
+                        "ix_q_backtest_experiment_execution_profile"));
+        assertFalse(
+                indexExists(
+                        jdbc,
+                        "q_walk_forward_study",
+                        "ix_walk_forward_study_execution_profile"));
+        assertFalse(v71Succeeded(jdbc));
+    }
+
+    @Test
+    void callbackNoOpsBeforeQuantTablesExist() {
+        DriverManagerDataSource dataSource = dataSource();
+        Flyway flyway =
+                Flyway.configure()
+                        .dataSource(dataSource)
+                        .locations("classpath:db/migration")
+                        .target("1")
+                        .cleanDisabled(false)
+                        .load();
+        flyway.clean();
+
+        assertDoesNotThrow(flyway::migrate);
+        assertFalse(
+                new JdbcTemplate(dataSource)
+                        .queryForObject(
+                                "SELECT COUNT(*) > 0 FROM information_schema.columns"
+                                        + " WHERE table_schema=DATABASE()"
+                                        + " AND table_name='q_backtest_run'"
+                                        + " AND column_name='ExecutionProfileCode'",
+                                Boolean.class));
     }
 
     private static void insertHistoricalRows(
@@ -583,5 +652,49 @@ class QuantExecutionContextMySqlTest {
                         table,
                         index)
                 > 0;
+    }
+
+    private static boolean columnExists(JdbcTemplate jdbc, String table, String column) {
+        return jdbc.queryForObject(
+                        "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE()"
+                                + " AND table_name=? AND column_name=?",
+                        Integer.class,
+                        table,
+                        column)
+                > 0;
+    }
+
+    private static void assertNoV71Objects(JdbcTemplate jdbc) {
+        assertFalse(columnExists(jdbc, "q_backtest_run", "ExecutionProfileCode"));
+        assertFalse(columnExists(jdbc, "q_backtest_experiment", "ExecutionProfileCode"));
+        assertFalse(columnExists(jdbc, "q_walk_forward_study", "ExecutionProfileCode"));
+        assertFalse(columnExists(jdbc, "q_backtest_trade", "PositionSide"));
+        assertFalse(indexExists(jdbc, "q_backtest_run", "idx_backtest_run_execution_profile"));
+        assertFalse(
+                indexExists(
+                        jdbc,
+                        "q_backtest_experiment",
+                        "ix_q_backtest_experiment_execution_profile"));
+        assertFalse(
+                indexExists(
+                        jdbc,
+                        "q_walk_forward_study",
+                        "ix_walk_forward_study_execution_profile"));
+    }
+
+    private static boolean v71Succeeded(JdbcTemplate jdbc) {
+        return jdbc.queryForObject(
+                        "SELECT COUNT(*) FROM flyway_schema_history"
+                                + " WHERE version='71' AND success=1",
+                        Integer.class)
+                > 0;
+    }
+
+    private static String exceptionText(Throwable failure) {
+        StringBuilder text = new StringBuilder();
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            text.append(current.getMessage()).append('\n');
+        }
+        return text.toString();
     }
 }

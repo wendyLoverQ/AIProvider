@@ -18,16 +18,21 @@ public final class ExecutionProfileRegistry {
     }
 
     public ExecutionProfileRegistry(Collection<ExecutionProfileDefinition> profiles) {
+        if (profiles == null) {
+            throw new IllegalArgumentException("profiles must not be null");
+        }
         for (ExecutionProfileDefinition profile : profiles) {
             register(profile);
         }
     }
 
     private void register(ExecutionProfileDefinition definition) {
-        if (definition == null
-                || definition.code() == null
-                || definitions.putIfAbsent(definition.code(), definition) != null) {
-            throw new IllegalArgumentException("duplicate execution profile code");
+        if (definition == null) {
+            throw new IllegalArgumentException("execution profile definition must not be null");
+        }
+        if (definitions.putIfAbsent(definition.code(), definition) != null) {
+            throw new IllegalArgumentException(
+                    "duplicate execution profile code=" + definition.code());
         }
     }
 
@@ -62,7 +67,7 @@ public final class ExecutionProfileRegistry {
     private static ExecutionProfileDefinition defaultProfile() {
         return new ExecutionProfileDefinition(
                 ExecutionProfileCode.USDM_PERPETUAL_LONG_ONLY_1X_V1,
-                "USDM 永续只做多 1×",
+                "USDT 本位永续·只做多·1× V1",
                 "以基础资产数量下单的 USDM 永续只做多 Ta4j 回测执行模型。",
                 MarketType.USDM_PERPETUAL,
                 DirectionMode.LONG_ONLY,

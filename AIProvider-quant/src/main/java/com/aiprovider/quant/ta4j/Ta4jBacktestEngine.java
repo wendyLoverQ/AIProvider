@@ -44,12 +44,21 @@ public final class Ta4jBacktestEngine {
     private final Ta4jStrategyFactory strategyFactory;
     private final BacktestCompatibilityService compatibility;
 
-    public Ta4jBacktestEngine() { this(new Ta4jBarSeriesFactory(), new StrategyRegistry()); }
-    public Ta4jBacktestEngine(Ta4jBarSeriesFactory barsFactory, StrategyRegistry registry) {
+    public Ta4jBacktestEngine() {
+        this(
+                new Ta4jBarSeriesFactory(),
+                new StrategyRegistry(),
+                new ExecutionProfileRegistry());
+    }
+
+    public Ta4jBacktestEngine(
+            Ta4jBarSeriesFactory barsFactory,
+            StrategyRegistry registry,
+            ExecutionProfileRegistry executionProfiles) {
         this.barsFactory = barsFactory;
         this.registry = registry;
         this.strategyFactory = new Ta4jStrategyFactory(registry);
-        this.compatibility = new BacktestCompatibilityService(new ExecutionProfileRegistry());
+        this.compatibility = new BacktestCompatibilityService(executionProfiles);
     }
 
     public BacktestResult run(BacktestRequest request, BacktestMarketContext market,
