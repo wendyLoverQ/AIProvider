@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 
 class WalkForwardStudyOosTest {
   @Test
-  void compoundsValidationOnlyAndAggregatesFeesTradesAndParameters() {
+  void chainsValidationOnlyAndAggregatesFeesTradesAndParameters() {
     WalkForwardStudyRow study = study("COMPLETED", 2);
     WalkForwardFoldRow first = completedFold(0, "v1", "{\"fastPeriod\":5}");
     WalkForwardFoldRow second = completedFold(1, "v2", "{\"fastPeriod\":7}");
@@ -25,7 +25,7 @@ class WalkForwardStudyOosTest {
     assertFalse(result.hasGaps());
     assertEquals(7, fixture.service.get("s").summary().totalOosTradeCount());
     assertEquals(new BigDecimal("3"), fixture.service.get("s").summary().totalOosFees());
-    assertEquals(new BigDecimal("-0.01"), result.totalReturnRatio().setScale(2));
+    assertEquals(new BigDecimal("0.00"), result.totalReturnRatio().setScale(2));
     assertEquals(2, result.points().size());
   }
 

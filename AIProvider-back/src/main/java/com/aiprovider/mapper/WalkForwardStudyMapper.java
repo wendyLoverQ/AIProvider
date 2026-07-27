@@ -9,7 +9,7 @@ import org.apache.ibatis.annotations.*;
 @Mapper
 public interface WalkForwardStudyMapper {
   String COLUMNS =
-      "Id,StudyId,DatasetId,Provider,MarketType,DataType,Symbol,IntervalCode,StrategyCode,StrategyVersion,ExecutionProfileCode,DirectionMode,OrderSizingMode,ParameterGridJson,WindowMode,StudyStartOpenTimeMs,StudyEndOpenTimeMs,TrainingBars,ValidationBars,StepBars,FoldCount,CandidateCountPerFold,TotalChildRuns,SelectionMetric,MinimumTrainTrades,OrderAmount,FeeRate,ForceCloseAtEnd,Status,ProgressPercent,ErrorCode,ErrorMessage,CreatedAt,UpdatedAt,StartedAt,FinishedAt,SuccessfulOosFolds,FailedFolds,HasOosGaps,OosTotalReturnRatio,OosMaximumDrawdownRatio,OosTradeCount,OosTotalFees,ParameterChanges";
+      "Id,StudyId,DatasetId,Provider,MarketType,DataType,Symbol,IntervalCode,StrategyCode,StrategyVersion,ExecutionProfileCode,DirectionMode,OrderSizingMode,ParameterGridJson,WindowMode,StudyStartOpenTimeMs,StudyEndOpenTimeMs,TrainingBars,ValidationBars,StepBars,FoldCount,CandidateCountPerFold,TotalChildRuns,SelectionMetric,MinimumTrainTrades,OrderAmount,FeeRate,ForceCloseAtEnd,Status,ProgressPercent,ErrorCode,ErrorMessage,CreatedAt,UpdatedAt,StartedAt,FinishedAt,SuccessfulOosFolds,FailedFolds,HasOosGaps,OosTotalReturnRatio,OosMaximumDrawdownRatio,OosTradeCount,OosTotalFees,ParameterChanges,OosAggregateVersion";
 
   @Results(
       id = "walkForwardStudyRow",
@@ -58,6 +58,7 @@ public interface WalkForwardStudyMapper {
         ,@Result(column = "OosTradeCount", property = "oosTradeCount")
         ,@Result(column = "OosTotalFees", property = "oosTotalFees")
         ,@Result(column = "ParameterChanges", property = "parameterChanges")
+        ,@Result(column = "OosAggregateVersion", property = "oosAggregateVersion")
       })
   @Select("SELECT " + COLUMNS + " FROM q_walk_forward_study WHERE StudyId=#{studyId}")
   WalkForwardStudyRow findByStudyId(@Param("studyId") String studyId);
@@ -129,7 +130,7 @@ public interface WalkForwardStudyMapper {
 
   @Update(
       "UPDATE q_walk_forward_study SET"
-          + " Status=#{status},ProgressPercent=#{progress},ErrorCode=#{errorCode},ErrorMessage=#{errorMessage},StartedAt=IF(#{status}='RUNNING',COALESCE(StartedAt,#{now}),StartedAt),FinishedAt=IF(#{status} IN ('COMPLETED','COMPLETED_WITH_FAILURES','FAILED'),COALESCE(FinishedAt,#{finishedAt}),NULL),SuccessfulOosFolds=#{successfulOosFolds},FailedFolds=#{failedFolds},HasOosGaps=#{hasOosGaps},OosTotalReturnRatio=#{oosTotalReturnRatio},OosMaximumDrawdownRatio=#{oosMaximumDrawdownRatio},OosTradeCount=#{oosTradeCount},OosTotalFees=#{oosTotalFees},ParameterChanges=#{parameterChanges},UpdatedAt=#{now}"
+          + " Status=#{status},ProgressPercent=#{progress},ErrorCode=#{errorCode},ErrorMessage=#{errorMessage},StartedAt=IF(#{status}='RUNNING',COALESCE(StartedAt,#{now}),StartedAt),FinishedAt=IF(#{status} IN ('COMPLETED','COMPLETED_WITH_FAILURES','FAILED'),COALESCE(FinishedAt,#{finishedAt}),NULL),SuccessfulOosFolds=#{successfulOosFolds},FailedFolds=#{failedFolds},HasOosGaps=#{hasOosGaps},OosTotalReturnRatio=#{oosTotalReturnRatio},OosMaximumDrawdownRatio=#{oosMaximumDrawdownRatio},OosTradeCount=#{oosTradeCount},OosTotalFees=#{oosTotalFees},ParameterChanges=#{parameterChanges},OosAggregateVersion=#{oosAggregateVersion},UpdatedAt=#{now}"
           + " WHERE StudyId=#{studyId} AND Status=#{expectedStatus}")
   int updateAggregateWithOos(
       @Param("studyId") String studyId,
@@ -147,6 +148,20 @@ public interface WalkForwardStudyMapper {
       @Param("oosTradeCount") Integer oosTradeCount,
       @Param("oosTotalFees") java.math.BigDecimal oosTotalFees,
       @Param("parameterChanges") Integer parameterChanges,
+      @Param("oosAggregateVersion") Short oosAggregateVersion,
+      @Param("now") Instant now);
+
+  @ResultMap("walkForwardStudyRow")
+  @Select("SELECT " + COLUMNS + " FROM q_walk_forward_study WHERE Status IN ('COMPLETED','COMPLETED_WITH_FAILURES','FAILED') AND (OosAggregateVersion IS NULL OR OosAggregateVersion <> 1) ORDER BY UpdatedAt ASC,Id ASC LIMIT #{limit}")
+  List<WalkForwardStudyRow> findTerminalMissingOosAggregate(@Param("limit") int limit);
+
+  @Update("UPDATE q_walk_forward_study SET SuccessfulOosFolds=#{successfulOosFolds},FailedFolds=#{failedFolds},HasOosGaps=#{hasOosGaps},OosTotalReturnRatio=#{totalReturnRatio},OosMaximumDrawdownRatio=#{maximumDrawdownRatio},OosTradeCount=#{tradeCount},OosTotalFees=#{totalFees},ParameterChanges=#{parameterChanges},OosAggregateVersion=#{oosAggregateVersion},UpdatedAt=#{now} WHERE StudyId=#{studyId} AND Status=#{expectedStatus} AND UpdatedAt=#{expectedUpdatedAt} AND (OosAggregateVersion IS NULL OR OosAggregateVersion <> 1)")
+  int backfillOosAggregate(@Param("studyId") String studyId, @Param("expectedStatus") String expectedStatus,
+      @Param("expectedUpdatedAt") Instant expectedUpdatedAt, @Param("successfulOosFolds") Integer successfulOosFolds,
+      @Param("failedFolds") Integer failedFolds, @Param("hasOosGaps") Boolean hasOosGaps,
+      @Param("totalReturnRatio") java.math.BigDecimal totalReturnRatio, @Param("maximumDrawdownRatio") java.math.BigDecimal maximumDrawdownRatio,
+      @Param("tradeCount") Integer tradeCount, @Param("totalFees") java.math.BigDecimal totalFees,
+      @Param("parameterChanges") Integer parameterChanges, @Param("oosAggregateVersion") Short oosAggregateVersion,
       @Param("now") Instant now);
 
   @Update(

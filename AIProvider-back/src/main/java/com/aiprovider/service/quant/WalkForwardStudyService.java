@@ -23,16 +23,25 @@ public class WalkForwardStudyService {
   private final WalkForwardFoldMapper folds;
   private final WalkForwardStudySnapshotLoader snapshots;
   private final ObjectMapper json;
+  private final WalkForwardOosCalculator oosCalculator;
 
+  @org.springframework.beans.factory.annotation.Autowired
   public WalkForwardStudyService(
       WalkForwardStudyMapper studies,
       WalkForwardFoldMapper folds,
       WalkForwardStudySnapshotLoader snapshots,
-      ObjectMapper json) {
+      ObjectMapper json,
+      WalkForwardOosCalculator oosCalculator) {
     this.studies = studies;
     this.folds = folds;
     this.snapshots = snapshots;
     this.json = json;
+    this.oosCalculator = oosCalculator;
+  }
+
+  public WalkForwardStudyService(WalkForwardStudyMapper studies, WalkForwardFoldMapper folds,
+      WalkForwardStudySnapshotLoader snapshots, ObjectMapper json) {
+    this(studies, folds, snapshots, json, new WalkForwardOosCalculator(json));
   }
 
   public BacktestDtos.Page<WalkForwardStudyDtos.StudySummary> page(
@@ -47,7 +56,7 @@ public class WalkForwardStudyService {
       }
     long offset = offset(page, pageSize);
     List<WalkForwardStudyRow> rows = studies.findPage(s, sym, code, pageSize, offset);
-    Map<String, WalkForwardStudySnapshot> loaded = snapshots.loadMany(rows, false);
+    Map<String, WalkForwardStudySnapshot> loaded = snapshots.loadMany(rows, true);
     List<WalkForwardStudyDtos.StudySummary> result =
         rows.stream().map(row -> refreshSummary(requiredSnapshot(loaded, row.studyId))).toList();
     return new BacktestDtos.Page<>(result, studies.count(s, sym, code), page, pageSize);
@@ -56,7 +65,7 @@ public class WalkForwardStudyService {
   public WalkForwardStudyDtos.StudyDetail get(String studyId) {
     WalkForwardStudyRow row = require(studyId);
     WalkForwardStudySnapshot snapshot =
-        snapshots.load(row, folds.findAllByStudyId(studyId), false);
+        snapshots.load(row, folds.findAllByStudyId(studyId), true);
     return new WalkForwardStudyDtos.StudyDetail(
         refreshSummary(snapshot), frequencies(snapshot.folds()));
   }
@@ -79,59 +88,19 @@ public class WalkForwardStudyService {
     if (limit < 100 || limit > 5000)
       fail("WALK_FORWARD_REQUEST_INVALID", "limit must be 100..5000");
     WalkForwardStudyRow study = require(studyId);
-    WalkForwardStudySnapshot snapshot =
-        snapshots.load(study, folds.findAllByStudyId(studyId), true);
-    WalkForwardStudyDtos.StudySummary summary = refreshSummary(snapshot);
-    if (!terminal(summary.status())) fail("WALK_FORWARD_NOT_TERMINAL", "study is not terminal");
-
-    List<WalkForwardFoldRow> successful = successfulFolds(snapshot.folds());
-    List<WalkForwardStudyDtos.OosPoint> points = new ArrayList<>();
-    BigDecimal previousEnd = BigDecimal.ONE, runningPeak = BigDecimal.ONE;
-    Instant previousTime = null;
-    for (WalkForwardFoldRow fold : successful) {
-      validateSelectedFields(fold);
-      List<BacktestEquityRow> raw = snapshot.equity(fold.selectedValidationRunId);
-      if (raw.isEmpty()) fail("WALK_FORWARD_OOS_INVALID", "selected validation equity is empty");
-      BigDecimal first = raw.get(0).equityRatio;
-      if (first == null || first.signum() <= 0)
-        fail("WALK_FORWARD_OOS_INVALID", "first equity must be positive");
-      Instant foldPrevious = null;
-      for (BacktestEquityRow value : raw) {
-        if (value.equityRatio == null || value.equityRatio.signum() <= 0)
-          fail("WALK_FORWARD_OOS_INVALID", "equity ratio must be positive");
-        Instant time = Instant.ofEpochMilli(value.openTimeMs);
-        if (foldPrevious != null && !time.isAfter(foldPrevious))
-          fail("WALK_FORWARD_OOS_INVALID", "equity time is not strictly increasing in fold");
-        if (previousTime != null && !time.isAfter(previousTime))
-          fail("WALK_FORWARD_OOS_INVALID", "equity time is not strictly increasing across folds");
-        BigDecimal normalized = previousEnd.multiply(value.equityRatio.divide(first, MC), MC);
-        if (normalized.signum() <= 0)
-          fail("WALK_FORWARD_OOS_INVALID", "normalized equity is not positive");
-        runningPeak = runningPeak.max(normalized);
-        BigDecimal drawdown =
-            runningPeak.subtract(normalized, MC).divide(runningPeak, MC);
-        if (drawdown.signum() < 0 || drawdown.compareTo(BigDecimal.ONE) > 0)
-          fail("WALK_FORWARD_OOS_INVALID", "drawdown is outside [0,1]");
-        points.add(new WalkForwardStudyDtos.OosPoint(points.size(), fold.foldIndex, time, normalized, drawdown));
-        foldPrevious = time;
-        previousTime = time;
-      }
-      previousEnd = points.get(points.size() - 1).indexRatio();
-    }
+    WalkForwardStudySnapshot snapshot = snapshots.load(study, folds.findAllByStudyId(studyId), true);
+    if (!terminal(study.status)) fail("WALK_FORWARD_NOT_TERMINAL", "study is not terminal");
+    WalkForwardOosCalculation calculation = oosCalculator.calculate(study, snapshot.folds(), snapshot.runs(), snapshot.equities());
+    List<WalkForwardStudyDtos.OosPoint> points = calculation.points();
     List<WalkForwardStudyDtos.OosPoint> sampled = sample(points, limit);
-    BigDecimal maxDrawdown =
-        points.stream()
-            .map(WalkForwardStudyDtos.OosPoint::drawdownRatio)
-            .max(Comparator.naturalOrder())
-            .orElse(BigDecimal.ZERO);
     return new WalkForwardStudyDtos.OosEquity(
         points.size() > sampled.size(),
         points.size(),
-        successful.size(),
-        snapshot.folds().size() - successful.size(),
-        snapshot.folds().size() != successful.size(),
-        summary.totalOosReturnRatio(),
-        maxDrawdown,
+        calculation.successfulFolds(),
+        calculation.failedFolds(),
+        calculation.hasGaps(),
+        calculation.totalReturnRatio(),
+        calculation.maximumDrawdownRatio(),
         sampled);
   }
 
@@ -142,7 +111,7 @@ public class WalkForwardStudyService {
   /** Batch result view used by Research Study; it never performs one child GET per study. */
   public Map<String, WalkForwardStudyDtos.StudySummary> batchSummary(List<WalkForwardStudyRow> rows) {
     if (rows == null || rows.isEmpty()) return Map.of();
-    Map<String, WalkForwardStudySnapshot> loaded = snapshots.loadMany(rows, false);
+    Map<String, WalkForwardStudySnapshot> loaded = snapshots.loadMany(rows, true);
     Map<String, WalkForwardStudyDtos.StudySummary> result = new LinkedHashMap<>();
     for (WalkForwardStudyRow row : rows) {
       WalkForwardStudySnapshot snapshot = loaded.get(row.studyId);
@@ -155,6 +124,9 @@ public class WalkForwardStudyService {
   private WalkForwardStudyDtos.StudySummary refreshSummary(WalkForwardStudySnapshot snapshot) {
     Aggregate aggregate = aggregate(snapshot);
     WalkForwardStudyRow row = snapshot.study();
+    if (terminal(aggregate.status) && snapshot.equities().isEmpty()) {
+      snapshot = snapshots.load(row, snapshot.folds(), true);
+    }
     OosSummary targetOos = terminal(aggregate.status) ? oosSummary(snapshot, aggregate.status) : OosSummary.empty();
     if (!Objects.equals(row.status, aggregate.status)
         || compare(row.progressPercent, aggregate.progress) != 0
@@ -171,7 +143,7 @@ public class WalkForwardStudyService {
         affected = studies.updateAggregateWithOos(row.studyId, row.status, aggregate.status, aggregate.progress,
             aggregate.errorCode, aggregate.errorMessage, finished, targetOos.successfulFolds, targetOos.failedFolds,
             targetOos.hasGaps, targetOos.returnRatio, targetOos.maximumDrawdown, targetOos.tradeCount,
-            targetOos.fees, targetOos.parameterChanges, now);
+            targetOos.fees, targetOos.parameterChanges, (short) 1, now);
       } else {
         affected = studies.updateAggregate(row.studyId, row.status, aggregate.status, aggregate.progress,
             aggregate.errorCode, aggregate.errorMessage, finished, now);
@@ -180,7 +152,7 @@ public class WalkForwardStudyService {
       if (affected == 0) {
         WalkForwardStudyRow latest = require(row.studyId);
         WalkForwardStudySnapshot current =
-            snapshots.load(latest, folds.findAllByStudyId(row.studyId), false);
+            snapshots.load(latest, folds.findAllByStudyId(row.studyId), true);
         Aggregate currentAggregate = aggregate(current);
         OosSummary currentOos = terminal(latest.status) ? oosSummary(current, latest.status) : OosSummary.empty();
         return summary(latest, currentAggregate, currentOos);
@@ -294,39 +266,16 @@ public class WalkForwardStudyService {
   }
 
   private OosSummary oosSummary(WalkForwardStudySnapshot snapshot, String status) {
-    List<WalkForwardFoldRow> selected = successfulFolds(snapshot.folds());
-    int failedFolds = snapshot.folds().size() - selected.size();
-    if (selected.isEmpty()) {
-      if (!"FAILED".equals(status)) fail("WALK_FORWARD_OOS_INVALID", "terminal study has no successful OOS folds");
-      return new OosSummary(0, failedFolds, true, null, null, null, null, null);
-    }
-    BigDecimal compound = BigDecimal.ONE, fees = BigDecimal.ZERO, maximumDrawdown = BigDecimal.ZERO;
-    int trades = 0, changes = 0;
-    Map<String, Integer> previous = null;
-    for (WalkForwardFoldRow fold : selected) {
-      validateSelectedFields(fold);
-      BacktestRunRow run = snapshot.run(fold.selectedValidationRunId);
-      if (run == null) fail("WALK_FORWARD_OOS_INVALID", "selected validation run is missing");
-      if (!"COMPLETED".equals(run.status) || run.totalReturnRatio == null || run.totalFees == null || run.tradeCount == null || run.maximumDrawdownRatio == null)
-        fail("WALK_FORWARD_OOS_INVALID", "selected validation run metrics are incomplete");
-      BigDecimal factor = BigDecimal.ONE.add(run.totalReturnRatio, MC);
-      if (factor.signum() <= 0) fail("WALK_FORWARD_OOS_INVALID", "validation return makes compound invalid");
-      compound = compound.multiply(factor, MC);
-      fees = fees.add(run.totalFees, MC);
-      maximumDrawdown = maximumDrawdown.max(run.maximumDrawdownRatio);
-      trades = Math.addExact(trades, run.tradeCount);
-      Map<String, Integer> current = readParameters(fold.selectedParametersJson);
-      if (previous != null && !previous.equals(current)) changes++;
-      previous = current;
-    }
-    return new OosSummary(selected.size(), failedFolds, failedFolds > 0, trades, fees, compound.subtract(BigDecimal.ONE, MC), maximumDrawdown, changes);
+    WalkForwardOosCalculation calculation = oosCalculator.calculate(snapshot.study(), snapshot.folds(), snapshot.runs(), snapshot.equities());
+    return new OosSummary(calculation.successfulFolds(), calculation.failedFolds(), calculation.hasGaps(), calculation.tradeCount(),
+        calculation.totalFees(), calculation.totalReturnRatio(), calculation.maximumDrawdownRatio(), calculation.parameterChanges());
   }
 
   private boolean oosMatches(WalkForwardStudyRow row, OosSummary expected, String status) {
     if (!terminal(status)) {
       return row.successfulOosFolds == null && row.failedFolds == null && row.hasOosGaps == null
           && row.oosTotalReturnRatio == null && row.oosMaximumDrawdownRatio == null && row.oosTradeCount == null
-          && row.oosTotalFees == null && row.parameterChanges == null;
+          && row.oosTotalFees == null && row.parameterChanges == null && row.oosAggregateVersion == null;
     }
     return Objects.equals(row.successfulOosFolds, expected.successfulFolds)
         && Objects.equals(row.failedFolds, expected.failedFolds)
@@ -335,12 +284,8 @@ public class WalkForwardStudyService {
         && Objects.equals(row.oosMaximumDrawdownRatio, expected.maximumDrawdown)
         && Objects.equals(row.oosTradeCount, expected.tradeCount)
         && Objects.equals(row.oosTotalFees, expected.fees)
-        && Objects.equals(row.parameterChanges, expected.parameterChanges);
-  }
-
-  private void validateSelectedFields(WalkForwardFoldRow fold) {
-    if (fold.selectedCandidateId == null || fold.selectedParametersJson == null || fold.selectedTrainingRunId == null || fold.selectedValidationRunId == null)
-      fail("WALK_FORWARD_OOS_INVALID", "completed fold selected fields are incomplete");
+        && Objects.equals(row.parameterChanges, expected.parameterChanges)
+        && Objects.equals(row.oosAggregateVersion, (short) 1);
   }
 
   private List<WalkForwardFoldRow> successfulFolds(List<WalkForwardFoldRow> all) {

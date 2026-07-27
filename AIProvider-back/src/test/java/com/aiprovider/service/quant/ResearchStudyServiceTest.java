@@ -40,6 +40,12 @@ class ResearchStudyServiceTest {
         () -> new ResearchStudyService(mock(ResearchStudyMapper.class), new ObjectMapper()).summaries(List.of(row))).getErrorCode());
   }
 
+  @Test void childConflictFailedResearchRemainsReadableWithNullOos() {
+    ResearchStudyRow row = row("FAILED"); row.errorCode = "RESEARCH_CHILD_CONFLICT"; row.errorMessage = "walk-forward child is missing";
+    ResearchStudyDtos.Summary summary = new ResearchStudyService(mock(ResearchStudyMapper.class), new ObjectMapper()).summaries(List.of(row)).get(0);
+    assertEquals("RESEARCH_CHILD_CONFLICT", summary.errorCode()); assertNull(summary.successfulOosFolds()); assertNull(summary.oosMaximumDrawdownRatio());
+  }
+
   private ResearchStudyRow row(String status) {
     ResearchStudyRow row = new ResearchStudyRow(); row.researchStudyId = "id"; row.name = "name"; row.datasetId = 1;
     row.parameterSpaceJson = "{}"; row.expandedParameterGridJson = "{}"; row.status = status; row.progressPercent = BigDecimal.ZERO;

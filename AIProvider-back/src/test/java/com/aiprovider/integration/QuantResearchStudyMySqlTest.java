@@ -28,6 +28,8 @@ class QuantResearchStudyMySqlTest {
     assertEquals("YES", jdbc.queryForObject("SELECT IS_NULLABLE FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='q_walk_forward_study' AND column_name='OosTotalReturnRatio'", String.class));
     assertTrue(indexExists(jdbc, "uk_research_study_child"));
     assertTrue(indexExists(jdbc, "ix_research_study_status_updated"));
+    assertEquals("smallint", jdbc.queryForObject("SELECT LOWER(DATA_TYPE) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='q_walk_forward_study' AND column_name='OosAggregateVersion'", String.class));
+    assertTrue(indexExistsOn(jdbc, "q_walk_forward_study", "ix_walk_forward_oos_recovery"));
     String id = "00000000-0000-0000-0000-000000000001";
     jdbc.update("INSERT INTO q_research_study(ResearchStudyId,Name,DatasetId,Provider,MarketType,DataType,Symbol,IntervalCode,StrategyCode,StrategyVersion,ExecutionProfileCode,DirectionMode,OrderSizingMode,EvaluationMode,ParameterSpaceMode,ParameterSpaceJson,ExpandedParameterGridJson,CandidateCount,StudyStartOpenTimeMs,StudyEndOpenTimeMs,TrainingBars,ValidationBars,SelectionMetric,MinimumTrainTrades,OrderAmount,FeeRate,ForceCloseAtEnd,ComparisonGroupKey,WalkForwardStudyId,Status,CreatedAt,UpdatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP(6),CURRENT_TIMESTAMP(6))",
         id, "test", 1, "BINANCE", "USDM_PERPETUAL", "CANDLE", "BTCUSDT", "1h", "EMA", "1", "PROFILE", "LONG_ONLY", "BASE_QUANTITY", "WALK_FORWARD", "STRATEGY_DEFAULT", "{}", "{}", 1, 1, 2, 1, 1, "METRIC", 0, new BigDecimal("0.01"), new BigDecimal("0.0004"), true, "a".repeat(64), "00000000-0000-0000-0000-000000000002", "QUEUED");
@@ -36,4 +38,5 @@ class QuantResearchStudyMySqlTest {
 
   private String columnType(JdbcTemplate jdbc, String column) { return jdbc.queryForObject("SELECT LOWER(COLUMN_TYPE) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='q_research_study' AND column_name=?", String.class, column); }
   private boolean indexExists(JdbcTemplate jdbc, String index) { return jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='q_research_study' AND index_name=?", Integer.class, index) > 0; }
+  private boolean indexExistsOn(JdbcTemplate jdbc, String table, String index) { return jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name=? AND index_name=?", Integer.class, table, index) > 0; }
 }

@@ -13,6 +13,7 @@ public class ResearchStudyRow {
   public long studyStartOpenTimeMs, studyEndOpenTimeMs;
   public BigDecimal orderAmount, feeRate, progressPercent;
   public Integer successfulOosFolds, failedFolds, oosTradeCount, parameterChanges;
+  public Short oosAggregateVersion;
   public Boolean hasOosGaps;
   public BigDecimal oosTotalReturnRatio, oosMaximumDrawdownRatio, oosTotalFees;
   public boolean forceCloseAtEnd;

@@ -67,10 +67,13 @@ public class ResearchStudyAggregationScheduler {
   }
 
   private void persistChildConflict(ResearchStudyRow parent) {
-    int affected = research.updateAggregate(parent.researchStudyId, parent.status, parent.updatedAt, "FAILED", BigDecimal.valueOf(100),
-        "RESEARCH_CHILD_CONFLICT", "walk-forward child is missing", Instant.now(), null, Instant.now());
+    Instant now = Instant.now();
+    int affected = research.markChildConflict(parent.researchStudyId, parent.status, parent.updatedAt, parent.startedAt, now);
     if (affected > 1) throw new ResearchStudyTaskException("RESEARCH_PERSISTENCE_FAILED", "research aggregate affected multiple rows");
-    if (affected == 0) research.findByResearchStudyId(parent.researchStudyId);
+    if (affected == 0) {
+      ResearchStudyRow latest = research.findByResearchStudyId(parent.researchStudyId);
+      log.info("operation=research-aggregate researchStudyId={} walkForwardStudyId={} errorCode=RESEARCH_CHILD_CONFLICT result=cas_lost currentStatus={}", parent.researchStudyId, parent.walkForwardStudyId, latest == null ? "MISSING" : latest.status);
+    }
   }
 
   private boolean terminal(String status) { return "COMPLETED".equals(status) || "COMPLETED_WITH_FAILURES".equals(status) || "FAILED".equals(status); }

@@ -8,7 +8,7 @@ import org.apache.ibatis.annotations.*;
 
 @Mapper
 public interface ResearchStudyMapper {
-  String COLUMNS = "r.Id,r.ResearchStudyId,r.Name,r.Description,r.DatasetId,r.Provider,r.MarketType,r.DataType,r.Symbol,r.IntervalCode,r.StrategyCode,r.StrategyVersion,r.ExecutionProfileCode,r.DirectionMode,r.OrderSizingMode,r.EvaluationMode,r.ParameterSpaceMode,r.ParameterSpaceJson,r.ExpandedParameterGridJson,r.CandidateCount,r.StudyStartOpenTimeMs,r.StudyEndOpenTimeMs,r.TrainingBars,r.ValidationBars,r.SelectionMetric,r.MinimumTrainTrades,r.OrderAmount,r.FeeRate,r.ForceCloseAtEnd,r.ComparisonGroupKey,r.WalkForwardStudyId,r.Status,r.ProgressPercent,r.ErrorCode,r.ErrorMessage,r.CreatedAt,r.StartedAt,r.FinishedAt,r.UpdatedAt,w.SuccessfulOosFolds AS OosSuccessfulOosFolds,w.FailedFolds AS OosFailedFolds,w.HasOosGaps AS OosHasOosGaps,w.OosTotalReturnRatio AS OosTotalReturnRatio,w.OosMaximumDrawdownRatio AS OosMaximumDrawdownRatio,w.OosTradeCount AS OosTradeCount,w.OosTotalFees AS OosTotalFees,w.ParameterChanges AS OosParameterChanges";
+  String COLUMNS = "r.Id,r.ResearchStudyId,r.Name,r.Description,r.DatasetId,r.Provider,r.MarketType,r.DataType,r.Symbol,r.IntervalCode,r.StrategyCode,r.StrategyVersion,r.ExecutionProfileCode,r.DirectionMode,r.OrderSizingMode,r.EvaluationMode,r.ParameterSpaceMode,r.ParameterSpaceJson,r.ExpandedParameterGridJson,r.CandidateCount,r.StudyStartOpenTimeMs,r.StudyEndOpenTimeMs,r.TrainingBars,r.ValidationBars,r.SelectionMetric,r.MinimumTrainTrades,r.OrderAmount,r.FeeRate,r.ForceCloseAtEnd,r.ComparisonGroupKey,r.WalkForwardStudyId,r.Status,r.ProgressPercent,r.ErrorCode,r.ErrorMessage,r.CreatedAt,r.StartedAt,r.FinishedAt,r.UpdatedAt,w.SuccessfulOosFolds AS OosSuccessfulOosFolds,w.FailedFolds AS OosFailedFolds,w.HasOosGaps AS OosHasOosGaps,w.OosTotalReturnRatio AS OosTotalReturnRatio,w.OosMaximumDrawdownRatio AS OosMaximumDrawdownRatio,w.OosTradeCount AS OosTradeCount,w.OosTotalFees AS OosTotalFees,w.ParameterChanges AS OosParameterChanges,w.OosAggregateVersion AS OosAggregateVersion";
 
   @Results(id = "researchStudyRow", value = {
       @Result(column="Id", property="id"), @Result(column="ResearchStudyId", property="researchStudyId"),
@@ -34,7 +34,7 @@ public interface ResearchStudyMapper {
       @Result(column="OosFailedFolds", property="failedFolds"), @Result(column="OosHasOosGaps", property="hasOosGaps"),
       @Result(column="OosTotalReturnRatio", property="oosTotalReturnRatio"), @Result(column="OosMaximumDrawdownRatio", property="oosMaximumDrawdownRatio"),
       @Result(column="OosTradeCount", property="oosTradeCount"), @Result(column="OosTotalFees", property="oosTotalFees"),
-      @Result(column="OosParameterChanges", property="parameterChanges")})
+      @Result(column="OosParameterChanges", property="parameterChanges"), @Result(column="OosAggregateVersion", property="oosAggregateVersion")})
   @Select("SELECT " + COLUMNS + " FROM q_research_study r LEFT JOIN q_walk_forward_study w ON w.StudyId=r.WalkForwardStudyId WHERE r.ResearchStudyId=#{researchStudyId}")
   ResearchStudyRow findByResearchStudyId(@Param("researchStudyId") String researchStudyId);
 
@@ -74,4 +74,9 @@ public interface ResearchStudyMapper {
                       @Param("progressPercent") java.math.BigDecimal progressPercent, @Param("errorCode") String errorCode,
                       @Param("errorMessage") String errorMessage, @Param("startedAt") Instant startedAt,
                       @Param("finishedAt") Instant finishedAt, @Param("updatedAt") Instant updatedAt);
+
+  @Update("UPDATE q_research_study SET Status='FAILED',ProgressPercent=100,ErrorCode='RESEARCH_CHILD_CONFLICT',ErrorMessage='walk-forward child is missing',StartedAt=#{startedAt},FinishedAt=#{now},UpdatedAt=#{now} WHERE ResearchStudyId=#{researchStudyId} AND Status=#{expectedStatus} AND UpdatedAt=#{expectedUpdatedAt}")
+  int markChildConflict(@Param("researchStudyId") String researchStudyId, @Param("expectedStatus") String expectedStatus,
+                        @Param("expectedUpdatedAt") Instant expectedUpdatedAt, @Param("startedAt") Instant startedAt,
+                        @Param("now") Instant now);
 }

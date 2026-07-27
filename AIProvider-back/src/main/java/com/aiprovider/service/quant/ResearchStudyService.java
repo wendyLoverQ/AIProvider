@@ -84,11 +84,19 @@ public class ResearchStudyService {
   private OosValues oosValues(ResearchStudyRow row) {
     if (!terminal(row.status)) {
       if (row.successfulOosFolds != null || row.failedFolds != null || row.hasOosGaps != null || row.oosTotalReturnRatio != null
-          || row.oosMaximumDrawdownRatio != null || row.oosTradeCount != null || row.oosTotalFees != null || row.parameterChanges != null) {
+          || row.oosMaximumDrawdownRatio != null || row.oosTradeCount != null || row.oosTotalFees != null || row.parameterChanges != null || row.oosAggregateVersion != null) {
         throw error("RESEARCH_RESULT_INVALID", "non-terminal research study contains OOS results");
       }
       return OosValues.empty();
     }
+    if ("FAILED".equals(row.status) && "RESEARCH_CHILD_CONFLICT".equals(row.errorCode)) {
+      if (row.successfulOosFolds != null || row.failedFolds != null || row.hasOosGaps != null || row.oosTotalReturnRatio != null
+          || row.oosMaximumDrawdownRatio != null || row.oosTradeCount != null || row.oosTotalFees != null || row.parameterChanges != null || row.oosAggregateVersion != null) {
+        throw error("RESEARCH_RESULT_INVALID", "child conflict result contains OOS data");
+      }
+      return OosValues.empty();
+    }
+    if (!Short.valueOf((short) 1).equals(row.oosAggregateVersion)) throw error("RESEARCH_RESULT_INVALID", "terminal research study OOS aggregate is not current");
     requirePresent(row.successfulOosFolds, row.failedFolds, row.hasOosGaps);
     if ("FAILED".equals(row.status) && row.successfulOosFolds == 0) {
       if (row.oosTotalReturnRatio != null || row.oosMaximumDrawdownRatio != null || row.oosTradeCount != null || row.oosTotalFees != null || row.parameterChanges != null) {

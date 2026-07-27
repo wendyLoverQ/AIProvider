@@ -26,4 +26,11 @@ class ResearchStudyMigrationContractTest {
     assertTrue(sql.contains("OosMaximumDrawdownRatio DECIMAL(38,18) NULL"));
     assertTrue(sql.contains("ParameterChanges INT NULL"));
   }
+
+  @Test void v74AddsRecoverableOosVersionAndIndex() throws Exception {
+    String sql = Files.readString(Path.of("src/main/resources/db/migration/V74__quant_walk_forward_oos_recovery.sql"));
+    assertTrue(sql.contains("OosAggregateVersion SMALLINT NULL"));
+    assertTrue(sql.contains("ix_walk_forward_oos_recovery"));
+    assertTrue(sql.contains("Status, OosAggregateVersion, UpdatedAt, Id"));
+  }
 }
