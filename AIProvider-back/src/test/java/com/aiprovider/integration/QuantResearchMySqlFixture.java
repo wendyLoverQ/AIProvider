@@ -49,8 +49,16 @@ final class QuantResearchMySqlFixture {
   }
 
   void insertResearchStudySnapshot(String id, String childId, String status, String group) {
+    insertResearchStudySnapshot(id, childId, status, group, Instant.EPOCH, Instant.EPOCH, Instant.EPOCH, null, null);
+  }
+
+  void insertResearchStudySnapshot(String id, String childId, String status, String group,
+      Instant startedAt, Instant finishedAt, Instant updatedAt, String errorCode, String errorMessage) {
     String sql = "INSERT INTO q_research_study(ResearchStudyId,Name,DatasetId,Provider,MarketType,DataType,Symbol,IntervalCode,StrategyCode,StrategyVersion,ExecutionProfileCode,DirectionMode,OrderSizingMode,EvaluationMode,ParameterSpaceMode,ParameterSpaceJson,ExpandedParameterGridJson,CandidateCount,StudyStartOpenTimeMs,StudyEndOpenTimeMs,TrainingBars,ValidationBars,SelectionMetric,MinimumTrainTrades,OrderAmount,FeeRate,ForceCloseAtEnd,ComparisonGroupKey,WalkForwardStudyId,Status,ProgressPercent,CreatedAt,UpdatedAt,StartedAt,FinishedAt,ErrorCode,ErrorMessage) VALUES (:id,'research',1,'BINANCE_USDM','USDM_PERPETUAL','CANDLE','BTCUSDT','1m','EMA_CROSS_LONG_ONLY','1.0.0','PROFILE','LONG_ONLY','BASE_QUANTITY','WALK_FORWARD','STRATEGY_DEFAULT','{\"fastPeriod\":{\"min\":5,\"max\":7,\"step\":2}}','{\"fastPeriod\":[5,7]}',2,0,10000,1,1,'TRAIN_TOTAL_RETURN_RATIO',0,1,0.001,1,:group,:child,:status,100,:time,:time,:time,:time,NULL,NULL)";
-    MapSqlParameterSource source = params().addValue("id", id).addValue("child", childId).addValue("status", status).addValue("group", group).addValue("time", Instant.EPOCH);
+    MapSqlParameterSource source = params().addValue("id", id).addValue("child", childId).addValue("status", status).addValue("group", group)
+        .addValue("time", updatedAt).addValue("startedAt", startedAt).addValue("finishedAt", finishedAt)
+        .addValue("errorCode", errorCode).addValue("errorMessage", errorMessage);
+    sql = sql.replace(":time,:time,:time,:time,NULL,NULL", ":time,:time,:startedAt,:finishedAt,:errorCode,:errorMessage");
     jdbc.update(sql, source);
   }
 
