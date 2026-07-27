@@ -15,6 +15,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -27,6 +28,7 @@ public class WalkForwardOosCalculator {
   public WalkForwardOosCalculation calculate(WalkForwardStudyRow study, List<WalkForwardFoldRow> folds,
       Map<String, BacktestRunRow> runs, Map<String, List<BacktestEquityRow>> equities) {
     if (study == null || folds == null || runs == null || equities == null) fail("WALK_FORWARD_OOS_INVALID", "OOS calculation input is incomplete");
+    validateStudyAndFolds(study, folds);
     List<WalkForwardFoldRow> successful = folds.stream().filter(fold -> "COMPLETED".equals(fold.status))
         .sorted(Comparator.comparingInt(fold -> fold.foldIndex)).toList();
     int failed = folds.size() - successful.size();
@@ -73,8 +75,41 @@ public class WalkForwardOosCalculator {
       if (previousParameters != null && !previousParameters.equals(parameters)) changes++;
       previousParameters = parameters;
     }
-    return new WalkForwardOosCalculation(successful.size(), failed, failed > 0, trades, fees,
-        previousEnd.subtract(BigDecimal.ONE, MC), maximumDrawdown, changes, points);
+    List<WalkForwardStudyDtos.OosPoint> normalizedPoints = points.stream()
+        .map(point -> new WalkForwardStudyDtos.OosPoint(point.pointIndex(), point.foldIndex(), point.openTime(),
+            WalkForwardOosNumbers.normalize(point.indexRatio()), WalkForwardOosNumbers.normalize(point.drawdownRatio())))
+        .toList();
+    return new WalkForwardOosCalculation(successful.size(), failed, failed > 0, trades,
+        WalkForwardOosNumbers.normalize(fees), WalkForwardOosNumbers.normalize(previousEnd.subtract(BigDecimal.ONE, MC)),
+        WalkForwardOosNumbers.normalize(maximumDrawdown), changes, normalizedPoints);
+  }
+
+  WalkForwardOosCalculation calculateForTerminalStatus(WalkForwardStudyRow study, String terminalStatus,
+      List<WalkForwardFoldRow> folds, Map<String, BacktestRunRow> runs, Map<String, List<BacktestEquityRow>> equities) {
+    WalkForwardStudyRow effective = new WalkForwardStudyRow();
+    effective.studyId = study.studyId;
+    effective.foldCount = study.foldCount;
+    effective.status = terminalStatus;
+    return calculate(effective, folds, runs, equities);
+  }
+
+  private void validateStudyAndFolds(WalkForwardStudyRow study, List<WalkForwardFoldRow> folds) {
+    if (!Set.of("COMPLETED", "COMPLETED_WITH_FAILURES", "FAILED").contains(study.status))
+      fail("WALK_FORWARD_STATE_CONFLICT", "study is not terminal");
+    if (study.foldCount < 1) fail("WALK_FORWARD_STATE_CONFLICT", "fold count does not match study");
+    if (folds.size() != study.foldCount) fail("WALK_FORWARD_STATE_CONFLICT", "fold count does not match study");
+    boolean[] seen = new boolean[study.foldCount];
+    for (WalkForwardFoldRow fold : folds) {
+      if (fold == null || fold.studyId == null || !fold.studyId.equals(study.studyId))
+        fail("WALK_FORWARD_STATE_CONFLICT", "fold belongs to another study");
+      if (fold.foldIndex < 0 || fold.foldIndex >= study.foldCount)
+        fail("WALK_FORWARD_STATE_CONFLICT", "foldIndex is outside study range");
+      if (seen[fold.foldIndex]) fail("WALK_FORWARD_STATE_CONFLICT", "duplicate foldIndex");
+      seen[fold.foldIndex] = true;
+      if (!Set.of("COMPLETED", "FAILED").contains(fold.status))
+        fail("WALK_FORWARD_STATE_CONFLICT", "fold state is not terminal");
+    }
+    for (boolean value : seen) if (!value) fail("WALK_FORWARD_STATE_CONFLICT", "foldIndex coverage is incomplete");
   }
 
   private void validateSelectedFields(WalkForwardFoldRow fold) {

@@ -27,7 +27,7 @@ class WalkForwardOosCalculatorTest {
     WalkForwardOosCalculation result = calculator.calculate(study, List.of(first, second), runs, equity);
     assertEquals(2, result.successfulFolds()); assertEquals(0, result.failedFolds());
     assertEquals(0, new BigDecimal("0.28").compareTo(result.maximumDrawdownRatio().setScale(2)));
-    assertEquals(4, result.tradeCount()); assertEquals(new BigDecimal("3"), result.totalFees());
+    assertEquals(4, result.tradeCount()); assertEquals(0, new BigDecimal("3").compareTo(result.totalFees()));
     assertEquals(1, result.parameterChanges()); assertEquals(5, result.points().size());
     assertThrows(UnsupportedOperationException.class, () -> result.points().add(null));
   }
@@ -44,9 +44,24 @@ class WalkForwardOosCalculatorTest {
     assertEquals("WALK_FORWARD_OOS_INVALID", error.getErrorCode());
   }
 
+  @Test void rejectsFoldIntegrityAndNonTerminalStateAsStateConflict() {
+    WalkForwardStudyRow study = study("COMPLETED", 2);
+    WalkForwardFoldRow one = fold(0, "v1", "{}");
+    WalkForwardTaskException missing = assertThrows(WalkForwardTaskException.class,
+        () -> calculator.calculate(study, List.of(one), Map.of(), Map.of()));
+    assertEquals("WALK_FORWARD_STATE_CONFLICT", missing.getErrorCode());
+    WalkForwardFoldRow duplicate = fold(0, "v2", "{}"); duplicate.studyId = "s";
+    WalkForwardTaskException duplicateError = assertThrows(WalkForwardTaskException.class,
+        () -> calculator.calculate(study, List.of(one, duplicate), Map.of(), Map.of()));
+    assertEquals("WALK_FORWARD_STATE_CONFLICT", duplicateError.getErrorCode());
+    WalkForwardTaskException nonTerminal = assertThrows(WalkForwardTaskException.class,
+        () -> calculator.calculate(study("RUNNING", 1), List.of(fold(0, "v1", "{}")), Map.of(), Map.of()));
+    assertEquals("WALK_FORWARD_STATE_CONFLICT", nonTerminal.getErrorCode());
+  }
+
   private WalkForwardStudyRow study(String status, int count) { WalkForwardStudyRow row = new WalkForwardStudyRow(); row.studyId = "s"; row.status = status; row.foldCount = count; return row; }
-  private WalkForwardFoldRow fold(int index, String runId, String parameters) { WalkForwardFoldRow row = fold("COMPLETED", index); row.selectedCandidateId = "c" + index; row.selectedParametersJson = parameters; row.selectedTrainingRunId = "t" + index; row.selectedValidationRunId = runId; return row; }
-  private WalkForwardFoldRow fold(String status, int index) { WalkForwardFoldRow row = new WalkForwardFoldRow(); row.status = status; row.foldIndex = index; return row; }
+  private WalkForwardFoldRow fold(int index, String runId, String parameters) { WalkForwardFoldRow row = fold("COMPLETED", index); row.studyId = "s"; row.selectedCandidateId = "c" + index; row.selectedParametersJson = parameters; row.selectedTrainingRunId = "t" + index; row.selectedValidationRunId = runId; return row; }
+  private WalkForwardFoldRow fold(String status, int index) { WalkForwardFoldRow row = new WalkForwardFoldRow(); row.studyId = "s"; row.status = status; row.foldIndex = index; return row; }
   private BacktestRunRow run(String id, String returns, String fees) { BacktestRunRow row = new BacktestRunRow(); row.runId = id; row.status = "COMPLETED"; row.totalReturnRatio = new BigDecimal(returns); row.totalFees = new BigDecimal(fees); row.tradeCount = 2; row.maximumDrawdownRatio = new BigDecimal("0.1"); return row; }
   private BacktestEquityRow point(String runId, long time, String ratio) { BacktestEquityRow row = new BacktestEquityRow(); row.runId = runId; row.openTimeMs = time; row.equityRatio = new BigDecimal(ratio); return row; }
 }

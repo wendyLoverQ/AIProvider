@@ -24,7 +24,7 @@ class WalkForwardStudyOosTest {
     assertEquals(2, result.successfulFolds());
     assertFalse(result.hasGaps());
     assertEquals(7, fixture.service.get("s").summary().totalOosTradeCount());
-    assertEquals(new BigDecimal("3"), fixture.service.get("s").summary().totalOosFees());
+    assertEquals(0, new BigDecimal("3").compareTo(fixture.service.get("s").summary().totalOosFees()));
     assertEquals(new BigDecimal("0.00"), result.totalReturnRatio().setScale(2));
     assertEquals(2, result.points().size());
   }
@@ -36,6 +36,32 @@ class WalkForwardStudyOosTest {
     WalkForwardRunFixture fixture = fixture(study, List.of(fold), List.of());
     WalkForwardTaskException error = assertThrows(WalkForwardTaskException.class, () -> fixture.service.oosEquity("s", 100));
     assertEquals("WALK_FORWARD_OOS_INVALID", error.getErrorCode());
+  }
+
+  @Test
+  void normalizedPersistedValuesDoNotTriggerAggregateUpdate() {
+    WalkForwardStudyMapper studies = mock(WalkForwardStudyMapper.class);
+    WalkForwardFoldMapper folds = mock(WalkForwardFoldMapper.class);
+    WalkForwardStudySnapshotLoader loader = mock(WalkForwardStudySnapshotLoader.class);
+    WalkForwardOosCalculator calculator = mock(WalkForwardOosCalculator.class);
+    WalkForwardStudyRow study = study("FAILED", 1);
+    study.errorCode = "FAILED_RUN"; study.errorMessage = "failed failedFolds=1";
+    WalkForwardFoldRow failed = completedFold(0, "missing", "{}");
+    failed.status = "FAILED"; failed.errorCode = "FAILED_RUN"; failed.errorMessage = "failed";
+    WalkForwardStudySnapshot snapshot = new WalkForwardStudySnapshot(study, List.of(failed), Map.of(), Map.of(), Map.of());
+    study.successfulOosFolds = 0; study.failedFolds = 1; study.hasOosGaps = true; study.oosTradeCount = null;
+    study.oosTotalReturnRatio = new BigDecimal("0.123456789012345679");
+    study.oosMaximumDrawdownRatio = new BigDecimal("0.200000000000000000");
+    study.oosTotalFees = new BigDecimal("0.100000000000000000"); study.parameterChanges = 0; study.oosAggregateVersion = 1;
+    when(studies.findByStudyId("s")).thenReturn(study);
+    when(loader.load(eq(study), anyList(), eq(true))).thenReturn(snapshot);
+    when(calculator.calculateForTerminalStatus(eq(study), eq("FAILED"), anyList(), anyMap(), anyMap()))
+        .thenReturn(new WalkForwardOosCalculation(0, 1, true, null,
+            new BigDecimal("0.1000000000000000004"), new BigDecimal("0.123456789012345678901"),
+            new BigDecimal("0.2"), 0, List.of()));
+    WalkForwardStudyService service = new WalkForwardStudyService(studies, folds, loader, new ObjectMapper(), calculator);
+    service.get("s");
+    verify(studies, never()).updateAggregateWithOos(anyString(), anyString(), anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
   }
 
   private WalkForwardRunFixture fixture(WalkForwardStudyRow study, List<WalkForwardFoldRow> folds, List<BacktestRunRow> runs) {

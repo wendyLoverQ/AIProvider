@@ -266,7 +266,8 @@ public class WalkForwardStudyService {
   }
 
   private OosSummary oosSummary(WalkForwardStudySnapshot snapshot, String status) {
-    WalkForwardOosCalculation calculation = oosCalculator.calculate(snapshot.study(), snapshot.folds(), snapshot.runs(), snapshot.equities());
+    WalkForwardOosCalculation calculation = oosCalculator.calculateForTerminalStatus(snapshot.study(), status,
+        snapshot.folds(), snapshot.runs(), snapshot.equities());
     return new OosSummary(calculation.successfulFolds(), calculation.failedFolds(), calculation.hasGaps(), calculation.tradeCount(),
         calculation.totalFees(), calculation.totalReturnRatio(), calculation.maximumDrawdownRatio(), calculation.parameterChanges());
   }
@@ -280,10 +281,10 @@ public class WalkForwardStudyService {
     return Objects.equals(row.successfulOosFolds, expected.successfulFolds)
         && Objects.equals(row.failedFolds, expected.failedFolds)
         && Objects.equals(row.hasOosGaps, expected.hasGaps)
-        && Objects.equals(row.oosTotalReturnRatio, expected.returnRatio)
-        && Objects.equals(row.oosMaximumDrawdownRatio, expected.maximumDrawdown)
+        && WalkForwardOosNumbers.numericallyEqual(row.oosTotalReturnRatio, expected.returnRatio)
+        && WalkForwardOosNumbers.numericallyEqual(row.oosMaximumDrawdownRatio, expected.maximumDrawdown)
         && Objects.equals(row.oosTradeCount, expected.tradeCount)
-        && Objects.equals(row.oosTotalFees, expected.fees)
+        && WalkForwardOosNumbers.numericallyEqual(row.oosTotalFees, expected.fees)
         && Objects.equals(row.parameterChanges, expected.parameterChanges)
         && Objects.equals(row.oosAggregateVersion, (short) 1);
   }
