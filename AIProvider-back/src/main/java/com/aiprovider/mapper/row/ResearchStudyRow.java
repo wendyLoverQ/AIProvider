@@ -12,6 +12,9 @@ public class ResearchStudyRow {
   public int candidateCount, trainingBars, validationBars, minimumTrainTrades;
   public long studyStartOpenTimeMs, studyEndOpenTimeMs;
   public BigDecimal orderAmount, feeRate, progressPercent;
+  public Integer successfulOosFolds, failedFolds, oosTradeCount, parameterChanges;
+  public Boolean hasOosGaps;
+  public BigDecimal oosTotalReturnRatio, oosMaximumDrawdownRatio, oosTotalFees;
   public boolean forceCloseAtEnd;
   public String comparisonGroupKey, walkForwardStudyId, status, errorCode, errorMessage;
   public Instant createdAt, startedAt, finishedAt, updatedAt;

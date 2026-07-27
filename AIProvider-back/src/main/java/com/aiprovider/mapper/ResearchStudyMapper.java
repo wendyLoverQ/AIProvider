@@ -8,7 +8,7 @@ import org.apache.ibatis.annotations.*;
 
 @Mapper
 public interface ResearchStudyMapper {
-  String COLUMNS = "r.Id,r.ResearchStudyId,r.Name,r.Description,r.DatasetId,r.Provider,r.MarketType,r.DataType,r.Symbol,r.IntervalCode,r.StrategyCode,r.StrategyVersion,r.ExecutionProfileCode,r.DirectionMode,r.OrderSizingMode,r.EvaluationMode,r.ParameterSpaceMode,r.ParameterSpaceJson,r.ExpandedParameterGridJson,r.CandidateCount,r.StudyStartOpenTimeMs,r.StudyEndOpenTimeMs,r.TrainingBars,r.ValidationBars,r.SelectionMetric,r.MinimumTrainTrades,r.OrderAmount,r.FeeRate,r.ForceCloseAtEnd,r.ComparisonGroupKey,r.WalkForwardStudyId,r.Status,r.ProgressPercent,r.ErrorCode,r.ErrorMessage,r.CreatedAt,r.StartedAt,r.FinishedAt,r.UpdatedAt";
+  String COLUMNS = "r.Id,r.ResearchStudyId,r.Name,r.Description,r.DatasetId,r.Provider,r.MarketType,r.DataType,r.Symbol,r.IntervalCode,r.StrategyCode,r.StrategyVersion,r.ExecutionProfileCode,r.DirectionMode,r.OrderSizingMode,r.EvaluationMode,r.ParameterSpaceMode,r.ParameterSpaceJson,r.ExpandedParameterGridJson,r.CandidateCount,r.StudyStartOpenTimeMs,r.StudyEndOpenTimeMs,r.TrainingBars,r.ValidationBars,r.SelectionMetric,r.MinimumTrainTrades,r.OrderAmount,r.FeeRate,r.ForceCloseAtEnd,r.ComparisonGroupKey,r.WalkForwardStudyId,r.Status,r.ProgressPercent,r.ErrorCode,r.ErrorMessage,r.CreatedAt,r.StartedAt,r.FinishedAt,r.UpdatedAt,w.SuccessfulOosFolds AS OosSuccessfulOosFolds,w.FailedFolds AS OosFailedFolds,w.HasOosGaps AS OosHasOosGaps,w.OosTotalReturnRatio AS OosTotalReturnRatio,w.OosMaximumDrawdownRatio AS OosMaximumDrawdownRatio,w.OosTradeCount AS OosTradeCount,w.OosTotalFees AS OosTotalFees,w.ParameterChanges AS OosParameterChanges";
 
   @Results(id = "researchStudyRow", value = {
       @Result(column="Id", property="id"), @Result(column="ResearchStudyId", property="researchStudyId"),
@@ -30,7 +30,11 @@ public interface ResearchStudyMapper {
       @Result(column="ProgressPercent", property="progressPercent"), @Result(column="ErrorCode", property="errorCode"),
       @Result(column="ErrorMessage", property="errorMessage"), @Result(column="CreatedAt", property="createdAt"),
       @Result(column="StartedAt", property="startedAt"), @Result(column="FinishedAt", property="finishedAt"),
-      @Result(column="UpdatedAt", property="updatedAt")})
+      @Result(column="UpdatedAt", property="updatedAt"), @Result(column="OosSuccessfulOosFolds", property="successfulOosFolds"),
+      @Result(column="OosFailedFolds", property="failedFolds"), @Result(column="OosHasOosGaps", property="hasOosGaps"),
+      @Result(column="OosTotalReturnRatio", property="oosTotalReturnRatio"), @Result(column="OosMaximumDrawdownRatio", property="oosMaximumDrawdownRatio"),
+      @Result(column="OosTradeCount", property="oosTradeCount"), @Result(column="OosTotalFees", property="oosTotalFees"),
+      @Result(column="OosParameterChanges", property="parameterChanges")})
   @Select("SELECT " + COLUMNS + " FROM q_research_study r LEFT JOIN q_walk_forward_study w ON w.StudyId=r.WalkForwardStudyId WHERE r.ResearchStudyId=#{researchStudyId}")
   ResearchStudyRow findByResearchStudyId(@Param("researchStudyId") String researchStudyId);
 
@@ -45,15 +49,20 @@ public interface ResearchStudyMapper {
                                    @Param("limit") int limit, @Param("offset") long offset);
 
   @ResultMap("researchStudyRow")
-  @Select("SELECT " + COLUMNS + " FROM q_research_study r LEFT JOIN q_walk_forward_study w ON w.StudyId=r.WalkForwardStudyId WHERE r.ComparisonGroupKey=#{comparisonGroupKey} ORDER BY r.CreatedAt DESC,r.ResearchStudyId ASC")
-  List<ResearchStudyRow> findAllByComparisonGroupKey(@Param("comparisonGroupKey") String comparisonGroupKey);
+  @Select("<script>SELECT " + COLUMNS + " FROM q_research_study r JOIN q_walk_forward_study w ON w.StudyId=r.WalkForwardStudyId WHERE r.ComparisonGroupKey=#{comparisonGroupKey} ORDER BY <choose><when test='sortKey == \"OOS_TOTAL_RETURN_RATIO\"'>w.OosTotalReturnRatio</when><when test='sortKey == \"OOS_MAXIMUM_DRAWDOWN_RATIO\"'>w.OosMaximumDrawdownRatio</when><when test='sortKey == \"OOS_TRADE_COUNT\"'>w.OosTradeCount</when><when test='sortKey == \"SUCCESSFUL_OOS_FOLDS\"'>w.SuccessfulOosFolds</when><when test='sortKey == \"FAILED_FOLDS\"'>w.FailedFolds</when><when test='sortKey == \"PARAMETER_CHANGES\"'>w.ParameterChanges</when></choose> IS NULL ASC,<choose><when test='sortKey == \"OOS_TOTAL_RETURN_RATIO\"'>w.OosTotalReturnRatio</when><when test='sortKey == \"OOS_MAXIMUM_DRAWDOWN_RATIO\"'>w.OosMaximumDrawdownRatio</when><when test='sortKey == \"OOS_TRADE_COUNT\"'>w.OosTradeCount</when><when test='sortKey == \"SUCCESSFUL_OOS_FOLDS\"'>w.SuccessfulOosFolds</when><when test='sortKey == \"FAILED_FOLDS\"'>w.FailedFolds</when><when test='sortKey == \"PARAMETER_CHANGES\"'>w.ParameterChanges</when></choose> <if test='descending'>DESC</if><if test='!descending'>ASC</if>,r.ResearchStudyId ASC LIMIT #{limit} OFFSET #{offset}</script>")
+  List<ResearchStudyRow> findComparisonResultsPage(@Param("comparisonGroupKey") String comparisonGroupKey,
+      @Param("sortKey") String sortKey, @Param("descending") boolean descending,
+      @Param("limit") int limit, @Param("offset") long offset);
 
   @Select("<script>SELECT COUNT(*) FROM q_research_study r LEFT JOIN q_walk_forward_study w ON w.StudyId=r.WalkForwardStudyId WHERE 1=1 <if test='status != null'>AND r.Status=#{status}</if><if test='datasetId != null'>AND r.DatasetId=#{datasetId}</if><if test='strategyCode != null'>AND r.StrategyCode=#{strategyCode}</if><if test='comparisonGroupKey != null'>AND r.ComparisonGroupKey=#{comparisonGroupKey}</if></script>")
   long count(@Param("status") String status, @Param("datasetId") Long datasetId,
              @Param("strategyCode") String strategyCode, @Param("comparisonGroupKey") String comparisonGroupKey);
 
+  @Select("SELECT COUNT(*) FROM q_research_study r JOIN q_walk_forward_study w ON w.StudyId=r.WalkForwardStudyId WHERE r.ComparisonGroupKey=#{comparisonGroupKey}")
+  long countByComparisonGroupKey(@Param("comparisonGroupKey") String comparisonGroupKey);
+
   @ResultMap("researchStudyRow")
-  @Select("SELECT " + COLUMNS + " FROM q_research_study r WHERE r.Status IN ('QUEUED','RUNNING') ORDER BY r.UpdatedAt ASC,r.ResearchStudyId ASC LIMIT #{limit}")
+  @Select("SELECT " + COLUMNS + " FROM q_research_study r LEFT JOIN q_walk_forward_study w ON w.StudyId=r.WalkForwardStudyId WHERE r.Status IN ('QUEUED','RUNNING') ORDER BY r.UpdatedAt ASC,r.ResearchStudyId ASC LIMIT #{limit}")
   List<ResearchStudyRow> findNonTerminal(@Param("limit") int limit);
 
   @Insert("INSERT INTO q_research_study(ResearchStudyId,Name,Description,DatasetId,Provider,MarketType,DataType,Symbol,IntervalCode,StrategyCode,StrategyVersion,ExecutionProfileCode,DirectionMode,OrderSizingMode,EvaluationMode,ParameterSpaceMode,ParameterSpaceJson,ExpandedParameterGridJson,CandidateCount,StudyStartOpenTimeMs,StudyEndOpenTimeMs,TrainingBars,ValidationBars,SelectionMetric,MinimumTrainTrades,OrderAmount,FeeRate,ForceCloseAtEnd,ComparisonGroupKey,WalkForwardStudyId,Status,ProgressPercent,CreatedAt,UpdatedAt) VALUES(#{researchStudyId},#{name},#{description},#{datasetId},#{provider},#{marketType},#{dataType},#{symbol},#{intervalCode},#{strategyCode},#{strategyVersion},#{executionProfileCode},#{directionMode},#{orderSizingMode},#{evaluationMode},#{parameterSpaceMode},#{parameterSpaceJson},#{expandedParameterGridJson},#{candidateCount},#{studyStartOpenTimeMs},#{studyEndOpenTimeMs},#{trainingBars},#{validationBars},#{selectionMetric},#{minimumTrainTrades},#{orderAmount},#{feeRate},#{forceCloseAtEnd},#{comparisonGroupKey},#{walkForwardStudyId},'QUEUED',0,#{createdAt},#{updatedAt})")

@@ -17,6 +17,9 @@ public class WalkForwardStudyRow {
   public int minimumTrainTrades;
   public long studyStartOpenTimeMs, studyEndOpenTimeMs;
   public BigDecimal orderAmount, feeRate, progressPercent;
+  public Integer successfulOosFolds, failedFolds, oosTradeCount, parameterChanges;
+  public Boolean hasOosGaps;
+  public BigDecimal oosTotalReturnRatio, oosMaximumDrawdownRatio, oosTotalFees;
   public boolean forceCloseAtEnd;
   public String status, errorCode, errorMessage;
   public Instant createdAt, updatedAt, startedAt, finishedAt;

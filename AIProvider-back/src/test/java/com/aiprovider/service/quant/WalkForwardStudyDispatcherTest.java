@@ -126,13 +126,13 @@ class WalkForwardStudyDispatcherTest {
     when(loader.loadMany(anyList(), anyList(), eq(false)))
         .thenReturn(Map.of("s", snapshot(running, fold)))
         .thenReturn(Map.of("s", snapshot(failed, fold)));
-    when(studies.updateAggregate(eq("s"), eq("RUNNING"), eq("FAILED"), argThat(value -> value.compareTo(BigDecimal.valueOf(100)) == 0), eq("REAL_ERROR"), eq("real failure failedFolds=1"), any(Instant.class), any()))
+    when(studies.updateAggregateWithOos(eq("s"), eq("RUNNING"), eq("FAILED"), argThat(value -> value.compareTo(BigDecimal.valueOf(100)) == 0), eq("REAL_ERROR"), eq("real failure failedFolds=1"), any(Instant.class), eq(0), eq(1), eq(true), isNull(), isNull(), isNull(), isNull(), isNull(), any(Instant.class)))
         .thenReturn(1);
     when(studies.findByStudyId("s")).thenReturn(failed);
 
     dispatcher(studies, folds, loader, service).tick();
 
-    verify(studies, times(1)).updateAggregate(eq("s"), eq("RUNNING"), eq("FAILED"), argThat(value -> value.compareTo(BigDecimal.valueOf(100)) == 0), eq("REAL_ERROR"), eq("real failure failedFolds=1"), any(Instant.class), any());
+    verify(studies, times(1)).updateAggregateWithOos(eq("s"), eq("RUNNING"), eq("FAILED"), argThat(value -> value.compareTo(BigDecimal.valueOf(100)) == 0), eq("REAL_ERROR"), eq("real failure failedFolds=1"), any(Instant.class), eq(0), eq(1), eq(true), isNull(), isNull(), isNull(), isNull(), isNull(), any(Instant.class));
     verify(folds, never()).claimNextPending(anyString(), anyString(), any());
   }
 

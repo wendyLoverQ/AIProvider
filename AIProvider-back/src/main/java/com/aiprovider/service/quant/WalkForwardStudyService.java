@@ -155,38 +155,40 @@ public class WalkForwardStudyService {
   private WalkForwardStudyDtos.StudySummary refreshSummary(WalkForwardStudySnapshot snapshot) {
     Aggregate aggregate = aggregate(snapshot);
     WalkForwardStudyRow row = snapshot.study();
+    OosSummary targetOos = terminal(aggregate.status) ? oosSummary(snapshot, aggregate.status) : OosSummary.empty();
     if (!Objects.equals(row.status, aggregate.status)
         || compare(row.progressPercent, aggregate.progress) != 0
         || !Objects.equals(row.errorCode, aggregate.errorCode)
         || !Objects.equals(row.errorMessage, aggregate.errorMessage)
         || ("RUNNING".equals(aggregate.status) && row.startedAt == null)
         || (!terminal(aggregate.status) && row.finishedAt != null)
-        || (terminal(aggregate.status) && row.finishedAt == null)) {
+        || (terminal(aggregate.status) && row.finishedAt == null)
+        || !oosMatches(row, targetOos, aggregate.status)) {
       Instant now = Instant.now();
       Instant finished = terminal(aggregate.status) ? now : null;
-      int affected =
-          studies.updateAggregate(
-              row.studyId,
-              row.status,
-              aggregate.status,
-              aggregate.progress,
-              aggregate.errorCode,
-              aggregate.errorMessage,
-              finished,
-              now);
+      int affected;
+      if (terminal(aggregate.status)) {
+        affected = studies.updateAggregateWithOos(row.studyId, row.status, aggregate.status, aggregate.progress,
+            aggregate.errorCode, aggregate.errorMessage, finished, targetOos.successfulFolds, targetOos.failedFolds,
+            targetOos.hasGaps, targetOos.returnRatio, targetOos.maximumDrawdown, targetOos.tradeCount,
+            targetOos.fees, targetOos.parameterChanges, now);
+      } else {
+        affected = studies.updateAggregate(row.studyId, row.status, aggregate.status, aggregate.progress,
+            aggregate.errorCode, aggregate.errorMessage, finished, now);
+      }
       if (affected > 1) fail("WALK_FORWARD_STATE_CONFLICT", "study aggregate affected multiple rows");
       if (affected == 0) {
         WalkForwardStudyRow latest = require(row.studyId);
         WalkForwardStudySnapshot current =
             snapshots.load(latest, folds.findAllByStudyId(row.studyId), false);
         Aggregate currentAggregate = aggregate(current);
-        OosSummary currentOos = terminal(latest.status) ? oosSummary(current) : OosSummary.empty();
+        OosSummary currentOos = terminal(latest.status) ? oosSummary(current, latest.status) : OosSummary.empty();
         return summary(latest, currentAggregate, currentOos);
       }
       row = require(row.studyId);
       snapshot = new WalkForwardStudySnapshot(row, snapshot.folds(), snapshot.experiments(), snapshot.runs(), snapshot.equities());
     }
-    OosSummary oos = terminal(row.status) ? oosSummary(snapshot) : OosSummary.empty();
+    OosSummary oos = terminal(row.status) ? oosSummary(snapshot, row.status) : OosSummary.empty();
     return summary(row, aggregate, oos);
   }
 
@@ -291,9 +293,13 @@ public class WalkForwardStudyService {
         group.stream().mapToInt(f -> f.foldIndex).min().orElse(0), group.stream().mapToInt(f -> f.foldIndex).max().orElse(0))).toList();
   }
 
-  private OosSummary oosSummary(WalkForwardStudySnapshot snapshot) {
+  private OosSummary oosSummary(WalkForwardStudySnapshot snapshot, String status) {
     List<WalkForwardFoldRow> selected = successfulFolds(snapshot.folds());
-    if (selected.isEmpty()) return new OosSummary(0, !snapshot.folds().isEmpty(), 0, null, null, null, 0);
+    int failedFolds = snapshot.folds().size() - selected.size();
+    if (selected.isEmpty()) {
+      if (!"FAILED".equals(status)) fail("WALK_FORWARD_OOS_INVALID", "terminal study has no successful OOS folds");
+      return new OosSummary(0, failedFolds, true, null, null, null, null, null);
+    }
     BigDecimal compound = BigDecimal.ONE, fees = BigDecimal.ZERO, maximumDrawdown = BigDecimal.ZERO;
     int trades = 0, changes = 0;
     Map<String, Integer> previous = null;
@@ -301,19 +307,35 @@ public class WalkForwardStudyService {
       validateSelectedFields(fold);
       BacktestRunRow run = snapshot.run(fold.selectedValidationRunId);
       if (run == null) fail("WALK_FORWARD_OOS_INVALID", "selected validation run is missing");
-      if (!"COMPLETED".equals(run.status) || run.totalReturnRatio == null || run.totalFees == null || run.tradeCount == null)
+      if (!"COMPLETED".equals(run.status) || run.totalReturnRatio == null || run.totalFees == null || run.tradeCount == null || run.maximumDrawdownRatio == null)
         fail("WALK_FORWARD_OOS_INVALID", "selected validation run metrics are incomplete");
       BigDecimal factor = BigDecimal.ONE.add(run.totalReturnRatio, MC);
       if (factor.signum() <= 0) fail("WALK_FORWARD_OOS_INVALID", "validation return makes compound invalid");
       compound = compound.multiply(factor, MC);
       fees = fees.add(run.totalFees, MC);
-      if (run.maximumDrawdownRatio != null) maximumDrawdown = maximumDrawdown.max(run.maximumDrawdownRatio);
+      maximumDrawdown = maximumDrawdown.max(run.maximumDrawdownRatio);
       trades = Math.addExact(trades, run.tradeCount);
       Map<String, Integer> current = readParameters(fold.selectedParametersJson);
       if (previous != null && !previous.equals(current)) changes++;
       previous = current;
     }
-    return new OosSummary(selected.size(), snapshot.folds().size() != selected.size(), trades, fees, compound.subtract(BigDecimal.ONE, MC), maximumDrawdown, changes);
+    return new OosSummary(selected.size(), failedFolds, failedFolds > 0, trades, fees, compound.subtract(BigDecimal.ONE, MC), maximumDrawdown, changes);
+  }
+
+  private boolean oosMatches(WalkForwardStudyRow row, OosSummary expected, String status) {
+    if (!terminal(status)) {
+      return row.successfulOosFolds == null && row.failedFolds == null && row.hasOosGaps == null
+          && row.oosTotalReturnRatio == null && row.oosMaximumDrawdownRatio == null && row.oosTradeCount == null
+          && row.oosTotalFees == null && row.parameterChanges == null;
+    }
+    return Objects.equals(row.successfulOosFolds, expected.successfulFolds)
+        && Objects.equals(row.failedFolds, expected.failedFolds)
+        && Objects.equals(row.hasOosGaps, expected.hasGaps)
+        && Objects.equals(row.oosTotalReturnRatio, expected.returnRatio)
+        && Objects.equals(row.oosMaximumDrawdownRatio, expected.maximumDrawdown)
+        && Objects.equals(row.oosTradeCount, expected.tradeCount)
+        && Objects.equals(row.oosTotalFees, expected.fees)
+        && Objects.equals(row.parameterChanges, expected.parameterChanges);
   }
 
   private void validateSelectedFields(WalkForwardFoldRow fold) {
@@ -379,5 +401,8 @@ public class WalkForwardStudyService {
   private void fail(String code, String message) { throw new WalkForwardTaskException(code, message); }
 
   private record Aggregate(String status, BigDecimal progress, int pending, int active, int completed, int failed, String errorCode, String errorMessage) {}
-  private record OosSummary(int successfulFolds, boolean hasGaps, int tradeCount, BigDecimal fees, BigDecimal returnRatio, BigDecimal maximumDrawdown, int parameterChanges) { static OosSummary empty() { return new OosSummary(0, false, 0, null, null, null, 0); } }
+  private record OosSummary(Integer successfulFolds, Integer failedFolds, Boolean hasGaps, Integer tradeCount,
+                            BigDecimal fees, BigDecimal returnRatio, BigDecimal maximumDrawdown, Integer parameterChanges) {
+    static OosSummary empty() { return new OosSummary(null, null, null, null, null, null, null, null); }
+  }
 }

@@ -30,7 +30,7 @@ public class QuantResearchStudyController {
   public Result<ResearchStudyDtos.Detail> get(@PathVariable String researchStudyId) { return Result.success(studies.get(researchStudyId)); }
 
   @GetMapping("/{researchStudyId}/parameter-space")
-  public Result<ResearchStudyDtos.Detail> parameterSpace(@PathVariable String researchStudyId) { return Result.success(studies.parameterSpace(researchStudyId)); }
+  public Result<ResearchStudyDtos.ParameterSpaceResponse> parameterSpace(@PathVariable String researchStudyId) { return Result.success(studies.parameterSpace(researchStudyId)); }
 
   @GetMapping("/comparison-groups/{comparisonGroupKey}/results")
   public Result<BacktestDtos.Page<ResearchStudyDtos.Summary>> results(@PathVariable String comparisonGroupKey,

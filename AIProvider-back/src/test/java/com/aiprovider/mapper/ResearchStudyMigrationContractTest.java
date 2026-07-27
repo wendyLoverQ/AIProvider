@@ -18,4 +18,12 @@ class ResearchStudyMigrationContractTest {
     assertTrue(sql.contains("CHECK (CandidateCount BETWEEN 1 AND 64)"));
     assertTrue(sql.contains("CHECK (ForceCloseAtEnd = TRUE)"));
   }
+
+  @Test void v73AddsAsciiComparisonKeyAndPersistedOosColumns() throws Exception {
+    String sql = Files.readString(Path.of("src/main/resources/db/migration/V73__quant_research_study_result_query_contract.sql"));
+    assertTrue(sql.contains("CHARACTER SET ascii COLLATE ascii_bin NOT NULL"));
+    assertTrue(sql.contains("SuccessfulOosFolds INT NULL"));
+    assertTrue(sql.contains("OosMaximumDrawdownRatio DECIMAL(38,18) NULL"));
+    assertTrue(sql.contains("ParameterChanges INT NULL"));
+  }
 }

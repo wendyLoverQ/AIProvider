@@ -9,7 +9,7 @@ import org.apache.ibatis.annotations.*;
 @Mapper
 public interface WalkForwardStudyMapper {
   String COLUMNS =
-      "Id,StudyId,DatasetId,Provider,MarketType,DataType,Symbol,IntervalCode,StrategyCode,StrategyVersion,ExecutionProfileCode,DirectionMode,OrderSizingMode,ParameterGridJson,WindowMode,StudyStartOpenTimeMs,StudyEndOpenTimeMs,TrainingBars,ValidationBars,StepBars,FoldCount,CandidateCountPerFold,TotalChildRuns,SelectionMetric,MinimumTrainTrades,OrderAmount,FeeRate,ForceCloseAtEnd,Status,ProgressPercent,ErrorCode,ErrorMessage,CreatedAt,UpdatedAt,StartedAt,FinishedAt";
+      "Id,StudyId,DatasetId,Provider,MarketType,DataType,Symbol,IntervalCode,StrategyCode,StrategyVersion,ExecutionProfileCode,DirectionMode,OrderSizingMode,ParameterGridJson,WindowMode,StudyStartOpenTimeMs,StudyEndOpenTimeMs,TrainingBars,ValidationBars,StepBars,FoldCount,CandidateCountPerFold,TotalChildRuns,SelectionMetric,MinimumTrainTrades,OrderAmount,FeeRate,ForceCloseAtEnd,Status,ProgressPercent,ErrorCode,ErrorMessage,CreatedAt,UpdatedAt,StartedAt,FinishedAt,SuccessfulOosFolds,FailedFolds,HasOosGaps,OosTotalReturnRatio,OosMaximumDrawdownRatio,OosTradeCount,OosTotalFees,ParameterChanges";
 
   @Results(
       id = "walkForwardStudyRow",
@@ -50,6 +50,14 @@ public interface WalkForwardStudyMapper {
         @Result(column = "UpdatedAt", property = "updatedAt"),
         @Result(column = "StartedAt", property = "startedAt"),
         @Result(column = "FinishedAt", property = "finishedAt")
+        ,@Result(column = "SuccessfulOosFolds", property = "successfulOosFolds")
+        ,@Result(column = "FailedFolds", property = "failedFolds")
+        ,@Result(column = "HasOosGaps", property = "hasOosGaps")
+        ,@Result(column = "OosTotalReturnRatio", property = "oosTotalReturnRatio")
+        ,@Result(column = "OosMaximumDrawdownRatio", property = "oosMaximumDrawdownRatio")
+        ,@Result(column = "OosTradeCount", property = "oosTradeCount")
+        ,@Result(column = "OosTotalFees", property = "oosTotalFees")
+        ,@Result(column = "ParameterChanges", property = "parameterChanges")
       })
   @Select("SELECT " + COLUMNS + " FROM q_walk_forward_study WHERE StudyId=#{studyId}")
   WalkForwardStudyRow findByStudyId(@Param("studyId") String studyId);
@@ -117,6 +125,28 @@ public interface WalkForwardStudyMapper {
       @Param("errorCode") String errorCode,
       @Param("errorMessage") String errorMessage,
       @Param("finishedAt") Instant finishedAt,
+      @Param("now") Instant now);
+
+  @Update(
+      "UPDATE q_walk_forward_study SET"
+          + " Status=#{status},ProgressPercent=#{progress},ErrorCode=#{errorCode},ErrorMessage=#{errorMessage},StartedAt=IF(#{status}='RUNNING',COALESCE(StartedAt,#{now}),StartedAt),FinishedAt=IF(#{status} IN ('COMPLETED','COMPLETED_WITH_FAILURES','FAILED'),COALESCE(FinishedAt,#{finishedAt}),NULL),SuccessfulOosFolds=#{successfulOosFolds},FailedFolds=#{failedFolds},HasOosGaps=#{hasOosGaps},OosTotalReturnRatio=#{oosTotalReturnRatio},OosMaximumDrawdownRatio=#{oosMaximumDrawdownRatio},OosTradeCount=#{oosTradeCount},OosTotalFees=#{oosTotalFees},ParameterChanges=#{parameterChanges},UpdatedAt=#{now}"
+          + " WHERE StudyId=#{studyId} AND Status=#{expectedStatus}")
+  int updateAggregateWithOos(
+      @Param("studyId") String studyId,
+      @Param("expectedStatus") String expectedStatus,
+      @Param("status") String status,
+      @Param("progress") java.math.BigDecimal progress,
+      @Param("errorCode") String errorCode,
+      @Param("errorMessage") String errorMessage,
+      @Param("finishedAt") Instant finishedAt,
+      @Param("successfulOosFolds") Integer successfulOosFolds,
+      @Param("failedFolds") Integer failedFolds,
+      @Param("hasOosGaps") Boolean hasOosGaps,
+      @Param("oosTotalReturnRatio") java.math.BigDecimal oosTotalReturnRatio,
+      @Param("oosMaximumDrawdownRatio") java.math.BigDecimal oosMaximumDrawdownRatio,
+      @Param("oosTradeCount") Integer oosTradeCount,
+      @Param("oosTotalFees") java.math.BigDecimal oosTotalFees,
+      @Param("parameterChanges") Integer parameterChanges,
       @Param("now") Instant now);
 
   @Update(

@@ -13,7 +13,7 @@ public final class ResearchStudyDtos {
       String strategyCode, String strategyVersion, String executionProfileCode, String directionMode,
       String orderSizingMode, String evaluationMode, String parameterSpaceMode, int candidateCount,
       String comparisonGroupKey, String walkForwardStudyId, String status, BigDecimal progressPercent,
-      int successfulOosFolds, int failedFolds, Boolean hasOosGaps, BigDecimal oosTotalReturnRatio,
+      Integer successfulOosFolds, Integer failedFolds, Boolean hasOosGaps, BigDecimal oosTotalReturnRatio,
       BigDecimal oosMaximumDrawdownRatio, Integer oosTradeCount, BigDecimal oosTotalFees,
       Integer parameterChanges, String errorCode, String errorMessage, Instant createdAt,
       Instant startedAt, Instant finishedAt, Instant updatedAt) {}
@@ -22,5 +22,8 @@ public final class ResearchStudyDtos {
       Instant studyEndOpenTimeExclusive, int trainingBars, int validationBars, String selectionMetric,
       int minimumTrainTrades, BigDecimal orderAmount, BigDecimal feeRate, boolean forceCloseAtEnd) {}
   public record IntegerRange(int minimum, int maximum, int step) {}
+  public record ParameterSpaceResponse(String researchStudyId, String parameterSpaceMode,
+      Map<String, IntegerRange> parameterSpace, Map<String, List<Integer>> expandedParameterGrid,
+      int candidateCount) {}
   public record Result(Summary summary) {}
 }

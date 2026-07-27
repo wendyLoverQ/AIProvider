@@ -23,6 +23,13 @@ class ResearchComparisonGroupKeyTest {
     assertNotEquals(ResearchComparisonGroupKey.sha256(first), ResearchComparisonGroupKey.sha256(second));
   }
 
+  @Test void normalizesOnlyTrimmedSixtyFourDigitHexKeys() {
+    String key = "A".repeat(64);
+    assertEquals("a".repeat(64), ResearchStudyService.normalizeComparisonGroupKey("  " + key + "  "));
+    assertThrows(ResearchStudyTaskException.class, () -> ResearchStudyService.normalizeComparisonGroupKey("a".repeat(63)));
+    assertThrows(ResearchStudyTaskException.class, () -> ResearchStudyService.normalizeComparisonGroupKey("g" + "a".repeat(63)));
+  }
+
   private ResearchStudyCreateRequest request() {
     ResearchStudyCreateRequest request = new ResearchStudyCreateRequest();
     request.setName("test"); request.setDatasetId(1); request.setStrategyCode("EMA_CROSS_LONG_ONLY"); request.setStrategyVersion("1.0.0");

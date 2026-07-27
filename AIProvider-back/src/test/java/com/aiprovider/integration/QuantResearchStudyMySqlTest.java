@@ -24,6 +24,8 @@ class QuantResearchStudyMySqlTest {
     assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='q_research_study'", Integer.class));
     assertEquals("json", columnType(jdbc, "ParameterSpaceJson"));
     assertEquals("decimal(38,18)", columnType(jdbc, "OrderAmount"));
+    assertEquals("ascii_bin", jdbc.queryForObject("SELECT COLLATION_NAME FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='q_research_study' AND column_name='ComparisonGroupKey'", String.class));
+    assertEquals("YES", jdbc.queryForObject("SELECT IS_NULLABLE FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='q_walk_forward_study' AND column_name='OosTotalReturnRatio'", String.class));
     assertTrue(indexExists(jdbc, "uk_research_study_child"));
     assertTrue(indexExists(jdbc, "ix_research_study_status_updated"));
     String id = "00000000-0000-0000-0000-000000000001";
