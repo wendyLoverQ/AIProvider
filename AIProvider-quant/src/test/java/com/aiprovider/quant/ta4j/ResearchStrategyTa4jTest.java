@@ -2,6 +2,7 @@ package com.aiprovider.quant.ta4j;
 
 import com.aiprovider.quant.backtest.BacktestEngine;
 import com.aiprovider.quant.backtest.BacktestRequest;
+import com.aiprovider.quant.execution.*;
 import com.aiprovider.quant.market.history.model.HistoricalCandle;
 import com.aiprovider.quant.market.model.KlineInterval;
 import com.aiprovider.quant.market.model.MarketProviderId;
@@ -74,12 +75,12 @@ class ResearchStrategyTa4jTest {
     void enginePreservesAllThreeStrategyContractsAndIsDeterministic() {
         List<HistoricalCandle> candles = candles(20, 25, 25, 30);
         List<BacktestRequest> requests = List.of(
-                new BacktestRequest("EMA_CROSS_LONG_ONLY", "1.0.0", Map.of("fastPeriod", 2, "slowPeriod", 4), BigDecimal.ONE, BigDecimal.ZERO, true),
-                new BacktestRequest("RSI_MEAN_REVERSION_LONG_ONLY", "1.0.0", Map.of("rsiPeriod", 14, "entryThreshold", 30, "exitThreshold", 55), BigDecimal.ONE, BigDecimal.ZERO, true),
-                new BacktestRequest("MACD_TREND_LONG_ONLY", "1.0.0", Map.of("fastPeriod", 12, "slowPeriod", 26, "signalPeriod", 9), BigDecimal.ONE, BigDecimal.ZERO, true));
+                request("EMA_CROSS_LONG_ONLY", Map.of("fastPeriod", 2, "slowPeriod", 4), true),
+                request("RSI_MEAN_REVERSION_LONG_ONLY", Map.of("rsiPeriod", 14, "entryThreshold", 30, "exitThreshold", 55), true),
+                request("MACD_TREND_LONG_ONLY", Map.of("fastPeriod", 12, "slowPeriod", 26, "signalPeriod", 9), true));
         for (BacktestRequest request : requests) {
-            var first = new BacktestEngine().run(request, "BTCUSDT", KlineInterval.M1, candles);
-            var second = new BacktestEngine().run(request, "BTCUSDT", KlineInterval.M1, candles);
+            var first = new BacktestEngine().run(request, market(), candles);
+            var second = new BacktestEngine().run(request, market(), candles);
             assertThat(first.getStrategyCode()).isEqualTo(request.getStrategyCode());
             assertThat(first.getStrategyVersion()).isEqualTo("1.0.0");
             assertThat(first.getExecutionModel()).isEqualTo("TA4J_TRADE_ON_NEXT_OPEN");
@@ -96,10 +97,10 @@ class ResearchStrategyTa4jTest {
     @Test
     void forceCloseAtEndControlsOnlyTheExplicitEndOfSeriesTrade() {
         List<HistoricalCandle> candles = candles(20, 25, 40, 0);
-        BacktestRequest forceClose = new BacktestRequest("MACD_TREND_LONG_ONLY", "1.0.0", Map.of("fastPeriod", 12, "slowPeriod", 26, "signalPeriod", 9), BigDecimal.ONE, BigDecimal.ZERO, true);
-        BacktestRequest keepOpen = new BacktestRequest("MACD_TREND_LONG_ONLY", "1.0.0", Map.of("fastPeriod", 12, "slowPeriod", 26, "signalPeriod", 9), BigDecimal.ONE, BigDecimal.ZERO, false);
-        var forced = new BacktestEngine().run(forceClose, "BTCUSDT", KlineInterval.M1, candles);
-        var unforced = new BacktestEngine().run(keepOpen, "BTCUSDT", KlineInterval.M1, candles);
+        BacktestRequest forceClose = request("MACD_TREND_LONG_ONLY", Map.of("fastPeriod", 12, "slowPeriod", 26, "signalPeriod", 9), true);
+        BacktestRequest keepOpen = request("MACD_TREND_LONG_ONLY", Map.of("fastPeriod", 12, "slowPeriod", 26, "signalPeriod", 9), false);
+        var forced = new BacktestEngine().run(forceClose, market(), candles);
+        var unforced = new BacktestEngine().run(keepOpen, market(), candles);
         assertThat(forced.getTrades()).isNotEmpty();
         var last = forced.getTrades().get(forced.getTrades().size() - 1);
         assertThat(last.isForcedExit()).isTrue();
@@ -115,6 +116,29 @@ class ResearchStrategyTa4jTest {
 
     private record TradeSnapshot(int tradeNo, Integer entrySignalIndex, int entryIndex, Instant entryTime, BigDecimal entryPrice, Integer exitSignalIndex, int exitIndex, Instant exitTime, BigDecimal exitPrice, BigDecimal amount, BigDecimal grossProfit, BigDecimal fee, BigDecimal netProfit, BigDecimal returnRatio, int barsHeld, boolean forcedExit, String exitReason) {}
     private record EquitySnapshot(Instant openTime, BigDecimal equityRatio, BigDecimal drawdownRatio, boolean inPosition) {}
+
+    private BacktestRequest request(String code, Map<String, Integer> parameters, boolean forceClose) {
+        return new BacktestRequest(
+                ExecutionProfileCode.USDM_PERPETUAL_LONG_ONLY_1X_V1,
+                DirectionMode.LONG_ONLY,
+                OrderSizingMode.BASE_QUANTITY,
+                code,
+                "1.0.0",
+                parameters,
+                BigDecimal.ONE,
+                BigDecimal.ZERO,
+                forceClose);
+    }
+
+    private BacktestMarketContext market() {
+        return new BacktestMarketContext(
+                MarketProviderId.BINANCE_USDM.name(),
+                MarketType.USDM_PERPETUAL,
+                "KLINE",
+                "BTCUSDT",
+                KlineInterval.M1,
+                java.util.Set.of(MarketFeature.OHLCV));
+    }
 
     @Test
     void rsiThresholdRulesIncludeEqualityAtBothBoundaries() {

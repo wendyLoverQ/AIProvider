@@ -17,7 +17,7 @@ class QuantBacktestExperimentControllerContractTest {
         BacktestExperimentCreationService creation=mock(BacktestExperimentCreationService.class); BacktestExperimentService service=mock(BacktestExperimentService.class);
         when(creation.create(any())).thenReturn(new BacktestExperimentDtos.CreateResponse("e",2,4));
         MockMvc mvc=standaloneSetup(new QuantBacktestExperimentController(creation,service)).build();
-        mvc.perform(post("/api/quant/backtests/experiments").contentType("application/json").content("{\"datasetId\":1}"))
+        mvc.perform(post("/api/quant/backtests/experiments").contentType("application/json").content("{\"datasetId\":1,\"executionProfileCode\":\"USDM_PERPETUAL_LONG_ONLY_1X_V1\",\"directionMode\":\"LONG_ONLY\",\"orderSizingMode\":\"BASE_QUANTITY\"}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.experimentId").value("e"));
         mvc.perform(get("/api/quant/backtests/experiments")).andExpect(status().isOk());
         mvc.perform(get("/api/quant/backtests/experiments/e")).andExpect(status().isOk());

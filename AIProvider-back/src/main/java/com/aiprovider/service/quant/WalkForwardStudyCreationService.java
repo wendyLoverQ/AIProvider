@@ -8,6 +8,8 @@ import com.aiprovider.mapper.WalkForwardStudyMapper;
 import com.aiprovider.mapper.row.WalkForwardFoldRow;
 import com.aiprovider.mapper.row.WalkForwardStudyRow;
 import com.aiprovider.quant.market.history.model.MarketDataset;
+import com.aiprovider.quant.execution.*;
+import com.aiprovider.quant.backtest.BacktestException;
 import com.aiprovider.quant.strategy.QuantStrategyDefinition;
 import com.aiprovider.quant.strategy.StrategyException;
 import com.aiprovider.quant.strategy.StrategyRegistry;
@@ -15,6 +17,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,6 +28,7 @@ public class WalkForwardStudyCreationService {
   private final WalkForwardFoldMapper folds;
   private final com.aiprovider.quant.market.history.port.MarketDatasetRepository datasets;
   private final StrategyRegistry strategies;
+  private final BacktestCompatibilityService compatibility;
   private final ObjectMapper json;
   private final QuantWalkForwardProperties properties;
 
@@ -33,12 +37,14 @@ public class WalkForwardStudyCreationService {
       WalkForwardFoldMapper folds,
       com.aiprovider.quant.market.history.port.MarketDatasetRepository datasets,
       StrategyRegistry strategies,
+      BacktestCompatibilityService compatibility,
       ObjectMapper json,
       QuantWalkForwardProperties properties) {
     this.studies = studies;
     this.folds = folds;
     this.datasets = datasets;
     this.strategies = strategies;
+    this.compatibility = compatibility;
     this.json = json;
     this.properties = properties;
   }
@@ -64,6 +70,21 @@ public class WalkForwardStudyCreationService {
       if ("WALK_FORWARD_TOO_LARGE".equals(e.getErrorCode())) throw e;
       throw error("WALK_FORWARD_REQUEST_INVALID", e.getMessage());
     }
+    try {
+      for (var parameters : grid.combinations()) {
+        compatibility.validate(
+            request.getExecutionProfileCode(),
+            request.getDirectionMode(),
+            request.getOrderSizingMode(),
+            definition,
+            marketContext(dataset),
+            parameters,
+            request.getOrderAmount(),
+            request.getFeeRate());
+      }
+    } catch (BacktestException e) {
+      throw error(e.getErrorCode(), e.getMessage());
+    }
     WalkForwardFoldGenerator.Result generated =
         WalkForwardFoldGenerator.generate(
             request,
@@ -83,6 +104,9 @@ public class WalkForwardStudyCreationService {
     study.intervalCode = dataset.getInterval().code();
     study.strategyCode = request.getStrategyCode().trim();
     study.strategyVersion = request.getStrategyVersion().trim();
+    study.executionProfileCode = request.getExecutionProfileCode();
+    study.directionMode = request.getDirectionMode();
+    study.orderSizingMode = request.getOrderSizingMode();
     study.parameterGridJson = write(grid.grid());
     study.windowMode = "ROLLING";
     study.studyStartOpenTimeMs = request.getStudyStartOpenTimeInclusive().toEpochMilli();
@@ -193,5 +217,18 @@ public class WalkForwardStudyCreationService {
   private WalkForwardTaskException error(String code, String message) {
     String text = (message == null ? "walk-forward failed" : message).replaceAll("[\\r\\n]", " ");
     return new WalkForwardTaskException(code, text.substring(0, Math.min(1000, text.length())));
+  }
+
+  private BacktestMarketContext marketContext(MarketDataset dataset) {
+    return new BacktestMarketContext(
+        dataset.getProvider().name(),
+        dataset.getMarketType(),
+        dataset.getDataType().name(),
+        dataset.getSymbol(),
+        dataset.getInterval(),
+        dataset.getDataType()
+                == com.aiprovider.quant.market.history.model.MarketDataType.CANDLE
+            ? Set.of(MarketFeature.OHLCV)
+            : Set.of());
   }
 }

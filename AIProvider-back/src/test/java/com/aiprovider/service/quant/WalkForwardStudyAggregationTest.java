@@ -80,7 +80,7 @@ class WalkForwardStudyAggregationTest {
   }
 
   private BacktestExperimentDtos.ExperimentSummary experiment() {
-    return new BacktestExperimentDtos.ExperimentSummary("e0", 1L, null, null, null, null, null, null, null, Map.of(), 0, Instant.EPOCH, Instant.EPOCH, Instant.EPOCH, Instant.EPOCH, BigDecimal.ONE, BigDecimal.ZERO, true, "RUNNING", new BigDecimal("40"), 0, 1, 0, 0, 0, 0, null, null, Instant.EPOCH, null, null, Instant.EPOCH);
+    return new BacktestExperimentDtos.ExperimentSummary("e0", 1L, null, null, null, null, null, null, null, "USDM_PERPETUAL_LONG_ONLY_1X_V1", "LONG_ONLY", "BASE_QUANTITY", Map.of(), 0, Instant.EPOCH, Instant.EPOCH, Instant.EPOCH, Instant.EPOCH, BigDecimal.ONE, BigDecimal.ZERO, true, "RUNNING", new BigDecimal("40"), 0, 1, 0, 0, 0, 0, null, null, Instant.EPOCH, null, null, Instant.EPOCH);
   }
 
   private record AggregateView(String status, BigDecimal progress, String errorCode) {}

@@ -316,6 +316,7 @@ public class WalkForwardStudyDispatcher {
   private BacktestExperimentCreateRequest request(WalkForwardStudyRow study, WalkForwardFoldRow fold) {
     BacktestExperimentCreateRequest request = new BacktestExperimentCreateRequest();
     request.setDatasetId(study.datasetId); request.setStrategyCode(study.strategyCode); request.setStrategyVersion(study.strategyVersion);
+    request.setExecutionProfileCode(study.executionProfileCode); request.setDirectionMode(study.directionMode); request.setOrderSizingMode(study.orderSizingMode);
     request.setParameterGrid(readGrid(study.parameterGridJson));
     request.setTrainingStartOpenTimeInclusive(Instant.ofEpochMilli(fold.trainingStartOpenTimeMs)); request.setTrainingEndOpenTimeExclusive(Instant.ofEpochMilli(fold.trainingEndOpenTimeMs));
     request.setValidationStartOpenTimeInclusive(Instant.ofEpochMilli(fold.validationStartOpenTimeMs)); request.setValidationEndOpenTimeExclusive(Instant.ofEpochMilli(fold.validationEndOpenTimeMs));

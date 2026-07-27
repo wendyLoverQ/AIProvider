@@ -11,7 +11,7 @@ import org.apache.ibatis.annotations.*;
 @Mapper
 public interface BacktestRunMapper {
   String COLUMNS =
-      "Id,RunId,DatasetId,DatasetLastValidatedAt,DatasetLastSyncTaskId,Provider,MarketType,DataType,Symbol,IntervalCode,StartOpenTimeMs,EndOpenTimeExclusiveMs,StrategyCode,StrategyVersion,RequestedParametersJson,ResolvedParametersJson,OrderAmount,FeeRate,ForceCloseAtEnd,Status,ProgressPercent,BarCount,TradeCount,WinningTradeCount,LosingTradeCount,BreakEvenTradeCount,WinRate,GrossProfit,GrossLoss,NetProfit,TotalReturnRatio,MaximumDrawdownRatio,ProfitFactor,AverageTradeReturnRatio,BuyAndHoldReturnRatio,TotalFees,ExecutionModel,WarningsJson,EquityPointCount,ErrorCode,ErrorMessage,QueuedAt,StartedAt,FinishedAt,UpdatedAt";
+      "Id,RunId,DatasetId,DatasetLastValidatedAt,DatasetLastSyncTaskId,Provider,MarketType,DataType,Symbol,IntervalCode,StartOpenTimeMs,EndOpenTimeExclusiveMs,StrategyCode,StrategyVersion,ExecutionProfileCode,DirectionMode,OrderSizingMode,RequestedParametersJson,ResolvedParametersJson,OrderAmount,FeeRate,ForceCloseAtEnd,Status,ProgressPercent,BarCount,TradeCount,WinningTradeCount,LosingTradeCount,BreakEvenTradeCount,WinRate,GrossProfit,GrossLoss,NetProfit,TotalReturnRatio,MaximumDrawdownRatio,ProfitFactor,AverageTradeReturnRatio,BuyAndHoldReturnRatio,TotalFees,ExecutionModel,WarningsJson,EquityPointCount,ErrorCode,ErrorMessage,QueuedAt,StartedAt,FinishedAt,UpdatedAt";
 
   @Results(
       id = "backtestRunRow",
@@ -30,6 +30,9 @@ public interface BacktestRunMapper {
         @Result(column = "EndOpenTimeExclusiveMs", property = "endOpenTimeExclusiveMs"),
         @Result(column = "StrategyCode", property = "strategyCode"),
         @Result(column = "StrategyVersion", property = "strategyVersion"),
+        @Result(column = "ExecutionProfileCode", property = "executionProfileCode"),
+        @Result(column = "DirectionMode", property = "directionMode"),
+        @Result(column = "OrderSizingMode", property = "orderSizingMode"),
         @Result(column = "RequestedParametersJson", property = "requestedParametersJson"),
         @Result(column = "ResolvedParametersJson", property = "resolvedParametersJson"),
         @Result(column = "OrderAmount", property = "orderAmount"),
@@ -86,8 +89,8 @@ public interface BacktestRunMapper {
 
   @Insert(
       "INSERT INTO"
-          + " q_backtest_run(RunId,DatasetId,Provider,MarketType,DataType,Symbol,IntervalCode,StartOpenTimeMs,EndOpenTimeExclusiveMs,StrategyCode,StrategyVersion,RequestedParametersJson,OrderAmount,FeeRate,ForceCloseAtEnd,Status,ProgressPercent,QueuedAt,UpdatedAt)"
-          + " VALUES(#{runId},#{datasetId},#{provider},#{marketType},#{dataType},#{symbol},#{intervalCode},#{startOpenTimeMs},#{endOpenTimeExclusiveMs},#{strategyCode},#{strategyVersion},#{requestedParametersJson},#{orderAmount},#{feeRate},#{forceCloseAtEnd},'QUEUED',0,#{queuedAt},#{updatedAt})")
+          + " q_backtest_run(RunId,DatasetId,Provider,MarketType,DataType,Symbol,IntervalCode,StartOpenTimeMs,EndOpenTimeExclusiveMs,StrategyCode,StrategyVersion,ExecutionProfileCode,DirectionMode,OrderSizingMode,RequestedParametersJson,OrderAmount,FeeRate,ForceCloseAtEnd,Status,ProgressPercent,QueuedAt,UpdatedAt)"
+          + " VALUES(#{runId},#{datasetId},#{provider},#{marketType},#{dataType},#{symbol},#{intervalCode},#{startOpenTimeMs},#{endOpenTimeExclusiveMs},#{strategyCode},#{strategyVersion},#{executionProfileCode},#{directionMode},#{orderSizingMode},#{requestedParametersJson},#{orderAmount},#{feeRate},#{forceCloseAtEnd},'QUEUED',0,#{queuedAt},#{updatedAt})")
   int insert(BacktestRunRow row);
 
   @Update(

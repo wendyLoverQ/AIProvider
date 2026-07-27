@@ -4,6 +4,8 @@ import com.aiprovider.controller.quant.dto.*;
 import com.aiprovider.mapper.*;
 import com.aiprovider.mapper.row.*;
 import com.aiprovider.quant.market.history.model.MarketDataset;
+import com.aiprovider.quant.execution.*;
+import com.aiprovider.quant.backtest.BacktestException;
 import com.aiprovider.quant.strategy.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,6 +24,7 @@ public class BacktestExperimentService {
   private final BacktestRunMapper runs;
   private final com.aiprovider.quant.market.history.port.MarketDatasetRepository datasets;
   private final StrategyRegistry strategies;
+  private final BacktestCompatibilityService compatibility;
   private final ObjectMapper json;
   private final int maxCandidates;
 
@@ -31,6 +34,7 @@ public class BacktestExperimentService {
       BacktestRunMapper r,
       com.aiprovider.quant.market.history.port.MarketDatasetRepository d,
       StrategyRegistry s,
+      BacktestCompatibilityService compatibility,
       ObjectMapper j,
       com.aiprovider.config.quant.QuantExperimentProperties p) {
     experiments = e;
@@ -38,6 +42,7 @@ public class BacktestExperimentService {
     runs = r;
     datasets = d;
     strategies = s;
+    this.compatibility = compatibility;
     json = j;
     maxCandidates = p.getMaxCandidates();
   }
@@ -55,6 +60,14 @@ public class BacktestExperimentService {
       throw error("WALK_FORWARD_EXPERIMENT_CONFLICT", "experimentId must be a UUID");
     }
     validateRequest(q);
+    BacktestExperimentRow existing = experiments.findByExperimentId(experimentId);
+    if (existing != null
+        && (!Objects.equals(existing.executionProfileCode, q.getExecutionProfileCode())
+            || !Objects.equals(existing.directionMode, q.getDirectionMode())
+            || !Objects.equals(existing.orderSizingMode, q.getOrderSizingMode()))) {
+      throw error(
+          "WALK_FORWARD_EXPERIMENT_CONFLICT", "experimentId belongs to a different request");
+    }
     MarketDataset dataset = datasets.findById(q.getDatasetId());
     if (dataset == null) throw error("BACKTEST_EXPERIMENT_RANGE_INVALID", "datasetId not found");
     QuantStrategyDefinition definition;
@@ -69,9 +82,23 @@ public class BacktestExperimentService {
         BacktestExperimentGrid.expand(q.getParameterGrid(), definition, maxCandidates);
     Map<String, List<Integer>> grid = gridResult.grid();
     List<Map<String, Integer>> combinations = gridResult.combinations();
+    try {
+      for (Map<String, Integer> parameters : combinations) {
+        compatibility.validate(
+            q.getExecutionProfileCode(),
+            q.getDirectionMode(),
+            q.getOrderSizingMode(),
+            definition,
+            marketContext(dataset),
+            parameters,
+            q.getOrderAmount(),
+            q.getFeeRate());
+      }
+    } catch (BacktestException e) {
+      throw error(e.getErrorCode(), e.getMessage());
+    }
     validateRange(dataset, q, combinations, definition);
     String canonicalGrid = write(grid);
-    BacktestExperimentRow existing = experiments.findByExperimentId(experimentId);
     if (existing != null) {
       if (!sameImmutableRequest(existing, q, canonicalGrid))
         throw error(
@@ -89,6 +116,9 @@ public class BacktestExperimentService {
     row.intervalCode = dataset.getInterval().code();
     row.strategyCode = q.getStrategyCode().trim();
     row.strategyVersion = q.getStrategyVersion().trim();
+    row.executionProfileCode = q.getExecutionProfileCode();
+    row.directionMode = q.getDirectionMode();
+    row.orderSizingMode = q.getOrderSizingMode();
     row.parameterGridJson = canonicalGrid;
     row.candidateCount = combinations.size();
     row.trainingStartOpenTimeMs = q.getTrainingStartOpenTimeInclusive().toEpochMilli();
@@ -143,6 +173,9 @@ public class BacktestExperimentService {
     return row.datasetId == request.getDatasetId()
         && row.strategyCode.equals(request.getStrategyCode().trim())
         && row.strategyVersion.equals(request.getStrategyVersion().trim())
+        && row.executionProfileCode.equals(request.getExecutionProfileCode())
+        && row.directionMode.equals(request.getDirectionMode())
+        && row.orderSizingMode.equals(request.getOrderSizingMode())
         && canonicalGrid.equals(row.parameterGridJson)
         && row.trainingStartOpenTimeMs == request.getTrainingStartOpenTimeInclusive().toEpochMilli()
         && row.trainingEndOpenTimeMs == request.getTrainingEndOpenTimeExclusive().toEpochMilli()
@@ -350,6 +383,9 @@ public class BacktestExperimentService {
         r.intervalCode,
         r.strategyCode,
         r.strategyVersion,
+        r.executionProfileCode,
+        r.directionMode,
+        r.orderSizingMode,
         readGrid(r.parameterGridJson),
         r.candidateCount,
         Instant.ofEpochMilli(r.trainingStartOpenTimeMs),
@@ -588,5 +624,18 @@ public class BacktestExperimentService {
   private BacktestTaskException error(String c, String m) {
     String text = (m == null ? "experiment failed" : m).replaceAll("[\\r\\n]", " ");
     return new BacktestTaskException(c, text.substring(0, Math.min(1000, text.length())));
+  }
+
+  private BacktestMarketContext marketContext(MarketDataset dataset) {
+    return new BacktestMarketContext(
+        dataset.getProvider().name(),
+        dataset.getMarketType(),
+        dataset.getDataType().name(),
+        dataset.getSymbol(),
+        dataset.getInterval(),
+        dataset.getDataType()
+                == com.aiprovider.quant.market.history.model.MarketDataType.CANDLE
+            ? Set.of(MarketFeature.OHLCV)
+            : Set.of());
   }
 }

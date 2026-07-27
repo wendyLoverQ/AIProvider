@@ -239,7 +239,8 @@ public class WalkForwardStudyService {
       WalkForwardStudyRow row, Aggregate aggregate, OosSummary oos) {
     return new WalkForwardStudyDtos.StudySummary(
         row.studyId, row.datasetId, row.provider, row.marketType, row.dataType, row.symbol,
-        row.intervalCode, row.strategyCode, row.strategyVersion, readGrid(row.parameterGridJson),
+        row.intervalCode, row.strategyCode, row.strategyVersion, row.executionProfileCode,
+        row.directionMode, row.orderSizingMode, readGrid(row.parameterGridJson),
         row.windowMode, Instant.ofEpochMilli(row.studyStartOpenTimeMs), Instant.ofEpochMilli(row.studyEndOpenTimeMs),
         row.trainingBars, row.validationBars, row.stepBars, row.foldCount, row.candidateCountPerFold,
         row.totalChildRuns, row.selectionMetric, row.minimumTrainTrades, row.orderAmount, row.feeRate,

@@ -87,6 +87,9 @@ class WalkForwardFoldGeneratorTest {
     request.setDatasetId(1);
     request.setStrategyCode("EMA_CROSS_LONG_ONLY");
     request.setStrategyVersion("1.0.0");
+    request.setExecutionProfileCode("USDM_PERPETUAL_LONG_ONLY_1X_V1");
+    request.setDirectionMode("LONG_ONLY");
+    request.setOrderSizingMode("BASE_QUANTITY");
     request.setParameterGrid(
         new LinkedHashMap<>(Map.of("fastPeriod", List.of(5, 7), "slowPeriod", List.of(20, 25))));
     request.setStudyStartOpenTimeInclusive(Instant.ofEpochMilli(startBars * 60_000L));

@@ -20,7 +20,7 @@ public class QuantWalkForwardController {
 
   @PostMapping
   public Result<WalkForwardStudyDtos.CreateResponse> create(
-      @RequestBody WalkForwardStudyCreateRequest request) {
+      @javax.validation.Valid @RequestBody WalkForwardStudyCreateRequest request) {
     return Result.success(creation.create(request));
   }
 

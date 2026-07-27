@@ -197,6 +197,8 @@ class BacktestRunRetryMySqlIT {
         mock(MarketDataSnapshotService.class),
         new BacktestEngine(new StrategyRegistry()),
         new StrategyRegistry(),
+        new com.aiprovider.quant.execution.BacktestCompatibilityService(
+            new com.aiprovider.quant.execution.ExecutionProfileRegistry()),
         mock(BacktestPersistenceService.class),
         new BacktestFailureService(runs),
         executor,
@@ -210,6 +212,9 @@ class BacktestRunRetryMySqlIT {
     request.setEndOpenTimeExclusive(Instant.ofEpochMilli(60_000));
     request.setStrategyCode("EMA_CROSS_LONG_ONLY");
     request.setStrategyVersion("1.0.0");
+    request.setExecutionProfileCode("USDM_PERPETUAL_LONG_ONLY_1X_V1");
+    request.setDirectionMode("LONG_ONLY");
+    request.setOrderSizingMode("BASE_QUANTITY");
     request.setStrategyParameters(Map.of("fastPeriod", 5, "slowPeriod", 20));
     request.setOrderAmount(BigDecimal.ONE);
     request.setFeeRate(new BigDecimal("0.001"));
@@ -284,6 +289,9 @@ class BacktestRunRetryMySqlIT {
       row.endOpenTimeExclusiveMs = request.getEndOpenTimeExclusive().toEpochMilli();
       row.strategyCode = request.getStrategyCode();
       row.strategyVersion = request.getStrategyVersion();
+      row.executionProfileCode = request.getExecutionProfileCode();
+      row.directionMode = request.getDirectionMode();
+      row.orderSizingMode = request.getOrderSizingMode();
       row.requestedParametersJson = "{\"fastPeriod\":5,\"slowPeriod\":20}";
       row.orderAmount = request.getOrderAmount();
       row.feeRate = request.getFeeRate();

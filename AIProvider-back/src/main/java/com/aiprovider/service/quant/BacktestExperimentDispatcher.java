@@ -187,6 +187,9 @@ public class BacktestExperimentDispatcher {
     request.setEndOpenTimeExclusive(Instant.ofEpochMilli(end));
     request.setStrategyCode(experiment.strategyCode);
     request.setStrategyVersion(experiment.strategyVersion);
+    request.setExecutionProfileCode(experiment.executionProfileCode);
+    request.setDirectionMode(experiment.directionMode);
+    request.setOrderSizingMode(experiment.orderSizingMode);
     try {
       request.setStrategyParameters(
           json.readValue(parameters, new TypeReference<LinkedHashMap<String, Integer>>() {}));

@@ -137,6 +137,9 @@ class QuantWalkForwardMySqlTest {
     row.intervalCode = "1m";
     row.strategyCode = "EMA_CROSS_LONG_ONLY";
     row.strategyVersion = "1.0.0";
+    row.executionProfileCode = "USDM_PERPETUAL_LONG_ONLY_1X_V1";
+    row.directionMode = "LONG_ONLY";
+    row.orderSizingMode = "BASE_QUANTITY";
     row.parameterGridJson = "{\"fastPeriod\":[5],\"slowPeriod\":[20]}";
     row.windowMode = "ROLLING";
     row.studyStartOpenTimeMs = 0;
@@ -200,6 +203,9 @@ class QuantWalkForwardMySqlTest {
       row.endOpenTimeExclusiveMs = 60000;
       row.strategyCode = "EMA_CROSS_LONG_ONLY";
       row.strategyVersion = "1.0.0";
+      row.executionProfileCode = "USDM_PERPETUAL_LONG_ONLY_1X_V1";
+      row.directionMode = "LONG_ONLY";
+      row.orderSizingMode = "BASE_QUANTITY";
       row.requestedParametersJson = "{\"fastPeriod\":5,\"slowPeriod\":20}";
       row.orderAmount = BigDecimal.ONE;
       row.feeRate = new BigDecimal("0.001");

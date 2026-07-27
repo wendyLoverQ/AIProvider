@@ -4,10 +4,14 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import javax.validation.constraints.NotBlank;
 
 public class WalkForwardStudyCreateRequest {
   private long datasetId;
   private String strategyCode, strategyVersion;
+  @NotBlank private String executionProfileCode;
+  @NotBlank private String directionMode;
+  @NotBlank private String orderSizingMode;
   private Map<String, List<Integer>> parameterGrid;
   private Instant studyStartOpenTimeInclusive, studyEndOpenTimeExclusive;
   private int trainingBars, validationBars, minimumTrainTrades;
@@ -38,6 +42,13 @@ public class WalkForwardStudyCreateRequest {
   public void setStrategyVersion(String v) {
     strategyVersion = v;
   }
+
+  public String getExecutionProfileCode() { return executionProfileCode; }
+  public void setExecutionProfileCode(String v) { executionProfileCode = v; }
+  public String getDirectionMode() { return directionMode; }
+  public void setDirectionMode(String v) { directionMode = v; }
+  public String getOrderSizingMode() { return orderSizingMode; }
+  public void setOrderSizingMode(String v) { orderSizingMode = v; }
 
   public Map<String, List<Integer>> getParameterGrid() {
     return parameterGrid;

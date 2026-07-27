@@ -7,6 +7,7 @@ public class WalkForwardStudyRow {
   public long id, datasetId;
   public String studyId, provider, marketType, dataType, symbol, intervalCode;
   public String strategyCode, strategyVersion, parameterGridJson, windowMode, selectionMetric;
+  public String executionProfileCode, directionMode, orderSizingMode;
   public int trainingBars,
       validationBars,
       stepBars,

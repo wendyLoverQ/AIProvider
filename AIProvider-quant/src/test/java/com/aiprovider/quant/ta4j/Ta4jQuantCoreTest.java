@@ -2,6 +2,7 @@ package com.aiprovider.quant.ta4j;
 
 import com.aiprovider.quant.backtest.BacktestEngine;
 import com.aiprovider.quant.backtest.BacktestRequest;
+import com.aiprovider.quant.execution.*;
 import com.aiprovider.quant.indicator.IndicatorEngine;
 import com.aiprovider.quant.indicator.IndicatorRequest;
 import com.aiprovider.quant.indicator.IndicatorType;
@@ -80,9 +81,9 @@ class Ta4jQuantCoreTest {
     @Test
     void backtestReturnsDeterministicSchemaAndForcedClose() {
         List<HistoricalCandle> candles = trendCandles(40, false);
-        var request = new BacktestRequest("EMA_CROSS_LONG_ONLY", "1.0.0",
+        var request = request("EMA_CROSS_LONG_ONLY", "1.0.0",
                 Map.of("fastPeriod", 2, "slowPeriod", 4), BigDecimal.ONE, new BigDecimal("0.001"), true);
-        var result = new BacktestEngine().run(request, "BTCUSDT", KlineInterval.M1, candles);
+        var result = new BacktestEngine().run(request, market(), candles);
         assertThat(result.getExecutionModel()).isEqualTo("TA4J_TRADE_ON_NEXT_OPEN");
         assertThat(result.getStrategyParameters()).containsExactlyInAnyOrderEntriesOf(Map.of("fastPeriod", 2, "slowPeriod", 4));
         assertThat(result.getTrades()).isNotEmpty();
@@ -93,6 +94,12 @@ class Ta4jQuantCoreTest {
         assertThat(forced.isForcedExit()).isTrue();
         assertThat(forced.getExitSignalIndex()).isNull();
         assertThat(forced.getExitReason()).isEqualTo("END_OF_SERIES");
+        assertThat(forced.getPositionSide()).isEqualTo(PositionSide.LONG);
+        assertThat(forced.getEntryOrderSide()).isEqualTo(OrderSide.BUY);
+        assertThat(forced.getExitOrderSide()).isEqualTo(OrderSide.SELL);
+        assertThat(result.getWarnings())
+                .contains("不计算资金费率", "不计算保证金占用", "不计算强平", "不模拟逐仓或全仓",
+                        "orderAmount 按基础资产数量解释");
         assertThat(forced.getExitTime()).isEqualTo(candles.get(candles.size() - 1).getCloseTime());
         assertThat(result.getEquityCurve()).hasSize(40);
         assertThat(result.getEquityCurve().get(0).equityRatio()).isEqualByComparingTo("1");
@@ -119,8 +126,8 @@ class Ta4jQuantCoreTest {
 
     @Test
     void noTradeCurveRemainsFlat() {
-        var request = new BacktestRequest("EMA_CROSS_LONG_ONLY", "1.0.0", Map.of(), BigDecimal.ONE, BigDecimal.ZERO, true);
-        var result = new BacktestEngine().run(request, "BTCUSDT", KlineInterval.M1, candles(40));
+        var request = request("EMA_CROSS_LONG_ONLY", "1.0.0", Map.of(), BigDecimal.ONE, BigDecimal.ZERO, true);
+        var result = new BacktestEngine().run(request, market(), candles(40));
         assertThat(result.getTrades()).isEmpty();
         assertThat(result.getEquityCurve()).allSatisfy(point -> {
             assertThat(point.equityRatio()).isEqualByComparingTo("1");
@@ -131,8 +138,8 @@ class Ta4jQuantCoreTest {
     @Test
     void sameBarForcedCloseKeepsTradeAndFiniteCashFlow() {
         List<HistoricalCandle> input = sameBarSignalCandles(true);
-        var request = new BacktestRequest("EMA_CROSS_LONG_ONLY", "1.0.0", Map.of("fastPeriod", 2, "slowPeriod", 4), BigDecimal.ONE, new BigDecimal("0.001"), true);
-        var result = new BacktestEngine().run(request, "BTCUSDT", KlineInterval.M1, input);
+        var request = request("EMA_CROSS_LONG_ONLY", "1.0.0", Map.of("fastPeriod", 2, "slowPeriod", 4), BigDecimal.ONE, new BigDecimal("0.001"), true);
+        var result = new BacktestEngine().run(request, market(), input);
         assertThat(result.getTrades()).hasSize(1);
         var trade = result.getTrades().get(0);
         assertThat(trade.getEntrySignalIndex()).isEqualTo(input.size() - 2);
@@ -156,7 +163,7 @@ class Ta4jQuantCoreTest {
     @Test
     void sameBarLossWithoutFeeStillProducesFiniteDownwardEquity() {
         List<HistoricalCandle> input = sameBarSignalCandles(false);
-        var result = new BacktestEngine().run(new BacktestRequest("EMA_CROSS_LONG_ONLY", "1.0.0", Map.of("fastPeriod", 2, "slowPeriod", 4), BigDecimal.ONE, BigDecimal.ZERO, true), "BTCUSDT", KlineInterval.M1, input);
+        var result = new BacktestEngine().run(request("EMA_CROSS_LONG_ONLY", "1.0.0", Map.of("fastPeriod", 2, "slowPeriod", 4), BigDecimal.ONE, BigDecimal.ZERO, true), market(), input);
         assertThat(result.getTrades()).hasSize(1);
         assertThat(result.getTrades().get(0).getNetProfit()).isNegative();
         assertThat(result.getMetrics().getTotalFees()).isZero();
@@ -167,8 +174,8 @@ class Ta4jQuantCoreTest {
     @Test
     void feesReduceNetAndReturnButDoNotChangeGross() {
         List<HistoricalCandle> candles = trendCandles(40, false);
-        var noFee = new BacktestEngine().run(new BacktestRequest("EMA_CROSS_LONG_ONLY", "1.0.0", Map.of("fastPeriod", 2, "slowPeriod", 4), BigDecimal.ONE, BigDecimal.ZERO, true), "BTCUSDT", KlineInterval.M1, candles);
-        var withFee = new BacktestEngine().run(new BacktestRequest("EMA_CROSS_LONG_ONLY", "1.0.0", Map.of("fastPeriod", 2, "slowPeriod", 4), BigDecimal.ONE, new BigDecimal("0.001"), true), "BTCUSDT", KlineInterval.M1, candles);
+        var noFee = new BacktestEngine().run(request("EMA_CROSS_LONG_ONLY", "1.0.0", Map.of("fastPeriod", 2, "slowPeriod", 4), BigDecimal.ONE, BigDecimal.ZERO, true), market(), candles);
+        var withFee = new BacktestEngine().run(request("EMA_CROSS_LONG_ONLY", "1.0.0", Map.of("fastPeriod", 2, "slowPeriod", 4), BigDecimal.ONE, new BigDecimal("0.001"), true), market(), candles);
         assertThat(withFee.getTrades()).hasSameSizeAs(noFee.getTrades());
         assertThat(withFee.getMetrics().getTotalFees()).isGreaterThan(BigDecimal.ZERO);
         assertThat(withFee.getMetrics().getNetProfit()).isLessThan(noFee.getMetrics().getNetProfit());
@@ -176,6 +183,30 @@ class Ta4jQuantCoreTest {
         for (int i = 0; i < noFee.getTrades().size(); i++) {
             assertThat(withFee.getTrades().get(i).getGrossProfit()).isEqualByComparingTo(noFee.getTrades().get(i).getGrossProfit());
         }
+    }
+
+    private BacktestRequest request(String code, String version, Map<String, Integer> parameters,
+                                    BigDecimal amount, BigDecimal feeRate, boolean forceClose) {
+        return new BacktestRequest(
+                ExecutionProfileCode.USDM_PERPETUAL_LONG_ONLY_1X_V1,
+                DirectionMode.LONG_ONLY,
+                OrderSizingMode.BASE_QUANTITY,
+                code,
+                version,
+                parameters,
+                amount,
+                feeRate,
+                forceClose);
+    }
+
+    private BacktestMarketContext market() {
+        return new BacktestMarketContext(
+                MarketProviderId.BINANCE_USDM.name(),
+                MarketType.USDM_PERPETUAL,
+                "KLINE",
+                "BTCUSDT",
+                KlineInterval.M1,
+                java.util.Set.of(MarketFeature.OHLCV));
     }
 
     private List<HistoricalCandle> candles(int count) {

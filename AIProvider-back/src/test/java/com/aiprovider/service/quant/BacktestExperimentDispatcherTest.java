@@ -284,6 +284,9 @@ class BacktestExperimentDispatcherTest {
     row.datasetId = 1;
     row.strategyCode = "EMA_CROSS_LONG_ONLY";
     row.strategyVersion = "1.0.0";
+    row.executionProfileCode = "USDM_PERPETUAL_LONG_ONLY_1X_V1";
+    row.directionMode = "LONG_ONLY";
+    row.orderSizingMode = "BASE_QUANTITY";
     row.trainingStartOpenTimeMs = 0;
     row.trainingEndOpenTimeMs = 60000;
     row.validationStartOpenTimeMs = 60000;

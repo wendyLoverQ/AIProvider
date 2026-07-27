@@ -4,6 +4,7 @@ import com.aiprovider.controller.quant.dto.*;
 import com.aiprovider.mapper.*;
 import com.aiprovider.mapper.row.*;
 import com.aiprovider.quant.backtest.*;
+import com.aiprovider.quant.execution.*;
 import com.aiprovider.quant.market.history.model.MarketDataSnapshot;
 import com.aiprovider.quant.market.history.port.MarketDatasetRepository;
 import com.aiprovider.quant.market.history.service.MarketDataSnapshotException;
@@ -30,6 +31,7 @@ public class BacktestRunService {
   private final MarketDataSnapshotService snapshots;
   private final BacktestEngine engine;
   private final StrategyRegistry strategies;
+  private final BacktestCompatibilityService compatibility;
   private final BacktestPersistenceService persistence;
   private final BacktestFailureService failures;
   private final ThreadPoolExecutor executor;
@@ -43,6 +45,7 @@ public class BacktestRunService {
       MarketDataSnapshotService s,
       BacktestEngine b,
       StrategyRegistry g,
+      BacktestCompatibilityService compatibility,
       BacktestPersistenceService p,
       BacktestFailureService f,
       @Qualifier("quantBacktestExecutor") ThreadPoolExecutor x,
@@ -54,6 +57,7 @@ public class BacktestRunService {
     snapshots = s;
     engine = b;
     strategies = g;
+    this.compatibility = compatibility;
     persistence = p;
     failures = f;
     executor = x;
@@ -74,6 +78,15 @@ public class BacktestRunService {
     String code = q.getStrategyCode().trim(), version = q.getStrategyVersion().trim();
     Map<String, Integer> params =
         q.getStrategyParameters() == null ? Map.of() : Map.copyOf(q.getStrategyParameters());
+    BacktestRunRow existing = runs.findByRunId(id);
+    if (existing != null) {
+      if (!sameRequest(existing, q, code, version, params))
+        throw error("BACKTEST_RUN_ID_CONFLICT", "runId already belongs to a different request");
+      if (isQueueRejected(existing)) {
+        retryQueueRejectedRun(id, q, code, version, params);
+      }
+      return id;
+    }
     var dataset = datasets.findById(q.getDatasetId());
     if (dataset == null)
       throw error("BACKTEST_DATASET_NOT_FOUND", "datasetId=" + q.getDatasetId() + " not found");
@@ -83,18 +96,17 @@ public class BacktestRunService {
           "BACKTEST_STRATEGY_VERSION_NOT_SUPPORTED",
           "strategyCode=" + code + " version=" + version);
     try {
-      def.minimumRequiredBars(params);
-    } catch (StrategyException e) {
+      compatibility.validate(
+          q.getExecutionProfileCode(),
+          q.getDirectionMode(),
+          q.getOrderSizingMode(),
+          def,
+          marketContext(dataset),
+          params,
+          q.getOrderAmount(),
+          q.getFeeRate());
+    } catch (BacktestException e) {
       throw error(e.getErrorCode(), e.getMessage());
-    }
-    BacktestRunRow existing = runs.findByRunId(id);
-    if (existing != null) {
-      if (!sameRequest(existing, q, code, version, params))
-        throw error("BACKTEST_RUN_ID_CONFLICT", "runId already belongs to a different request");
-      if (isQueueRejected(existing)) {
-        retryQueueRejectedRun(id, q, code, version, params);
-      }
-      return id;
     }
     BacktestRunRow row = new BacktestRunRow();
     row.runId = id;
@@ -108,6 +120,9 @@ public class BacktestRunService {
     row.endOpenTimeExclusiveMs = q.getEndOpenTimeExclusive().toEpochMilli();
     row.strategyCode = code;
     row.strategyVersion = version;
+    row.executionProfileCode = q.getExecutionProfileCode();
+    row.directionMode = q.getDirectionMode();
+    row.orderSizingMode = q.getOrderSizingMode();
     row.requestedParametersJson = write(params);
     row.orderAmount = q.getOrderAmount();
     row.feeRate = q.getFeeRate();
@@ -140,6 +155,9 @@ public class BacktestRunService {
             q.getEndOpenTimeExclusive(),
             code,
             version,
+            ExecutionProfileCode.valueOf(q.getExecutionProfileCode()),
+            DirectionMode.valueOf(q.getDirectionMode()),
+            OrderSizingMode.valueOf(q.getOrderSizingMode()),
             params,
             q.getOrderAmount(),
             q.getFeeRate(),
@@ -169,6 +187,9 @@ public class BacktestRunService {
               q.getEndOpenTimeExclusive(),
               code,
               version,
+              ExecutionProfileCode.valueOf(q.getExecutionProfileCode()),
+              DirectionMode.valueOf(q.getDirectionMode()),
+              OrderSizingMode.valueOf(q.getOrderSizingMode()),
               params,
               q.getOrderAmount(),
               q.getFeeRate(),
@@ -207,6 +228,9 @@ public class BacktestRunService {
         && existing.endOpenTimeExclusiveMs == q.getEndOpenTimeExclusive().toEpochMilli()
         && code.equals(existing.strategyCode)
         && version.equals(existing.strategyVersion)
+        && Objects.equals(q.getExecutionProfileCode(), existing.executionProfileCode)
+        && Objects.equals(q.getDirectionMode(), existing.directionMode)
+        && Objects.equals(q.getOrderSizingMode(), existing.orderSizingMode)
         && Objects.equals(read(existing.requestedParametersJson), params)
         && existing.orderAmount != null
         && existing.orderAmount.compareTo(q.getOrderAmount()) == 0
@@ -241,14 +265,16 @@ public class BacktestRunService {
       BacktestResult result =
           engine.run(
               new BacktestRequest(
+                  c.executionProfileCode(),
+                  c.directionMode(),
+                  c.orderSizingMode(),
                   c.strategyCode(),
                   c.strategyVersion(),
                   c.strategyParameters(),
                   c.orderAmount(),
                   c.feeRate(),
                   c.forceCloseAtEnd()),
-              s.getSymbol(),
-              s.getInterval(),
+              marketContext(s),
               s.getCandles());
       validateResult(c.runId(), s, result);
       cas(
@@ -319,7 +345,11 @@ public class BacktestRunService {
                             p ->
                                 new BacktestDtos.Parameter(
                                     p.name(), p.defaultValue(), p.minValue(), p.maxValue()))
-                        .toList()))
+                        .toList(),
+                    d.supportedMarketTypes().stream().map(Enum::name).sorted().toList(),
+                    d.supportedExecutionProfiles().stream().map(Enum::name).sorted().toList(),
+                    d.supportedDirectionModes().stream().map(Enum::name).sorted().toList(),
+                    d.requiredMarketFeatures().stream().map(Enum::name).sorted().toList()))
         .toList();
   }
 
@@ -469,6 +499,9 @@ public class BacktestRunService {
         Instant.ofEpochMilli(r.endOpenTimeExclusiveMs),
         r.strategyCode,
         r.strategyVersion,
+        r.executionProfileCode,
+        r.directionMode,
+        r.orderSizingMode,
         req,
         res,
         r.orderAmount,
@@ -508,7 +541,10 @@ public class BacktestRunService {
         r.returnRatio,
         r.barsHeld,
         r.forcedExit,
-        r.exitReason);
+        r.exitReason,
+        r.positionSide,
+        r.entryOrderSide,
+        r.exitOrderSide);
   }
 
   private BacktestDtos.EquityPoint point(BacktestEquityRow r) {
@@ -547,6 +583,9 @@ public class BacktestRunService {
               Instant.ofEpochMilli(row.endOpenTimeExclusiveMs),
               row.strategyCode,
               row.strategyVersion,
+              ExecutionProfileCode.valueOf(row.executionProfileCode),
+              DirectionMode.valueOf(row.directionMode),
+              OrderSizingMode.valueOf(row.orderSizingMode),
               read(row.requestedParametersJson),
               row.orderAmount,
               row.feeRate,
@@ -562,5 +601,32 @@ public class BacktestRunService {
         runId,
         "BACKTEST_INTERRUPTED_BY_RESTART",
         "previousStatus=" + previousStatus + " interrupted by application restart");
+  }
+
+  private BacktestMarketContext marketContext(
+      com.aiprovider.quant.market.history.model.MarketDataset dataset) {
+    return new BacktestMarketContext(
+        dataset.getProvider().name(),
+        dataset.getMarketType(),
+        dataset.getDataType().name(),
+        dataset.getSymbol(),
+        dataset.getInterval(),
+        dataset.getDataType()
+                == com.aiprovider.quant.market.history.model.MarketDataType.CANDLE
+            ? Set.of(MarketFeature.OHLCV)
+            : Set.of());
+  }
+
+  private BacktestMarketContext marketContext(MarketDataSnapshot snapshot) {
+    return new BacktestMarketContext(
+        snapshot.getProvider().name(),
+        snapshot.getMarketType(),
+        snapshot.getDataType().name(),
+        snapshot.getSymbol(),
+        snapshot.getInterval(),
+        snapshot.getDataType()
+                == com.aiprovider.quant.market.history.model.MarketDataType.CANDLE
+            ? Set.of(MarketFeature.OHLCV)
+            : Set.of());
   }
 }
