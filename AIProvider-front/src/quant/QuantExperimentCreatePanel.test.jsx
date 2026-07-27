@@ -13,6 +13,10 @@ const strategies = [{
   name: "RSI 均值回归",
   version: "1.0.0",
   minimumRequiredBars: 20,
+  supportedMarketTypes: ["USDM_PERPETUAL"],
+  supportedExecutionProfileCodes: ["USDM_PERPETUAL_LONG_ONLY_1X_V1"],
+  supportedDirectionModes: ["LONG_ONLY"],
+  requiredMarketFeatures: ["OHLCV"],
   parameters: [
     { name: "rsiPeriod", defaultValue: 14, minValue: 2, maxValue: 100 },
     { name: "entryThreshold", defaultValue: 30, minValue: 1, maxValue: 50 },
@@ -21,11 +25,29 @@ const strategies = [{
 
 const datasets = [{
   id: 1,
+  provider: "BINANCE",
+  marketType: "USDM_PERPETUAL",
+  dataType: "KLINE",
+  status: "CONTIGUOUS",
+  gapCount: 0,
+  gapSegmentCount: 0,
   symbol: "BTC/USDT",
   interval: "H1",
   candleCount: 100,
   earliestOpenTime: "2025-01-01T00:00:00Z",
   latestOpenTime: "2025-01-05T03:00:00Z",
+}];
+const executionProfiles = [{
+  code: "USDM_PERPETUAL_LONG_ONLY_1X_V1",
+  name: "USDT 本位永续·只做多·1× V1",
+  marketType: "USDM_PERPETUAL",
+  directionMode: "LONG_ONLY",
+  orderSizingMode: "BASE_QUANTITY",
+  entryOrderSide: "BUY",
+  exitOrderSide: "SELL",
+  positionSide: "LONG",
+  leverage: "1",
+  limitations: ["不计算资金费率"],
 }];
 
 function setup(props = {}) {
@@ -35,6 +57,7 @@ function setup(props = {}) {
     <QuantExperimentCreatePanel
       strategies={strategies}
       datasets={datasets}
+      executionProfiles={executionProfiles}
       onClose={onClose}
       onCreated={onCreated}
       {...props}
@@ -44,7 +67,7 @@ function setup(props = {}) {
 }
 
 function chooseRequiredValues() {
-  fireEvent.change(screen.getByRole("combobox", { name: "连续历史数据集" }), { target: { value: "1" } });
+  fireEvent.change(screen.getByRole("combobox", { name: "数据集 / 交易对" }), { target: { value: "1" } });
   fireEvent.change(screen.getByRole("combobox", { name: "策略" }), { target: { value: "RSI_MEAN_REVERSION_LONG_ONLY" } });
 }
 
@@ -101,7 +124,7 @@ describe("QuantExperimentCreatePanel", () => {
     chooseRequiredValues();
     fireEvent.change(screen.getByLabelText("rsiPeriod 候选值"), { target: { value: "7,14" } });
     fireEvent.click(screen.getByRole("button", { name: "按 70% / 30% 填充" }));
-    fireEvent.change(screen.getByLabelText("下单数量"), { target: { value: "1.000000000000000001" } });
+    fireEvent.change(screen.getByLabelText("基础资产数量"), { target: { value: "1.000000000000000001" } });
     fireEvent.change(screen.getByLabelText("手续费比例"), { target: { value: "0.001000000000000001" } });
     const submit = screen.getByRole("button", { name: "创建异步实验" });
     fireEvent.click(submit);
@@ -113,6 +136,9 @@ describe("QuantExperimentCreatePanel", () => {
       datasetId: 1,
       strategyCode: "RSI_MEAN_REVERSION_LONG_ONLY",
       strategyVersion: "1.0.0",
+      executionProfileCode: "USDM_PERPETUAL_LONG_ONLY_1X_V1",
+      directionMode: "LONG_ONLY",
+      orderSizingMode: "BASE_QUANTITY",
       parameterGrid: { rsiPeriod: [7, 14], entryThreshold: [30] },
       trainingStartOpenTimeInclusive: new Date(screen.getByLabelText("TRAIN 开始").value).toISOString(),
       trainingEndOpenTimeExclusive: new Date(screen.getByLabelText("TRAIN 结束（不包含）").value).toISOString(),

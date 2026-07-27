@@ -20,6 +20,7 @@ import {
 import {
   fetchDatasets,
   fetchEquity,
+  fetchExecutionProfiles,
   fetchNonTerminalRuns,
   fetchRunDetail,
   fetchRuns,
@@ -88,6 +89,7 @@ export default function QuantSingleBacktests() {
   );
   const [strategies, setStrategies] = useState([]);
   const [datasets, setDatasets] = useState([]);
+  const [executionProfiles, setExecutionProfiles] = useState([]);
   const [invalidDatasetCount, setInvalidDatasetCount] = useState(0);
   const [runs, setRuns] = useState([]);
   const [runPage, setRunPage] = useState(1);
@@ -107,6 +109,7 @@ export default function QuantSingleBacktests() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [creating, setCreating] = useState(false);
   const listAbortRef = useRef(null);
   const detailAbortRef = useRef(null);
   const equityAbortRef = useRef(null);
@@ -119,9 +122,10 @@ export default function QuantSingleBacktests() {
   const createButtonRef = useRef(null);
 
   const closeCreatePanel = useCallback(() => {
+    if (creating) return;
     setShowCreate(false);
     requestAnimationFrame(() => createButtonRef.current?.focus());
-  }, []);
+  }, [creating]);
 
   const selectRun = useCallback((runId, { replace = false } = {}) => {
     setSelectedId(runId || null);
@@ -148,12 +152,14 @@ export default function QuantSingleBacktests() {
         ...value,
         strategies: "",
         datasets: "",
+        profiles: "",
         runs: "",
       }));
-      const [strategyResult, datasetResult, runResult] =
+      const [strategyResult, datasetResult, profileResult, runResult] =
         await Promise.allSettled([
           fetchStrategies(requestSignal),
           fetchDatasets(requestSignal),
+          fetchExecutionProfiles(requestSignal),
           fetchRuns(page, runPageSize, requestSignal),
         ]);
       if (current !== sequence.current.list) return;
@@ -176,6 +182,14 @@ export default function QuantSingleBacktests() {
         setErrors((value) => ({
           ...value,
           datasets: datasetResult.reason.message,
+        }));
+      if (profileResult.status === "fulfilled") {
+        setExecutionProfiles(profileResult.value);
+        setErrors((value) => ({ ...value, profiles: "" }));
+      } else if (profileResult.reason?.name !== "AbortError")
+        setErrors((value) => ({
+          ...value,
+          profiles: profileResult.reason.message,
         }));
       if (runResult.status === "fulfilled") {
         setRuns(runResult.value.records);
@@ -457,6 +471,11 @@ export default function QuantSingleBacktests() {
           数据集不可用：{errors.datasets}
         </div>
       )}
+      {errors.profiles && (
+        <div className="backtest-notice" role="alert">
+          执行模型不可用：{errors.profiles}
+        </div>
+      )}
       {invalidDatasetCount > 0 && (
         <div className="backtest-notice" role="alert">
           已隐藏 {invalidDatasetCount} 个不满足连续性或校验条件的数据集
@@ -551,6 +570,9 @@ export default function QuantSingleBacktests() {
               equity={equity}
               equityError={equityError}
               retryEquity={() => loadEquity(displayRun?.runId)}
+              executionProfile={executionProfiles.find(
+                (item) => item.code === displayRun?.executionProfileCode,
+              )}
             />
             <QuantSingleBacktestTrades
               run={displayRun}
@@ -575,8 +597,10 @@ export default function QuantSingleBacktests() {
           <QuantSingleBacktestCreatePanel
             strategies={strategies}
             datasets={datasets}
+            executionProfiles={executionProfiles}
             initialStrategyCode={initialStrategyCode}
             onClose={closeCreatePanel}
+            onSavingChange={setCreating}
             onCreated={async (run) => {
               selectRun(run.runId);
               await refresh();

@@ -4,7 +4,6 @@ import {
   calculateExpectedBars,
   compareDecimalStrings,
   formatInstant,
-  intervalCode,
   intervalDurationMs,
   isPositiveDecimal,
   normalizeDecimalString,
@@ -12,27 +11,33 @@ import {
   utcInstantToLocalInput,
 } from "./quantBacktestsFormat";
 import { createBacktestRun } from "./quantBacktestsApi";
+import QuantExecutionContextFields from "./QuantExecutionContextFields";
+import {
+  executionContextPayload,
+  validateExecutionSelection,
+} from "./quantExecutionContext";
 
 export default function QuantSingleBacktestCreatePanel({
   strategies,
   datasets,
+  executionProfiles = [],
   initialStrategyCode = "",
   onClose,
   onCreated,
+  onSavingChange = () => {},
 }) {
-  const initialStrategy = strategies.find(
-    (item) => item.code === initialStrategyCode,
-  );
-  const [datasetId, setDatasetId] = useState("");
-  const [strategyCode, setStrategyCode] = useState(initialStrategy?.code || "");
+  const [executionContext, setExecutionContext] = useState({
+    marketType: "",
+    datasetId: "",
+    strategyCode: "",
+    executionProfileCode: "",
+  });
+  const [contextErrors, setContextErrors] = useState({});
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [params, setParams] = useState(() =>
     Object.fromEntries(
-      (initialStrategy?.parameters || []).map((parameter) => [
-        parameter.name,
-        String(parameter.defaultValue),
-      ]),
+      [],
     ),
   );
   const [orderAmount, setOrderAmount] = useState("1");
@@ -40,10 +45,14 @@ export default function QuantSingleBacktestCreatePanel({
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
+  const requestRef = useRef(null);
+  const mountedRef = useRef(true);
   const dataset = datasets.find(
-    (item) => String(item.id) === String(datasetId),
+    (item) => String(item.id) === String(executionContext.datasetId),
   );
-  const strategy = strategies.find((item) => item.code === strategyCode);
+  const strategy = strategies.find(
+    (item) => item.code === executionContext.strategyCode,
+  );
 
   useEffect(() => {
     const close = (event) => {
@@ -54,50 +63,65 @@ export default function QuantSingleBacktestCreatePanel({
   }, [onClose]);
 
   useEffect(() => {
-    if (!initialStrategyCode) return;
-    const selected = strategies.find(
-      (item) => item.code === initialStrategyCode,
-    );
-    setStrategyCode(selected?.code || "");
+    if (!strategy) {
+      setParams({});
+      return;
+    }
     setParams(
       Object.fromEntries(
-        (selected?.parameters || []).map((parameter) => [
+        (strategy.parameters || []).map((parameter) => [
           parameter.name,
           String(parameter.defaultValue),
         ]),
       ),
     );
-  }, [initialStrategyCode, strategies]);
+  }, [strategy]);
 
-  const selectDataset = (value) => {
-    const selected = datasets.find((item) => String(item.id) === String(value));
-    setDatasetId(value);
-    if (!selected) return;
-    const duration = intervalDurationMs(selected.interval);
-    setStart(utcInstantToLocalInput(selected.earliestOpenTime));
+  useEffect(() => {
+    if (!dataset) return;
+    const duration = intervalDurationMs(dataset.interval);
+    setStart(utcInstantToLocalInput(dataset.earliestOpenTime));
     setEnd(
       duration
         ? utcInstantToLocalInput(
             new Date(
-              new Date(selected.latestOpenTime).getTime() + duration,
+              new Date(dataset.latestOpenTime).getTime() + duration,
             ).toISOString(),
           )
         : "",
     );
-  };
+  }, [dataset]);
 
-  const selectStrategy = (value) => {
-    const selected = strategies.find((item) => item.code === value);
-    setStrategyCode(value);
-    setParams(
-      Object.fromEntries(
-        (selected?.parameters || []).map((parameter) => [
-          parameter.name,
-          String(parameter.defaultValue),
-        ]),
-      ),
-    );
-  };
+  useEffect(() => {
+    if (
+      !initialStrategyCode ||
+      !dataset ||
+      executionContext.strategyCode ||
+      !strategies.some(
+        (item) =>
+          item.code === initialStrategyCode &&
+          item.supportedMarketTypes.includes(dataset.marketType),
+      )
+    )
+      return;
+    setExecutionContext((current) => ({
+      ...current,
+      strategyCode: initialStrategyCode,
+    }));
+  }, [
+    dataset,
+    executionContext.strategyCode,
+    initialStrategyCode,
+    strategies,
+  ]);
+
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+      requestRef.current?.abort();
+    },
+    [],
+  );
 
   const expectedBars = dataset
     ? calculateExpectedBars(toUtcIso(start), toUtcIso(end), dataset.interval)
@@ -107,6 +131,13 @@ export default function QuantSingleBacktestCreatePanel({
     event.preventDefault();
     if (savingRef.current) return;
     setError("");
+    const contextResult = validateExecutionSelection({
+      datasets,
+      strategies,
+      profiles: executionProfiles,
+      value: executionContext,
+    });
+    setContextErrors(contextResult.errors);
     const normalizedOrderAmount = normalizeDecimalString(orderAmount, {
       maxIntegerDigits: 20,
       maxFractionDigits: 18,
@@ -123,8 +154,8 @@ export default function QuantSingleBacktestCreatePanel({
         Number(params[parameter.name]) < parameter.minValue ||
         Number(params[parameter.name]) > parameter.maxValue,
     );
-    if (!dataset || !strategy || !startIso || !endIso)
-      return setError("请完整选择数据集、策略和时间范围");
+    if (!contextResult.valid || !startIso || !endIso)
+      return setError("请完整选择兼容的市场、数据集、策略、执行模型和时间范围");
     const duration = intervalDurationMs(dataset.interval);
     if (!duration) return setError("当前周期暂不支持前端时间计算");
     if (
@@ -159,7 +190,10 @@ export default function QuantSingleBacktestCreatePanel({
       return setError("手续费必须是 0～0.01、最多 18 位小数的十进制字符串");
 
     savingRef.current = true;
+    const controller = new AbortController();
+    requestRef.current = controller;
     setSaving(true);
+    onSavingChange(true);
     try {
       const run = await createBacktestRun({
         datasetId: Number(dataset.id),
@@ -167,25 +201,36 @@ export default function QuantSingleBacktestCreatePanel({
         endOpenTimeExclusive: endIso,
         strategyCode: strategy.code,
         strategyVersion: strategy.version,
+        ...executionContextPayload(contextResult.profile),
         orderAmount: normalizedOrderAmount,
         feeRate: normalizedFeeRate,
         strategyParameters: Object.fromEntries(
           Object.entries(params).map(([key, value]) => [key, Number(value)]),
         ),
         forceCloseAtEnd: true,
-      });
+      }, controller.signal);
+      if (!mountedRef.current || controller.signal.aborted) return;
       await onCreated(run);
+      if (!mountedRef.current || controller.signal.aborted) return;
       onClose();
     } catch (exception) {
-      setError(exception.message || "创建回测失败");
+      if (exception.name !== "AbortError" && !controller.signal.aborted)
+        setError(exception.message || "创建回测失败");
     } finally {
       savingRef.current = false;
-      setSaving(false);
+      if (requestRef.current === controller) requestRef.current = null;
+      if (mountedRef.current) {
+        setSaving(false);
+        onSavingChange(false);
+      }
     }
   };
 
   const requestedStrategyUnavailable =
-    initialStrategyCode && strategies.length > 0 && !strategy;
+    initialStrategyCode &&
+    strategies.length > 0 &&
+    (!strategies.some((item) => item.code === initialStrategyCode) ||
+      (dataset && !strategy));
 
   return (
     <aside
@@ -209,44 +254,25 @@ export default function QuantSingleBacktestCreatePanel({
         </button>
       </div>
       <form onSubmit={submit}>
-        <label>
-          连续历史数据集
-          <select
-            autoFocus
-            aria-label="连续历史数据集"
-            value={datasetId}
-            onChange={(event) => selectDataset(event.target.value)}
-          >
-            <option value="">请选择已校验数据集</option>
-            {datasets.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.symbol} · {intervalCode(item.interval)} ·{" "}
-                {Number(item.candleCount).toLocaleString()} 根
-              </option>
-            ))}
-          </select>
-        </label>
+        <QuantExecutionContextFields
+          autoFocus
+          datasets={datasets}
+          strategies={strategies}
+          executionProfiles={executionProfiles}
+          value={executionContext}
+          onChange={(next) => {
+            setExecutionContext(next);
+            setContextErrors({});
+          }}
+          disabled={saving}
+          errors={contextErrors}
+        />
         {dataset && (
           <p className="backtest-help">
             {formatInstant(dataset.earliestOpenTime)} ～{" "}
             {formatInstant(dataset.latestOpenTime)} · 已校验 · 结束时间不包含
           </p>
         )}
-        <label>
-          策略
-          <select
-            aria-label="策略"
-            value={strategyCode}
-            onChange={(event) => selectStrategy(event.target.value)}
-          >
-            <option value="">请选择策略</option>
-            {strategies.map((item) => (
-              <option key={item.code} value={item.code}>
-                {item.name} · {item.version}
-              </option>
-            ))}
-          </select>
-        </label>
         {requestedStrategyUnavailable && (
           <p className="strategy-unavailable" role="alert">
             指定策略当前不可用
@@ -297,13 +323,17 @@ export default function QuantSingleBacktestCreatePanel({
         </div>
         <div className="backtest-form-grid">
           <label>
-            下单数量
+            基础资产数量
             <input
-              aria-label="下单数量"
+              aria-label="基础资产数量"
               inputMode="decimal"
               value={orderAmount}
               onChange={(event) => setOrderAmount(event.target.value)}
             />
+            <small>
+              按交易对的基础资产数量解释，不是 USDT 金额。例如 BTCUSDT 填
+              0.01，表示 0.01 BTC 名义数量。
+            </small>
           </label>
           <label>
             手续费比例
@@ -330,7 +360,12 @@ export default function QuantSingleBacktestCreatePanel({
         <button
           className="quant-primary-action"
           type="submit"
-          disabled={saving || !strategies.length || !datasets.length}
+          disabled={
+            saving ||
+            !strategies.length ||
+            !datasets.length ||
+            !executionProfiles.length
+          }
         >
           {saving ? "正在创建" : "创建异步回测"}
         </button>

@@ -4,6 +4,10 @@ import {
   formatInstant,
   formatRatioString,
 } from "./quantBacktestsFormat";
+import {
+  formatOrderSide,
+  formatPositionSide,
+} from "./quantExecutionContext";
 
 function LoadState({ label }) {
   return (
@@ -61,6 +65,9 @@ export default function QuantSingleBacktestTrades({
                 <tr>
                   {[
                     "编号",
+                    "持仓",
+                    "开仓",
+                    "平仓",
                     "入场时间",
                     "入场价",
                     "退出时间",
@@ -79,6 +86,9 @@ export default function QuantSingleBacktestTrades({
                 {(data?.records || []).map((trade) => (
                   <tr key={trade.tradeNo}>
                     <td>{trade.tradeNo}</td>
+                    <td>{formatPositionSide(trade.positionSide)}</td>
+                    <td>{formatOrderSide(trade.entryOrderSide)}</td>
+                    <td>{formatOrderSide(trade.exitOrderSide)}</td>
                     <td>{formatInstant(trade.entryTime)}</td>
                     <td>{formatDecimalString(trade.entryPrice)}</td>
                     <td>{formatInstant(trade.exitTime)}</td>
@@ -96,7 +106,7 @@ export default function QuantSingleBacktestTrades({
                 ))}
                 {!(data?.records || []).length && (
                   <tr>
-                    <td colSpan="10" className="backtest-empty">
+                    <td colSpan="13" className="backtest-empty">
                       已完成但没有交易
                     </td>
                   </tr>

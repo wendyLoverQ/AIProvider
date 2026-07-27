@@ -40,6 +40,9 @@ const METRICS = [
   "buyAndHoldReturnRatio",
   "averageTradeReturnRatio",
 ];
+const EXECUTION_PROFILE_CODES = new Set(["USDM_PERPETUAL_LONG_ONLY_1X_V1"]);
+const DIRECTION_MODES = new Set(["LONG_ONLY"]);
+const ORDER_SIZING_MODES = new Set(["BASE_QUANTITY"]);
 
 function fail(message) { throw new Error(message); }
 function object(value, message) {
@@ -99,6 +102,7 @@ function validateSummary(value) {
   string(required(summary.studyId, "Study 缺少 studyId"), "Study 缺少 studyId");
   safeInt(required(summary.datasetId, "Study 缺少 datasetId"), "Study datasetId 格式异常", { positive: true });
   ["provider", "marketType", "dataType", "symbol", "intervalCode", "strategyCode", "strategyVersion"].forEach((key) => string(required(summary[key], `Study 缺少 ${key}`), `Study ${key} 格式异常`));
+  if (!EXECUTION_PROFILE_CODES.has(summary.executionProfileCode) || !DIRECTION_MODES.has(summary.directionMode) || !ORDER_SIZING_MODES.has(summary.orderSizingMode)) fail("Study 执行上下文格式异常");
   if (summary.windowMode !== "ROLLING") fail("Study windowMode 必须为 ROLLING");
   parseIntegerArrayObject(summary.parameterGrid, "Study parameterGrid 格式异常");
   ["studyStartOpenTimeInclusive", "studyEndOpenTimeExclusive"].forEach((key) => instant(required(summary[key], `Study 缺少 ${key}`), `Study ${key} 格式异常`));

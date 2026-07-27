@@ -3,10 +3,15 @@ import {
   formatExperimentStatus,
   orderedParameterEntries,
 } from "./quantExperimentsFormat";
+import {
+  formatDirectionMode,
+  formatOrderSizingMode,
+} from "./quantExecutionContext";
 
 export default function QuantExperimentDetail({
   experiment,
   strategy,
+  executionProfile,
   loading,
   error,
   onRetry,
@@ -46,6 +51,18 @@ export default function QuantExperimentDetail({
     <section className="backtest-card quant-experiment-detail">
       <header className="quant-section-head">
         <div>
+          <dt>执行模型</dt>
+          <dd>{executionProfile?.name || experiment.executionProfileCode}</dd>
+        </div>
+        <div>
+          <dt>方向</dt>
+          <dd>{formatDirectionMode(experiment.directionMode)}</dd>
+        </div>
+        <div>
+          <dt>规模模式</dt>
+          <dd>{formatOrderSizingMode(experiment.orderSizingMode)}</dd>
+        </div>
+        <div>
           <h4>实验详情</h4>
           <small className="copyable-id">{experiment.experimentId}</small>
         </div>
@@ -78,7 +95,7 @@ export default function QuantExperimentDetail({
           </dd>
         </div>
         <div>
-          <dt>下单数量 / 手续费</dt>
+          <dt>基础资产数量 / 手续费</dt>
           <dd>
             {experiment.orderAmount ?? "—"} / {experiment.feeRate ?? "—"}
           </dd>

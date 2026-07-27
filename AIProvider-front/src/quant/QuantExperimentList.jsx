@@ -5,6 +5,10 @@ import {
   EXPERIMENT_STATUS_LABELS,
   formatExperimentStatus,
 } from "./quantExperimentsFormat";
+import {
+  formatDirectionMode,
+  formatOrderSizingMode,
+} from "./quantExecutionContext";
 
 export default function QuantExperimentList({
   page,
@@ -79,6 +83,11 @@ export default function QuantExperimentList({
             <span>
               {experiment.strategyCode || "—"} ·{" "}
               {experiment.strategyVersion || "—"}
+            </span>
+            <span>
+              {experiment.executionProfileCode || "—"} ·{" "}
+              {formatDirectionMode(experiment.directionMode)} ·{" "}
+              {formatOrderSizingMode(experiment.orderSizingMode)}
             </span>
             <span>
               候选 {experiment.candidateCount} · 完成{" "}

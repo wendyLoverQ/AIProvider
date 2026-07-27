@@ -16,12 +16,19 @@ const strategy = {
   name: "RSI 反转",
   version: "1.0.0",
   minimumRequiredBars: 1,
+  supportedMarketTypes: ["USDM_PERPETUAL"],
+  supportedExecutionProfileCodes: ["USDM_PERPETUAL_LONG_ONLY_1X_V1"],
+  supportedDirectionModes: ["LONG_ONLY"],
+  requiredMarketFeatures: ["OHLCV"],
   parameters: [
     { name: "period", defaultValue: 14, minValue: 2, maxValue: 100 },
   ],
 };
 const dataset = {
   id: 1,
+  provider: "BINANCE",
+  marketType: "USDM_PERPETUAL",
+  dataType: "KLINE",
   status: "CONTIGUOUS",
   gapCount: 0,
   gapSegmentCount: 0,
@@ -32,13 +39,38 @@ const dataset = {
   symbol: "BTC/USDT",
   interval: "H1",
 };
+const executionContext = {
+  executionProfileCode: "USDM_PERPETUAL_LONG_ONLY_1X_V1",
+  directionMode: "LONG_ONLY",
+  orderSizingMode: "BASE_QUANTITY",
+};
+const executionProfile = {
+  code: "USDM_PERPETUAL_LONG_ONLY_1X_V1",
+  name: "USDT 本位永续·只做多·1× V1",
+  description: "USDT 本位永续只做多 1× 执行模型",
+  marketType: "USDM_PERPETUAL",
+  directionMode: "LONG_ONLY",
+  orderSizingMode: "BASE_QUANTITY",
+  entryOrderSide: "BUY",
+  exitOrderSide: "SELL",
+  positionSide: "LONG",
+  leverage: "1",
+  fillModel: "TA4J_TRADE_ON_NEXT_OPEN",
+  transactionCostModel: "LINEAR_FEE_RATE",
+  holdingCostModel: "ZERO",
+  fundingCostModel: "ZERO_NOT_MODELED",
+  liquidationModel: "NONE_NOT_MODELED",
+  marginModel: "NONE_NOT_MODELED",
+  requiredMarketFeatures: ["OHLCV"],
+  limitations: ["不计算资金费率"],
+};
 const result = (data) => ({
   ok: true,
   status: 200,
   json: async () => ({ code: 200, data }),
 });
 
-const walkForwardSummary = { studyId: "wf-1", datasetId: 7, provider: "BINANCE", marketType: "SPOT", dataType: "KLINE", symbol: "BTCUSDT", intervalCode: "1h", strategyCode: "s", strategyVersion: "1", parameterGrid: { fast: [5, 7] }, windowMode: "ROLLING", studyStartOpenTimeInclusive: "2024-01-01T00:00:00Z", studyEndOpenTimeExclusive: "2024-01-10T00:00:00Z", trainingBars: 48, validationBars: 24, stepBars: 24, foldCount: 2, candidateCountPerFold: 2, totalChildRuns: 8, selectionMetric: "TRAIN_TOTAL_RETURN_RATIO", minimumTrainTrades: 10, orderAmount: "1", feeRate: "0.001", forceCloseAtEnd: true, status: "COMPLETED_WITH_FAILURES", progressPercent: 100, pendingFolds: 0, activeFolds: 0, completedFolds: 1, failedFolds: 1, selectedParameterChanges: 0, successfulOosFolds: 1, totalOosTradeCount: 1, totalOosFees: "0", totalOosReturnRatio: "0", hasOosGaps: true, errorCode: null, errorMessage: null, createdAt: "2024-01-01T00:00:00Z", startedAt: "2024-01-01T00:00:00Z", finishedAt: "2024-01-10T00:00:00Z", updatedAt: "2024-01-10T00:00:00Z" };
+const walkForwardSummary = { studyId: "wf-1", datasetId: 7, provider: "BINANCE", marketType: "USDM_PERPETUAL", dataType: "KLINE", symbol: "BTCUSDT", intervalCode: "1h", strategyCode: "s", strategyVersion: "1", ...executionContext, parameterGrid: { fast: [5, 7] }, windowMode: "ROLLING", studyStartOpenTimeInclusive: "2024-01-01T00:00:00Z", studyEndOpenTimeExclusive: "2024-01-10T00:00:00Z", trainingBars: 48, validationBars: 24, stepBars: 24, foldCount: 2, candidateCountPerFold: 2, totalChildRuns: 8, selectionMetric: "TRAIN_TOTAL_RETURN_RATIO", minimumTrainTrades: 10, orderAmount: "1", feeRate: "0.001", forceCloseAtEnd: true, status: "COMPLETED_WITH_FAILURES", progressPercent: 100, pendingFolds: 0, activeFolds: 0, completedFolds: 1, failedFolds: 1, selectedParameterChanges: 0, successfulOosFolds: 1, totalOosTradeCount: 1, totalOosFees: "0", totalOosReturnRatio: "0", hasOosGaps: true, errorCode: null, errorMessage: null, createdAt: "2024-01-01T00:00:00Z", startedAt: "2024-01-01T00:00:00Z", finishedAt: "2024-01-10T00:00:00Z", updatedAt: "2024-01-10T00:00:00Z" };
 const walkForwardMetrics = { totalReturnRatio: "0", maximumDrawdownRatio: "0", profitFactor: "1", netProfit: "0", winRate: "0", totalFees: "0", buyAndHoldReturnRatio: "0", averageTradeReturnRatio: "0", tradeCount: 0 };
 const walkForwardFold = (foldId, status, progressPercent) => ({ foldId, foldIndex: foldId === "fold-a" ? 0 : 1, trainingStartOpenTimeInclusive: "2024-01-01T00:00:00Z", trainingEndOpenTimeExclusive: "2024-01-03T00:00:00Z", validationStartOpenTimeInclusive: "2024-01-03T00:00:00Z", validationEndOpenTimeExclusive: "2024-01-04T00:00:00Z", experimentId: `exp-${foldId}`, experimentStatus: status === "FAILED" ? "FAILED" : "COMPLETED", status, progressPercent, selectedCandidateId: status === "COMPLETED" ? "candidate-1" : null, selectedParameters: status === "COMPLETED" ? { fast: 5 } : null, selectedTrainingRunId: status === "COMPLETED" ? "train-1" : null, selectedValidationRunId: status === "COMPLETED" ? "valid-1" : null, selectionMetricValue: status === "COMPLETED" ? "0" : null, trainingMetrics: status === "COMPLETED" ? walkForwardMetrics : null, validationMetrics: status === "COMPLETED" ? walkForwardMetrics : null, errorCode: status === "FAILED" ? "CHILD_FAILED" : null, errorMessage: status === "FAILED" ? "子任务失败" : null, startedAt: null, finishedAt: null, updatedAt: "2024-01-04T00:00:00Z" });
 
@@ -52,6 +84,7 @@ describe("Quant Walk-forward workspace lifecycle", () => {
   function installOosLifecycleFetch({ detailStatus = "COMPLETED_WITH_FAILURES", oosHandler, studyIds = ["wf-1"] } = {}) {
     const studies = studyIds.map((id) => ({ ...walkForwardSummary, studyId: id, status: detailStatus }));
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options = {}) => {
+      if (url.includes("/execution-profiles")) return result([executionProfile]);
       if (url.includes("/strategies")) return result([strategy]);
       if (url.includes("/datasets")) return result([]);
       if (url.includes("/oos-equity")) return oosHandler(options.signal);
@@ -67,6 +100,7 @@ describe("Quant Walk-forward workspace lifecycle", () => {
   function installWalkForwardFetch() {
     const oos = { sampled: false, totalPoints: 1, successfulFolds: 1, missingFolds: 1, hasGaps: true, totalReturnRatio: "0", maximumDrawdownRatio: "0", points: [{ pointIndex: 0, foldIndex: 0, openTime: "2024-01-03T00:00:00Z", indexRatio: "1", drawdownRatio: "0" }] };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url.includes("/execution-profiles")) return result([executionProfile]);
       if (url.includes("/strategies")) return result([strategy]);
       if (url.includes("/datasets")) return result([]);
       if (url.includes("/oos-equity")) return result(oos);
@@ -156,8 +190,9 @@ describe("Quant Walk-forward workspace lifecycle", () => {
 });
 const installFetch = () =>
   vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+    if (url.includes("/execution-profiles")) return result([executionProfile]);
     if (url.includes("/strategies")) return result([strategy]);
-    if (url.includes("/datasets")) return result([]);
+    if (url.includes("/datasets")) return result([dataset]);
     if (url.includes("/experiments"))
       return result({ records: [], total: 0, page: 1, pageSize: 20 });
     if (url.includes("/walk-forward-studies"))
@@ -185,8 +220,13 @@ describe("Quant backtest strategy handoff", () => {
     await waitFor(() =>
       expect(screen.getByRole("dialog", { name: "新建回测" })).toBeTruthy(),
     );
-    expect(screen.getByRole("combobox", { name: "策略" }).value).toBe(
-      "rsi/mean",
+    fireEvent.change(screen.getByRole("combobox", { name: "数据集 / 交易对" }), {
+      target: { value: "1" },
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "策略" }).value).toBe(
+        "rsi/mean",
+      ),
     );
     expect(screen.getByDisplayValue("14")).toBeTruthy();
     expect(window.location.pathname).toBe("/quant/backtests");
@@ -253,17 +293,19 @@ describe("Quant backtest strategy handoff", () => {
     const run = {
       runId: "run/deep",
       status: "FAILED",
+      ...executionContext,
       errorCode: "REAL_FAILURE",
       errorMessage: "真实任务失败",
     };
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url.includes("/execution-profiles")) return result([executionProfile]);
       if (url.includes("/strategies")) return result([strategy]);
       if (url.includes("/datasets")) return result([]);
       if (url.endsWith("/runs/run%2Fdeep")) return result(run);
       if (url.includes("/runs"))
         return result({
           records: [
-            { runId: "other-run", status: "COMPLETED" },
+            { runId: "other-run", status: "COMPLETED", ...executionContext },
           ],
           total: 1,
           page: 1,
@@ -290,6 +332,7 @@ describe("Quant backtest strategy handoff", () => {
 
   it("shows a deep-link detail failure without selecting the first list run", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url.includes("/execution-profiles")) return result([executionProfile]);
       if (url.includes("/strategies")) return result([strategy]);
       if (url.includes("/datasets")) return result([]);
       if (url.endsWith("/runs/missing"))
@@ -300,7 +343,7 @@ describe("Quant backtest strategy handoff", () => {
         };
       if (url.includes("/runs"))
         return result({
-          records: [{ runId: "first-run", status: "COMPLETED" }],
+          records: [{ runId: "first-run", status: "COMPLETED", ...executionContext }],
           total: 1,
           page: 1,
           pageSize: 20,
@@ -324,12 +367,13 @@ describe("Quant backtest strategy handoff", () => {
 
   it("re-requests runId when browser back restores the previous deep link", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (url.includes("/execution-profiles")) return result([executionProfile]);
       if (url.includes("/strategies")) return result([strategy]);
       if (url.includes("/datasets")) return result([]);
       if (url.endsWith("/runs/run-1"))
-        return result({ runId: "run-1", status: "FAILED", errorMessage: "任务一" });
+        return result({ runId: "run-1", status: "FAILED", ...executionContext, errorMessage: "任务一" });
       if (url.endsWith("/runs/run-2"))
-        return result({ runId: "run-2", status: "FAILED", errorMessage: "任务二" });
+        return result({ runId: "run-2", status: "FAILED", ...executionContext, errorMessage: "任务二" });
       if (url.includes("/runs"))
         return result({ records: [], total: 0, page: 1, pageSize: 20 });
       throw new Error(`unexpected request ${url}`);
@@ -356,8 +400,9 @@ describe("Quant backtest strategy handoff", () => {
   });
 
   it("restores focus to the exact create button for close, Escape, backdrop, and success", async () => {
-    const run = { runId: "created-run", status: "QUEUED" };
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+    const run = { runId: "created-run", status: "QUEUED", ...executionContext };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+      if (url.includes("/execution-profiles")) return result([executionProfile]);
       if (url.includes("/strategies")) return result([strategy]);
       if (url.includes("/datasets")) return result([dataset]);
       if (url.endsWith("/runs") && options?.method === "POST") return result(run);
@@ -386,7 +431,7 @@ describe("Quant backtest strategy handoff", () => {
     await waitFor(() => expect(document.activeElement).toBe(createButton));
 
     fireEvent.click(createButton);
-    fireEvent.change(screen.getByRole("combobox", { name: "连续历史数据集" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "数据集 / 交易对" }), {
       target: { value: "1" },
     });
     fireEvent.change(screen.getByRole("combobox", { name: "策略" }), {
@@ -394,6 +439,16 @@ describe("Quant backtest strategy handoff", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "创建异步回测" }));
     await waitFor(() => expect(document.activeElement).toBe(createButton));
+    const postOptions = fetchMock.mock.calls.find(
+      ([url, options]) => url.endsWith("/runs") && options?.method === "POST",
+    )[1];
+    expect(JSON.parse(postOptions.body)).toMatchObject({
+      executionProfileCode: "USDM_PERPETUAL_LONG_ONLY_1X_V1",
+      directionMode: "LONG_ONLY",
+      orderSizingMode: "BASE_QUANTITY",
+      orderAmount: "1",
+    });
+    expect(postOptions.signal).toBeInstanceOf(AbortSignal);
     expect(unrelated).not.toBe(document.activeElement);
     unrelated.remove();
   });

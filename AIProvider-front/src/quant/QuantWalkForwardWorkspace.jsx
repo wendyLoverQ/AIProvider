@@ -7,7 +7,7 @@ import QuantWalkForwardStudyDetail from "./QuantWalkForwardStudyDetail";
 import QuantWalkForwardFolds from "./QuantWalkForwardFolds";
 import QuantWalkForwardParameterFrequency from "./QuantWalkForwardParameterFrequency";
 import QuantWalkForwardOosChart from "./QuantWalkForwardOosChart";
-import { fetchDatasets, fetchStrategies } from "./quantBacktestsApi";
+import { fetchDatasets, fetchExecutionProfiles, fetchStrategies } from "./quantBacktestsApi";
 import { fetchWalkForwardFolds, fetchWalkForwardOosEquity, fetchWalkForwardStudies, fetchWalkForwardStudy } from "./quantWalkForwardApi";
 import "./QuantWalkForward.css";
 
@@ -54,6 +54,7 @@ export default function QuantWalkForwardWorkspace() {
   const initial = useRef(readRoute()).current;
   const [strategies, setStrategies] = useState([]);
   const [datasets, setDatasets] = useState([]);
+  const [executionProfiles, setExecutionProfiles] = useState([]);
   const [filters, setFilters] = useState({ status: "", symbol: "", strategyCode: "" });
   const [listPage, setListPage] = useState(1);
   const [listData, setListData] = useState({ records: [], total: 0, page: 1, pageSize: 20 });
@@ -91,11 +92,12 @@ export default function QuantWalkForwardWorkspace() {
     aborts.current.shared = controller;
     const current = ++sequence.current.shared;
     setLoading((value) => ({ ...value, shared: true }));
-    setErrors((value) => ({ ...value, strategies: "", datasets: "" }));
-    const [strategyResult, datasetResult] = await Promise.allSettled([fetchStrategies(controller.signal), fetchDatasets(controller.signal)]);
+    setErrors((value) => ({ ...value, strategies: "", datasets: "", profiles: "" }));
+    const [strategyResult, datasetResult, profileResult] = await Promise.allSettled([fetchStrategies(controller.signal), fetchDatasets(controller.signal), fetchExecutionProfiles(controller.signal)]);
     if (current !== sequence.current.shared) return;
     if (strategyResult.status === "fulfilled") setStrategies(strategyResult.value); else if (strategyResult.reason?.name !== "AbortError") setErrors((value) => ({ ...value, strategies: strategyResult.reason.message }));
     if (datasetResult.status === "fulfilled") setDatasets(datasetResult.value.filter(validDataset)); else if (datasetResult.reason?.name !== "AbortError") setErrors((value) => ({ ...value, datasets: datasetResult.reason.message }));
+    if (profileResult.status === "fulfilled") setExecutionProfiles(profileResult.value); else if (profileResult.reason?.name !== "AbortError") setErrors((value) => ({ ...value, profiles: profileResult.reason.message }));
     setLoading((value) => ({ ...value, shared: false }));
   }, [abort]);
 
@@ -287,5 +289,5 @@ export default function QuantWalkForwardWorkspace() {
 
   const selectedFold = useMemo(() => foldData.records.find((fold) => fold.foldId === selectedFoldId) || null, [foldData.records, selectedFoldId]);
   const detailData = detail?.summary;
-  return <QuantPageScaffold pageClass="quant-backtests-page quant-walk-forward-page"><div className="quant-workspace-head"><div><span className="eyebrow">QUANT · WALK-FORWARD LAB</span><h3>滚动验证</h3><small>按 TRAIN 指标选择参数，再观察连续样本外 VALIDATION 表现</small></div><div className="backtest-head-actions"><button type="button" className="quant-refresh" onClick={refresh} disabled={refreshing}><ArrowsClockwise className={refreshing ? "spin" : ""} />刷新</button><button ref={openCreateButtonRef} type="button" className="quant-primary-action quant-walk-forward-open" onClick={() => setShowCreate(true)}><Flask />新建滚动验证</button></div></div>{errors.strategies && <div className="backtest-notice" role="alert"><Warning />策略不可用：{errors.strategies}</div>}{errors.datasets && <div className="backtest-notice" role="alert"><Warning />数据集不可用：{errors.datasets}</div>}{errors.list && <div className="backtest-notice" role="alert">Study 列表加载失败：{errors.list}</div>}<div className="quant-walk-forward-main"><QuantWalkForwardStudyList page={listPage} data={listData} filters={filters} loading={loading.list} selectedId={studyId} onFilters={(next) => { setFilters(next); setListPage(1); }} onPage={loadList} onSelect={selectStudy} /><QuantWalkForwardStudyDetail detail={detail} loading={loading.detail} error={errors.detail} onRetry={retryDetail} /></div>{detailData && <><QuantWalkForwardFolds data={foldData} page={foldPage} selectedFold={selectedFold} loading={loading.folds} error={errors.folds} onPage={onFoldPage} onSelect={selectFold} onOpenExperiment={(id) => jump("experiment", "experimentId", id)} onOpenRun={(id) => jump("single", "runId", id)} /><div className="quant-walk-forward-bottom"><QuantWalkForwardParameterFrequency frequencies={detail.parameterFrequencies} selectedParameterChanges={detailData.selectedParameterChanges} /><QuantWalkForwardOosChart equity={oos} loading={loading.oos} error={errors.oos} /></div></>}{showCreate && <div className="backtest-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCreateByUser(); }}><QuantWalkForwardCreatePanel strategies={strategies} datasets={datasets} onClose={closeCreateByUser} onCreated={completeCreate} onSavingChange={setCreating} /></div>}</QuantPageScaffold>;
+  return <QuantPageScaffold pageClass="quant-backtests-page quant-walk-forward-page"><div className="quant-workspace-head"><div><span className="eyebrow">QUANT · WALK-FORWARD LAB</span><h3>滚动验证</h3><small>按 TRAIN 指标选择参数，再观察连续样本外 VALIDATION 表现</small></div><div className="backtest-head-actions"><button type="button" className="quant-refresh" onClick={refresh} disabled={refreshing}><ArrowsClockwise className={refreshing ? "spin" : ""} />刷新</button><button ref={openCreateButtonRef} type="button" className="quant-primary-action quant-walk-forward-open" onClick={() => setShowCreate(true)}><Flask />新建滚动验证</button></div></div>{errors.strategies && <div className="backtest-notice" role="alert"><Warning />策略不可用：{errors.strategies}</div>}{errors.datasets && <div className="backtest-notice" role="alert"><Warning />数据集不可用：{errors.datasets}</div>}{errors.profiles && <div className="backtest-notice" role="alert"><Warning />执行模型不可用：{errors.profiles}</div>}{errors.list && <div className="backtest-notice" role="alert">Study 列表加载失败：{errors.list}</div>}<div className="quant-walk-forward-main"><QuantWalkForwardStudyList page={listPage} data={listData} filters={filters} loading={loading.list} selectedId={studyId} onFilters={(next) => { setFilters(next); setListPage(1); }} onPage={loadList} onSelect={selectStudy} /><QuantWalkForwardStudyDetail detail={detail} executionProfile={executionProfiles.find((item) => item.code === detailData?.executionProfileCode)} loading={loading.detail} error={errors.detail} onRetry={retryDetail} /></div>{detailData && <><QuantWalkForwardFolds data={foldData} page={foldPage} selectedFold={selectedFold} loading={loading.folds} error={errors.folds} onPage={onFoldPage} onSelect={selectFold} onOpenExperiment={(id) => jump("experiment", "experimentId", id)} onOpenRun={(id) => jump("single", "runId", id)} /><div className="quant-walk-forward-bottom"><QuantWalkForwardParameterFrequency frequencies={detail.parameterFrequencies} selectedParameterChanges={detailData.selectedParameterChanges} /><QuantWalkForwardOosChart equity={oos} loading={loading.oos} error={errors.oos} /></div></>}{showCreate && <div className="backtest-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCreateByUser(); }}><QuantWalkForwardCreatePanel strategies={strategies} datasets={datasets} executionProfiles={executionProfiles} onClose={closeCreateByUser} onCreated={completeCreate} onSavingChange={setCreating} /></div>}</QuantPageScaffold>;
 }

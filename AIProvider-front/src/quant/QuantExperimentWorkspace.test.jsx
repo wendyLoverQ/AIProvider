@@ -2,12 +2,13 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import QuantExperimentWorkspace from "./QuantExperimentWorkspace";
-import { fetchDatasets, fetchStrategies } from "./quantBacktestsApi";
+import { fetchDatasets, fetchExecutionProfiles, fetchStrategies } from "./quantBacktestsApi";
 import { createExperiment, fetchExperiment, fetchExperimentCandidates, fetchExperiments } from "./quantExperimentsApi";
 
 vi.mock("./quantBacktestsApi", () => ({
   fetchStrategies: vi.fn(),
   fetchDatasets: vi.fn(),
+  fetchExecutionProfiles: vi.fn(),
   fetchEquity: vi.fn(),
 }));
 
@@ -27,11 +28,18 @@ const strategy = {
   name: "RSI",
   version: "1.0.0",
   minimumRequiredBars: 20,
+  supportedMarketTypes: ["USDM_PERPETUAL"],
+  supportedExecutionProfileCodes: ["USDM_PERPETUAL_LONG_ONLY_1X_V1"],
+  supportedDirectionModes: ["LONG_ONLY"],
+  requiredMarketFeatures: ["OHLCV"],
   parameters: [{ name: "period", defaultValue: 14, minValue: 2, maxValue: 100 }],
 };
 
 const dataset = {
   id: 1,
+  provider: "BINANCE",
+  marketType: "USDM_PERPETUAL",
+  dataType: "KLINE",
   status: "CONTIGUOUS",
   gapCount: 0,
   gapSegmentCount: 0,
@@ -42,6 +50,18 @@ const dataset = {
   symbol: "BTC/USDT",
   interval: "H1",
 };
+const executionProfile = {
+  code: "USDM_PERPETUAL_LONG_ONLY_1X_V1",
+  name: "USDT 本位永续·只做多·1× V1",
+  marketType: "USDM_PERPETUAL",
+  directionMode: "LONG_ONLY",
+  orderSizingMode: "BASE_QUANTITY",
+  entryOrderSide: "BUY",
+  exitOrderSide: "SELL",
+  positionSide: "LONG",
+  leverage: "1",
+  limitations: ["不计算资金费率"],
+};
 
 const experiment = (status = "COMPLETED") => ({
   experimentId: "experiment-1",
@@ -50,6 +70,9 @@ const experiment = (status = "COMPLETED") => ({
   intervalCode: "H1",
   strategyCode: "RSI",
   strategyVersion: "1.0.0",
+  executionProfileCode: "USDM_PERPETUAL_LONG_ONLY_1X_V1",
+  directionMode: "LONG_ONLY",
+  orderSizingMode: "BASE_QUANTITY",
   parameterGrid: { period: [7, 14] },
   candidateCount: 2,
   pendingCandidates: status === "QUEUED" ? 2 : 0,
@@ -105,6 +128,7 @@ describe("QuantExperimentWorkspace", () => {
     window.history.replaceState({}, "", "/quant/backtests?mode=experiment");
     fetchStrategies.mockResolvedValue([strategy]);
     fetchDatasets.mockResolvedValue([dataset]);
+    fetchExecutionProfiles.mockResolvedValue([executionProfile]);
     fetchExperiments.mockResolvedValue({ records: [], total: 0, page: 1, pageSize: 20 });
     fetchExperimentCandidates.mockResolvedValue(candidatePage);
   });
@@ -266,14 +290,13 @@ describe("QuantExperimentWorkspace", () => {
     expect(screen.queryByText(/迟到的旧错误/)).toBeNull();
   });
 
-  it("keeps successful strategies when datasets fail", async () => {
+  it("keeps the dataset failure isolated and does not expose strategies without a dataset", async () => {
     fetchDatasets.mockRejectedValue(new Error("数据集服务失败"));
     render(<QuantExperimentWorkspace />);
     expect(await screen.findByText(/数据集服务失败/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "新建参数实验" }));
-    expect(
-      screen.getByRole("option", { name: "RSI · 1.0.0" }),
-    ).toBeTruthy();
+    expect(screen.queryByRole("option", { name: /RSI/ })).toBeNull();
+    expect(fetchStrategies).toHaveBeenCalled();
   });
 
   it("polls a running experiment immediately and every three seconds, then stops at terminal state", async () => {
@@ -381,7 +404,7 @@ describe("QuantExperimentWorkspace", () => {
     render(<QuantExperimentWorkspace />);
     await waitFor(() => expect(screen.getByRole("button", { name: "新建参数实验" })).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "新建参数实验" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "连续历史数据集" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "数据集 / 交易对" }), {
       target: { value: "1" },
     });
     fireEvent.change(screen.getByRole("combobox", { name: "策略" }), {

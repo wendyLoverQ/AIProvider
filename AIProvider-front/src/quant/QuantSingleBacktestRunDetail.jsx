@@ -18,6 +18,11 @@ import {
   intervalCode,
   validateEquityResponse,
 } from "./quantBacktestsFormat";
+import {
+  formatDirectionMode,
+  formatMarketType,
+  formatOrderSizingMode,
+} from "./quantExecutionContext";
 
 function LoadState({ label }) {
   return (
@@ -60,6 +65,7 @@ export default function QuantSingleBacktestRunDetail({
   equity,
   equityError,
   retryEquity,
+  executionProfile,
 }) {
   if (loading) return <LoadState label="正在读取任务详情…" />;
   if (error)
@@ -107,14 +113,18 @@ export default function QuantSingleBacktestRunDetail({
               `${formatInstant(run.startOpenTimeInclusive)} ～ ${formatInstant(run.endOpenTimeExclusive)}`,
             ],
             [
-              "数量 / 手续费",
+              "基础资产数量 / 手续费",
               `${run.orderAmount ?? "—"} / ${run.feeRate ?? "—"}`,
             ],
             [
               "K 线数 / 交易数",
               `${run.barCount ?? "—"} / ${run.tradeCount ?? "—"}`,
             ],
-            ["成交模型", run.executionModel || "—"],
+            ["市场类型", formatMarketType(run.marketType)],
+            ["执行模型", executionProfile?.name || run.executionProfileCode],
+            ["方向", formatDirectionMode(run.directionMode)],
+            ["规模模式", formatOrderSizingMode(run.orderSizingMode)],
+            ["成交模型", executionProfile?.fillModel || run.executionModel || "—"],
             ["阶段", run.status],
             [
               "开始 / 完成",
@@ -127,6 +137,16 @@ export default function QuantSingleBacktestRunDetail({
             </div>
           ))}
         </dl>
+        {executionProfile?.limitations?.length > 0 && (
+          <div className="quant-execution-limitations">
+            <strong>限制说明</strong>
+            <ul>
+              {executionProfile.limitations.map((limitation) => (
+                <li key={limitation}>{limitation}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         {warnings.length > 0 && (
           <div className="backtest-warnings">
             <strong>警告</strong>

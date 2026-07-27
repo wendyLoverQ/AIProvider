@@ -6,7 +6,11 @@ import QuantExperimentComparison from "./QuantExperimentComparison";
 import QuantExperimentCreatePanel from "./QuantExperimentCreatePanel";
 import QuantExperimentDetail from "./QuantExperimentDetail";
 import QuantExperimentList from "./QuantExperimentList";
-import { fetchDatasets, fetchStrategies } from "./quantBacktestsApi";
+import {
+  fetchDatasets,
+  fetchExecutionProfiles,
+  fetchStrategies,
+} from "./quantBacktestsApi";
 import {
   fetchExperiment,
   fetchExperimentCandidates,
@@ -61,6 +65,7 @@ export default function QuantExperimentWorkspace() {
   const initialRoute = useRef(readCandidateRoute()).current;
   const [strategies, setStrategies] = useState([]);
   const [datasets, setDatasets] = useState([]);
+  const [executionProfiles, setExecutionProfiles] = useState([]);
   const [listPage, setListPage] = useState(1);
   const [listData, setListData] = useState({
     records: [],
@@ -129,10 +134,12 @@ export default function QuantExperimentWorkspace() {
       ...value,
       strategies: "",
       datasets: "",
+      profiles: "",
     }));
-    const [strategyResult, datasetResult] = await Promise.allSettled([
+    const [strategyResult, datasetResult, profileResult] = await Promise.allSettled([
       fetchStrategies(controller.signal),
       fetchDatasets(controller.signal),
+      fetchExecutionProfiles(controller.signal),
     ]);
     if (current !== sequence.current.shared || controller.signal.aborted) return;
     if (strategyResult.status === "fulfilled") {
@@ -152,6 +159,14 @@ export default function QuantExperimentWorkspace() {
       setErrors((value) => ({
         ...value,
         datasets: datasetResult.reason.message,
+      }));
+    if (profileResult.status === "fulfilled") {
+      setExecutionProfiles(profileResult.value);
+      setErrors((value) => ({ ...value, profiles: "" }));
+    } else if (profileResult.reason?.name !== "AbortError")
+      setErrors((value) => ({
+        ...value,
+        profiles: profileResult.reason.message,
       }));
     if (current === sequence.current.shared)
       setLoading((value) => ({ ...value, shared: false }));
@@ -525,6 +540,12 @@ export default function QuantExperimentWorkspace() {
           数据集不可用：{errors.datasets}
         </div>
       )}
+      {errors.profiles && (
+        <div className="backtest-notice" role="alert">
+          <Warning />
+          执行模型不可用：{errors.profiles}
+        </div>
+      )}
       {errors.list && (
         <div className="backtest-notice" role="alert">
           实验列表加载失败：{errors.list}
@@ -550,6 +571,9 @@ export default function QuantExperimentWorkspace() {
         <QuantExperimentDetail
           experiment={detail}
           strategy={strategy}
+          executionProfile={executionProfiles.find(
+            (item) => item.code === detail?.executionProfileCode,
+          )}
           loading={loading.detail}
           error={errors.detail}
           onRetry={() => loadDetail(selectedId)}
@@ -590,6 +614,7 @@ export default function QuantExperimentWorkspace() {
           <QuantExperimentCreatePanel
             strategies={strategies}
             datasets={datasets}
+            executionProfiles={executionProfiles}
             onClose={closeCreatePanel}
             onCreated={onCreated}
             onSavingChange={setCreating}

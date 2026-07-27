@@ -30,6 +30,9 @@ const TERMINAL_EXPERIMENT_STATUSES = new Set([
   "COMPLETED_WITH_FAILURES",
   "FAILED",
 ]);
+const EXECUTION_PROFILE_CODES = new Set(["USDM_PERPETUAL_LONG_ONLY_1X_V1"]);
+const DIRECTION_MODES = new Set(["LONG_ONLY"]);
+const ORDER_SIZING_MODES = new Set(["BASE_QUANTITY"]);
 
 function invalid(message) {
   throw new Error(message);
@@ -176,6 +179,12 @@ export function parseCandidatePage(value) {
 export function parseExperimentSummary(value) {
   const summary = object(value, "参数实验响应格式异常");
   nonEmpty(summary.experimentId, "参数实验缺少 experimentId");
+  if (
+    !EXECUTION_PROFILE_CODES.has(summary.executionProfileCode) ||
+    !DIRECTION_MODES.has(summary.directionMode) ||
+    !ORDER_SIZING_MODES.has(summary.orderSizingMode)
+  )
+    invalid("参数实验执行上下文格式异常");
   safeCount(summary.candidateCount, "参数实验 candidateCount 格式异常");
   [
     "pendingCandidates",

@@ -3,7 +3,6 @@ import { X } from "@phosphor-icons/react";
 import {
   compareDecimalStrings,
   formatInstant,
-  intervalCode,
   isPositiveDecimal,
   normalizeDecimalString,
   toUtcIso,
@@ -15,6 +14,11 @@ import {
   validateExperimentRanges,
 } from "./quantExperimentsFormat";
 import { createExperiment } from "./quantExperimentsApi";
+import QuantExecutionContextFields from "./QuantExecutionContextFields";
+import {
+  executionContextPayload,
+  validateExecutionSelection,
+} from "./quantExecutionContext";
 
 function ParameterInput({ parameter, value, onChange }) {
   const parsed = parseIntegerCsv(value, parameter);
@@ -49,12 +53,18 @@ function ParameterInput({ parameter, value, onChange }) {
 export default function QuantExperimentCreatePanel({
   strategies,
   datasets,
+  executionProfiles = [],
   onClose,
   onCreated,
   onSavingChange = () => {},
 }) {
-  const [datasetId, setDatasetId] = useState("");
-  const [strategyCode, setStrategyCode] = useState("");
+  const [executionContext, setExecutionContext] = useState({
+    marketType: "",
+    datasetId: "",
+    strategyCode: "",
+    executionProfileCode: "",
+  });
+  const [contextErrors, setContextErrors] = useState({});
   const [parameterInputs, setParameterInputs] = useState({});
   const [ranges, setRanges] = useState({
     trainingStart: "",
@@ -71,9 +81,11 @@ export default function QuantExperimentCreatePanel({
   const mountedRef = useRef(true);
 
   const dataset = datasets.find(
-    (item) => String(item.id) === String(datasetId),
+    (item) => String(item.id) === String(executionContext.datasetId),
   );
-  const strategy = strategies.find((item) => item.code === strategyCode);
+  const strategy = strategies.find(
+    (item) => item.code === executionContext.strategyCode,
+  );
   const parsedGrid = useMemo(() => {
     if (!strategy) return { grid: null, error: "请选择策略" };
     const grid = {};
@@ -109,19 +121,17 @@ export default function QuantExperimentCreatePanel({
     [],
   );
 
-  const chooseStrategy = (code) => {
-    const selected = strategies.find((item) => item.code === code);
-    setStrategyCode(code);
+  useEffect(() => {
     setParameterInputs(
       Object.fromEntries(
-        (selected?.parameters || []).map((parameter) => [
+        (strategy?.parameters || []).map((parameter) => [
           parameter.name,
           String(parameter.defaultValue),
         ]),
       ),
     );
     setError("");
-  };
+  }, [strategy]);
 
   const fillSplit = () => {
     setError("");
@@ -146,8 +156,15 @@ export default function QuantExperimentCreatePanel({
     event.preventDefault();
     if (savingRef.current) return;
     setError("");
-    if (!dataset || !strategy) {
-      setError("请完整选择数据集和策略");
+    const contextResult = validateExecutionSelection({
+      datasets,
+      strategies,
+      profiles: executionProfiles,
+      value: executionContext,
+    });
+    setContextErrors(contextResult.errors);
+    if (!contextResult.valid) {
+      setError("请完整选择兼容的市场、数据集、策略和执行模型");
       return;
     }
     if (parsedGrid.error || !parsedGrid.grid) {
@@ -186,7 +203,7 @@ export default function QuantExperimentCreatePanel({
       maxFractionDigits: 18,
     });
     if (!normalizedOrderAmount || !isPositiveDecimal(normalizedOrderAmount)) {
-      setError("下单数量必须大于 0，整数最多 20 位、小数最多 18 位");
+      setError("基础资产数量必须大于 0，整数最多 20 位、小数最多 18 位");
       return;
     }
     if (
@@ -201,6 +218,7 @@ export default function QuantExperimentCreatePanel({
       datasetId: Number(dataset.id),
       strategyCode: strategy.code,
       strategyVersion: strategy.version,
+      ...executionContextPayload(contextResult.profile),
       parameterGrid: parsedGrid.grid,
       trainingStartOpenTimeInclusive: toUtcIso(ranges.trainingStart),
       trainingEndOpenTimeExclusive: toUtcIso(ranges.trainingEnd),
@@ -260,47 +278,25 @@ export default function QuantExperimentCreatePanel({
         </button>
       </div>
       <form onSubmit={submit}>
-        <label>
-          连续历史数据集
-          <select
-            autoFocus
-            aria-label="连续历史数据集"
-            value={datasetId}
-            onChange={(event) => {
-              setDatasetId(event.target.value);
-              setError("");
-            }}
-          >
-            <option value="">请选择已校验数据集</option>
-            {datasets.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.symbol} · {intervalCode(item.interval)} ·{" "}
-                {Number(item.candleCount).toLocaleString()} 根
-              </option>
-            ))}
-          </select>
-        </label>
+        <QuantExecutionContextFields
+          autoFocus
+          datasets={datasets}
+          strategies={strategies}
+          executionProfiles={executionProfiles}
+          value={executionContext}
+          onChange={(next) => {
+            setExecutionContext(next);
+            setContextErrors({});
+          }}
+          disabled={saving}
+          errors={contextErrors}
+        />
         {dataset && (
           <p className="backtest-help">
             {formatInstant(dataset.earliestOpenTime)} ～{" "}
             {formatInstant(dataset.latestOpenTime)} · 选择数据集不会自动切分时间
           </p>
         )}
-        <label>
-          策略
-          <select
-            aria-label="策略"
-            value={strategyCode}
-            onChange={(event) => chooseStrategy(event.target.value)}
-          >
-            <option value="">请选择策略</option>
-            {strategies.map((item) => (
-              <option key={item.code} value={item.code}>
-                {item.name} · {item.version}
-              </option>
-            ))}
-          </select>
-        </label>
         {(strategy?.parameters || []).map((parameter) => (
           <ParameterInput
             key={parameter.name}
@@ -397,13 +393,17 @@ export default function QuantExperimentCreatePanel({
         </div>
         <div className="backtest-form-grid">
           <label>
-            下单数量
+            基础资产数量
             <input
-              aria-label="下单数量"
+              aria-label="基础资产数量"
               inputMode="decimal"
               value={orderAmount}
               onChange={(event) => setOrderAmount(event.target.value)}
             />
+            <small>
+              按交易对的基础资产数量解释，不是 USDT 金额。例如 BTCUSDT 填
+              0.01，表示 0.01 BTC 名义数量。
+            </small>
           </label>
           <label>
             手续费比例
@@ -428,7 +428,7 @@ export default function QuantExperimentCreatePanel({
         <button
           type="submit"
           className="quant-primary-action"
-          disabled={saving || overLimit}
+          disabled={saving || overLimit || !executionProfiles.length}
         >
           {saving ? "正在创建…" : "创建异步实验"}
         </button>
