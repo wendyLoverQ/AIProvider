@@ -12,19 +12,19 @@ import com.aiprovider.quant.execution.ExecutionProfileDefinition;
 import com.aiprovider.quant.execution.ExecutionProfileRegistry;
 import com.aiprovider.quant.execution.OrderSide;
 import com.aiprovider.quant.market.history.model.HistoricalCandle;
+import com.aiprovider.quant.portfolio.BacktestCapitalLedger;
+import com.aiprovider.quant.portfolio.BacktestPortfolioSnapshot;
 import com.aiprovider.quant.strategy.QuantStrategyDefinition;
 import com.aiprovider.quant.strategy.StrategyBuildResult;
 import com.aiprovider.quant.strategy.StrategyException;
 import com.aiprovider.quant.strategy.StrategyRegistry;
 import org.ta4j.core.BarSeries;
-import org.ta4j.core.BaseTradingRecord;
 import org.ta4j.core.Position;
 import org.ta4j.core.Strategy;
 import org.ta4j.core.Trade;
 import org.ta4j.core.TradingRecord;
 import org.ta4j.core.analysis.cost.LinearTransactionCostModel;
 import org.ta4j.core.analysis.cost.ZeroCostModel;
-import org.ta4j.core.analysis.CashFlow;
 import org.ta4j.core.backtest.BarSeriesManager;
 import org.ta4j.core.backtest.TradeOnNextOpenModel;
 
@@ -32,9 +32,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /** Deterministic Ta4j execution adapter. */
 public final class Ta4jBacktestEngine {
@@ -43,6 +41,7 @@ public final class Ta4jBacktestEngine {
     private final StrategyRegistry registry;
     private final Ta4jStrategyFactory strategyFactory;
     private final BacktestCompatibilityService compatibility;
+    private final BacktestCapitalLedger capitalLedger;
 
     public Ta4jBacktestEngine() {
         this(
@@ -59,6 +58,7 @@ public final class Ta4jBacktestEngine {
         this.registry = registry;
         this.strategyFactory = new Ta4jStrategyFactory(registry);
         this.compatibility = new BacktestCompatibilityService(executionProfiles);
+        this.capitalLedger = new BacktestCapitalLedger();
     }
 
     public BacktestResult run(BacktestRequest request, BacktestMarketContext market,
@@ -129,13 +129,29 @@ public final class Ta4jBacktestEngine {
                         series.getBar(series.getEndIndex()).getClosePrice(),
                         amount);
             }
-            List<BacktestTrade> trades = toTrades(record, series, candles, forcedClose, profile);
-            List<EquityPoint> equity = equityCurve(record, series, trades, candles, profile);
-            BacktestMetrics metrics = metrics(trades, equity, candles);
+            List<BacktestTrade> trades =
+                    toTrades(
+                            record,
+                            series,
+                            candles,
+                            forcedClose,
+                            profile,
+                            request.getFeeRate());
+            List<BacktestPortfolioSnapshot> portfolio =
+                    capitalLedger.rebuild(
+                            request.getInitialCapital(),
+                            request.getFeeRate(),
+                            trades,
+                            candles);
+            List<EquityPoint> equity = equityCurve(portfolio);
+            BacktestMetrics metrics =
+                    metrics(trades, equity, candles, request.getInitialCapital());
             Instant endExclusive = candles.get(candles.size() - 1).getOpenTime().plusMillis(market.interval().durationMillis());
             return new BacktestResult(request.getStrategyCode(), request.getStrategyVersion(), build.getParameters(),
                     market.symbol(), market.interval(), candles.size(), candles.get(0).getOpenTime(), endExclusive,
-                    profile.fillModel(), request.getFeeRate(), request.getOrderAmount(), metrics, trades, equity, profile.limitations());
+                    profile.fillModel(), request.getFeeRate(), request.getOrderAmount(),
+                    request.getInitialCapital(), metrics.getFinalEquity(), metrics, trades, equity,
+                    profile.limitations());
         } catch (BacktestException e) {
             throw e;
         } catch (StrategyException e) {
@@ -148,7 +164,8 @@ public final class Ta4jBacktestEngine {
     }
 
     private List<BacktestTrade> toTrades(TradingRecord record, BarSeries series, List<HistoricalCandle> candles,
-                                         boolean forcedClose, ExecutionProfileDefinition profile) {
+                                         boolean forcedClose, ExecutionProfileDefinition profile,
+                                         BigDecimal feeRate) {
         List<BacktestTrade> result = new ArrayList<>();
         int last = series.getEndIndex();
         for (Position position : record.getPositions()) {
@@ -158,8 +175,8 @@ public final class Ta4jBacktestEngine {
             BigDecimal entryPrice = forced ? bd(candles.get(entry).getOpenPrice()) : bd(position.getEntry().getPricePerAsset());
             BigDecimal exitPrice = forced ? bd(candles.get(exit).getClosePrice()) : bd(position.getExit().getPricePerAsset());
             BigDecimal amount = bd(position.getEntry().getAmount());
-            BigDecimal gross = bd(position.getGrossProfit());
-            BigDecimal fee = gross.subtract(bd(position.getProfit()));
+            BigDecimal gross = exitPrice.subtract(entryPrice).multiply(amount);
+            BigDecimal fee = entryPrice.add(exitPrice).multiply(amount).multiply(feeRate);
             BigDecimal net = gross.subtract(fee);
             requirePositive(entryPrice, "entryPrice");
             requirePositive(amount, "amount");
@@ -174,53 +191,41 @@ public final class Ta4jBacktestEngine {
         return result;
     }
 
-    private List<EquityPoint> equityCurve(TradingRecord record, BarSeries series, List<BacktestTrade> trades, List<HistoricalCandle> candles, ExecutionProfileDefinition profile) {
-        List<EquityPoint> points = new ArrayList<>(candles.size());
-        CashFlow cashFlow = new CashFlow(series, normalRecord(record, profile));
-        Map<Integer, BigDecimal> sameBarMultipliers = sameBarMultipliers(record);
-        BigDecimal peak = ONE;
-        for (int bar = 0; bar < candles.size(); bar++) {
-            BigDecimal equity = requireFinite(cashFlow.getValue(bar), "equity");
-            for (Map.Entry<Integer, BigDecimal> sameBar : sameBarMultipliers.entrySet()) {
-                if (sameBar.getKey() <= bar) equity = equity.multiply(sameBar.getValue());
-            }
-            peak = peak.max(equity);
-            BigDecimal drawdown = peak.signum() <= 0 ? BigDecimal.ZERO : peak.subtract(equity).divide(peak, 12, RoundingMode.HALF_UP).max(BigDecimal.ZERO);
-            final int currentBar = bar;
-            boolean inPosition = trades.stream().anyMatch(t -> t.getEntryIndex() <= currentBar && currentBar < t.getExitIndex());
-            points.add(new EquityPoint(candles.get(bar).getOpenTime(), equity, drawdown, inPosition));
+    private List<EquityPoint> equityCurve(List<BacktestPortfolioSnapshot> portfolio) {
+        List<EquityPoint> points = new ArrayList<>(portfolio.size());
+        BigDecimal peak = portfolio.get(0).initialCapital();
+        for (BacktestPortfolioSnapshot snapshot : portfolio) {
+            peak = peak.max(snapshot.totalEquity());
+            BigDecimal drawdown =
+                    peak.subtract(snapshot.totalEquity())
+                            .divide(peak, 12, RoundingMode.HALF_UP)
+                            .max(BigDecimal.ZERO);
+            BigDecimal equityRatio =
+                    snapshot
+                            .totalEquity()
+                            .divide(snapshot.initialCapital(), 12, RoundingMode.HALF_UP);
+            points.add(
+                    new EquityPoint(
+                            snapshot.openTime(),
+                            equityRatio,
+                            drawdown,
+                            snapshot.position().inPosition(),
+                            snapshot.totalEquity(),
+                            snapshot.availableCapital(),
+                            snapshot.realizedPnl(),
+                            snapshot.unrealizedPnl(),
+                            snapshot.position().quantity(),
+                            snapshot.position().positionNotional(),
+                            snapshot.exposureRatio()));
         }
-        return points;
+        return List.copyOf(points);
     }
 
-    private TradingRecord normalRecord(TradingRecord record, ExecutionProfileDefinition profile) {
-        List<Trade> normalTrades = new ArrayList<>();
-        for (Position position : record.getPositions()) {
-            if (position.getEntry().getIndex() != position.getExit().getIndex()) {
-                normalTrades.add(position.getEntry());
-                normalTrades.add(position.getExit());
-            }
-        }
-        if (normalTrades.isEmpty()) {
-            return new BaseTradingRecord(tradeType(profile.entryOrderSide()), record.getTransactionCostModel(), record.getHoldingCostModel());
-        }
-        return new BaseTradingRecord(record.getTransactionCostModel(), record.getHoldingCostModel(), normalTrades.toArray(Trade[]::new));
-    }
-
-    private Map<Integer, BigDecimal> sameBarMultipliers(TradingRecord record) {
-        Map<Integer, BigDecimal> multipliers = new HashMap<>();
-        for (Position position : record.getPositions()) {
-            if (position.getEntry().getIndex() != position.getExit().getIndex()) continue;
-            BigDecimal entryNetCost = bd(position.getEntry().getValue()).add(bd(position.getEntry().getCost()));
-            BigDecimal exitNetValue = bd(position.getExit().getValue()).subtract(bd(position.getExit().getCost()));
-            requirePositive(entryNetCost, "sameBarEntryNetCost");
-            BigDecimal multiplier = exitNetValue.divide(entryNetCost, 12, RoundingMode.HALF_UP);
-            multipliers.merge(position.getExit().getIndex(), multiplier, BigDecimal::multiply);
-        }
-        return multipliers;
-    }
-
-    private BacktestMetrics metrics(List<BacktestTrade> trades, List<EquityPoint> equity, List<HistoricalCandle> candles) {
+    private BacktestMetrics metrics(
+            List<BacktestTrade> trades,
+            List<EquityPoint> equity,
+            List<HistoricalCandle> candles,
+            BigDecimal initialCapital) {
         BigDecimal net = BigDecimal.ZERO, grossProfit = BigDecimal.ZERO, grossLoss = BigDecimal.ZERO, fees = BigDecimal.ZERO;
         BigDecimal averageReturn = BigDecimal.ZERO;
         int wins = 0, losses = 0, breakeven = 0;
@@ -238,8 +243,23 @@ public final class Ta4jBacktestEngine {
         BigDecimal maximumDrawdown = equity.stream().map(EquityPoint::drawdownRatio).max(BigDecimal::compareTo).orElse(BigDecimal.ZERO);
         BigDecimal buyHold = candles.get(candles.size() - 1).getClosePrice().divide(candles.get(0).getClosePrice(), 12, RoundingMode.HALF_UP).subtract(ONE);
         BigDecimal average = trades.isEmpty() ? null : averageReturn.divide(BigDecimal.valueOf(trades.size()), 12, RoundingMode.HALF_UP);
+        BigDecimal finalEquity = equity.get(equity.size() - 1).equityValue();
+        BigDecimal totalPnl = finalEquity.subtract(initialCapital);
+        BigDecimal totalExposure =
+                equity.stream()
+                        .map(EquityPoint::exposureRatio)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal averageExposure =
+                totalExposure.divide(
+                        BigDecimal.valueOf(equity.size()), 12, RoundingMode.HALF_UP);
+        BigDecimal maximumExposure =
+                equity.stream()
+                        .map(EquityPoint::exposureRatio)
+                        .max(BigDecimal::compareTo)
+                        .orElse(BigDecimal.ZERO);
         return new BacktestMetrics(trades.size(), wins, losses, breakeven, winRate, grossProfit, grossLoss, net,
-                totalReturn, maximumDrawdown, profitFactor, average, buyHold, fees);
+                totalReturn, maximumDrawdown, profitFactor, average, buyHold, fees, finalEquity,
+                totalPnl, averageExposure, maximumExposure);
     }
 
     private void validateRequest(BacktestRequest request, BacktestMarketContext market) {
@@ -248,6 +268,7 @@ public final class Ta4jBacktestEngine {
             throw new BacktestException("BACKTEST_REQUEST_INVALID", context(request, market, null, "identity"));
         }
         if (request.getOrderAmount() == null || request.getOrderAmount().signum() <= 0) throw new BacktestException("BACKTEST_PARAMETER_INVALID", context(request, market, null, "orderAmount"));
+        if (request.getInitialCapital() == null || request.getInitialCapital().signum() <= 0) throw new BacktestException("BACKTEST_PARAMETER_INVALID", context(request, market, null, "initialCapital"));
         if (request.getFeeRate() == null || request.getFeeRate().signum() < 0 || request.getFeeRate().compareTo(new BigDecimal("0.01")) > 0) throw new BacktestException("BACKTEST_PARAMETER_INVALID", context(request, market, null, "feeRate"));
     }
 

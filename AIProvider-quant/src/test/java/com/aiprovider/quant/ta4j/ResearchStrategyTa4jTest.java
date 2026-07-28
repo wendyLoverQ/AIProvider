@@ -125,6 +125,7 @@ class ResearchStrategyTa4jTest {
                 code,
                 "1.0.0",
                 parameters,
+                new BigDecimal("100000"),
                 BigDecimal.ONE,
                 BigDecimal.ZERO,
                 forceClose);

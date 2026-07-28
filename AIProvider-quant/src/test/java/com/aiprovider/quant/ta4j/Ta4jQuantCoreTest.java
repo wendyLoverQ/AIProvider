@@ -248,6 +248,7 @@ class Ta4jQuantCoreTest {
                 code,
                 version,
                 parameters,
+                new BigDecimal("100000"),
                 amount,
                 feeRate,
                 forceClose);
