@@ -177,6 +177,84 @@ class DefaultRuntimeMarketStateEngineTest {
     }
 
     @Test
+    void candleContentComparisonIgnoresBigDecimalScale() {
+        StreamKlineEvent firstEvent = kline(0, true);
+        setDecimalValues(firstEvent, "100.0", "102.00", "99.000", "101.0",
+                "10.00", "1005.000", "6.0", "603.00");
+        StreamKlineEvent secondEvent = kline(0, true);
+        secondEvent.setEventTime(firstEvent.getEventTime().plusMillis(1));
+        setDecimalValues(secondEvent, "100.000000000000000000", "102.0", "99.00", "101.000",
+                "10.0000", "1005.0", "6.000", "603.0");
+        RuntimeClosedCandle first = RuntimeClosedCandle.from(firstEvent);
+        RuntimeClosedCandle second = RuntimeClosedCandle.from(secondEvent);
+
+        assertTrue(first.hasSameCandleContent(second));
+        assertTrue(second.hasSameCandleContent(first));
+        assertNotEquals(first, second);
+    }
+
+    @Test
+    void handsHighScaleHistoricalSeedToNumericallyEqualLiveKline() {
+        HistoricalCandle seed = candle(0);
+        setDatabaseScale(seed);
+        RuntimeMarketState seeded = engine.initialize(KEY, 3, Collections.singletonList(seed));
+        RuntimeClosedCandle historical = seeded.getClosedCandles().get(0);
+        StreamKlineEvent live = kline(0, true);
+        Instant windowStart = historical.getOpenTime();
+        Instant windowEnd = historical.getCloseTime();
+
+        RuntimeMarketUpdateResult result = engine.onKline(seeded, live);
+
+        assertEquals(RuntimeMarketUpdateType.DUPLICATE_CLOSED_CANDLE_IGNORED,
+                result.getUpdateType());
+        assertEquals(1, result.getClosedCandleCount());
+        assertSame(historical, result.getState().getClosedCandles().get(0));
+        assertEquals(live.getEventTime(), result.getState().getLastKlineEventTime());
+        assertNotNull(result.getState().getLastKlineEventFingerprint());
+        assertEquals(windowStart, result.getWindowStartTime());
+        assertEquals(windowEnd, result.getWindowEndTime());
+    }
+
+    @Test
+    void differentNumericPriceStillConflictsAcrossScales() {
+        HistoricalCandle seed = candle(0);
+        setDatabaseScale(seed);
+        RuntimeMarketState seeded = engine.initialize(KEY, 3, Collections.singletonList(seed));
+        StreamKlineEvent changed = kline(0, true);
+        changed.setClose(new BigDecimal("101.01"));
+
+        assertError(RuntimeMarketStateException.CANDLE_CONFLICT,
+                () -> engine.onKline(seeded, changed));
+    }
+
+    @Test
+    void differentNumericVolumeStillConflictsAcrossScales() {
+        HistoricalCandle seed = candle(0);
+        setDatabaseScale(seed);
+        RuntimeMarketState seeded = engine.initialize(KEY, 3, Collections.singletonList(seed));
+        StreamKlineEvent changed = kline(0, true);
+        changed.setVolume(new BigDecimal("10.01"));
+
+        assertError(RuntimeMarketStateException.CANDLE_CONFLICT,
+                () -> engine.onKline(seeded, changed));
+    }
+
+    @Test
+    void numericEqualityAcrossScalesDoesNotBypassKlineEventWatermark() {
+        HistoricalCandle seed = candle(0);
+        setDatabaseScale(seed);
+        RuntimeMarketState seeded = engine.initialize(KEY, 3, Collections.singletonList(seed));
+        StreamKlineEvent newest = kline(0, true);
+        newest.setEventTime(newest.getCloseTime().plusMillis(10));
+        RuntimeMarketState handedOff = engine.onKline(seeded, newest).getState();
+        StreamKlineEvent older = kline(0, true);
+        older.setEventTime(older.getCloseTime().plusMillis(5));
+
+        assertError(RuntimeMarketStateException.EVENT_TIME_INVALID,
+                () -> engine.onKline(handedOff, older));
+    }
+
+    @Test
     void matchingCandleContentDoesNotBypassKlineEventWatermark() {
         RuntimeMarketState seeded = engine.initialize(KEY, 3, Collections.singletonList(candle(0)));
         StreamKlineEvent newest = kline(0, true);
@@ -379,6 +457,31 @@ class DefaultRuntimeMarketStateEngineTest {
         event.setTakerBuyQuoteVolume(source.getTakerBuyQuoteVolume());
         event.setClosed(closed);
         return event;
+    }
+
+    private static void setDatabaseScale(HistoricalCandle candle) {
+        candle.setOpenPrice(new BigDecimal("100.000000000000000000"));
+        candle.setHighPrice(new BigDecimal("102.000000000000000000"));
+        candle.setLowPrice(new BigDecimal("99.000000000000000000"));
+        candle.setClosePrice(new BigDecimal("101.000000000000000000"));
+        candle.setVolume(new BigDecimal("10.000000000000000000"));
+        candle.setQuoteVolume(new BigDecimal("1005.000000000000000000"));
+        candle.setTakerBuyBaseVolume(new BigDecimal("6.000000000000000000"));
+        candle.setTakerBuyQuoteVolume(new BigDecimal("603.000000000000000000"));
+    }
+
+    private static void setDecimalValues(StreamKlineEvent event, String open, String high,
+                                         String low, String close, String volume,
+                                         String quoteVolume, String takerBuyBaseVolume,
+                                         String takerBuyQuoteVolume) {
+        event.setOpen(new BigDecimal(open));
+        event.setHigh(new BigDecimal(high));
+        event.setLow(new BigDecimal(low));
+        event.setClose(new BigDecimal(close));
+        event.setVolume(new BigDecimal(volume));
+        event.setQuoteVolume(new BigDecimal(quoteVolume));
+        event.setTakerBuyBaseVolume(new BigDecimal(takerBuyBaseVolume));
+        event.setTakerBuyQuoteVolume(new BigDecimal(takerBuyQuoteVolume));
     }
 
     private static StreamBookTickerEvent book(int index) {

@@ -205,11 +205,18 @@ public final class RuntimeClosedCandle {
                 && provider == other.provider && marketType == other.marketType
                 && symbol.equals(other.symbol) && interval == other.interval
                 && openTime.equals(other.openTime) && closeTime.equals(other.closeTime)
-                && open.equals(other.open) && high.equals(other.high) && low.equals(other.low)
-                && close.equals(other.close) && volume.equals(other.volume)
-                && quoteVolume.equals(other.quoteVolume)
-                && takerBuyBaseVolume.equals(other.takerBuyBaseVolume)
-                && takerBuyQuoteVolume.equals(other.takerBuyQuoteVolume);
+                && numericallyEqual(open, other.open)
+                && numericallyEqual(high, other.high)
+                && numericallyEqual(low, other.low)
+                && numericallyEqual(close, other.close)
+                && numericallyEqual(volume, other.volume)
+                && numericallyEqual(quoteVolume, other.quoteVolume)
+                && numericallyEqual(takerBuyBaseVolume, other.takerBuyBaseVolume)
+                && numericallyEqual(takerBuyQuoteVolume, other.takerBuyQuoteVolume);
+    }
+
+    private static boolean numericallyEqual(BigDecimal left, BigDecimal right) {
+        return left != null && right != null && left.compareTo(right) == 0;
     }
 
     @Override
