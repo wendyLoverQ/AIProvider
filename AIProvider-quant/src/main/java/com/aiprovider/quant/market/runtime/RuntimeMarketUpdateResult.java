@@ -10,6 +10,7 @@ public final class RuntimeMarketUpdateResult {
     private final RuntimeMarketState state;
     private final RuntimeClosedCandle addedClosedCandle;
     private final RuntimeTopOfBook latestTopOfBook;
+    private final RuntimeMarkPrice latestMarkPrice;
     private final int closedCandleCount;
     private final Instant windowStartTime;
     private final Instant windowEndTime;
@@ -24,6 +25,7 @@ public final class RuntimeMarketUpdateResult {
         this.state = state;
         this.addedClosedCandle = addedClosedCandle;
         this.latestTopOfBook = state.getLatestTopOfBook();
+        this.latestMarkPrice = state.getLatestMarkPrice();
         List<RuntimeClosedCandle> candles = state.getClosedCandles();
         this.closedCandleCount = candles.size();
         this.windowStartTime = candles.isEmpty() ? null : candles.get(0).getOpenTime();
@@ -34,6 +36,7 @@ public final class RuntimeMarketUpdateResult {
     public RuntimeMarketState getState() { return state; }
     public RuntimeClosedCandle getAddedClosedCandle() { return addedClosedCandle; }
     public RuntimeTopOfBook getLatestTopOfBook() { return latestTopOfBook; }
+    public RuntimeMarkPrice getLatestMarkPrice() { return latestMarkPrice; }
     public int getClosedCandleCount() { return closedCandleCount; }
     public Instant getWindowStartTime() { return RuntimeClosedCandle.copy(windowStartTime); }
     public Instant getWindowEndTime() { return RuntimeClosedCandle.copy(windowEndTime); }
@@ -46,13 +49,14 @@ public final class RuntimeMarketUpdateResult {
         return closedCandleCount == that.closedCandleCount && updateType == that.updateType
                 && state.equals(that.state) && Objects.equals(addedClosedCandle, that.addedClosedCandle)
                 && Objects.equals(latestTopOfBook, that.latestTopOfBook)
+                && Objects.equals(latestMarkPrice, that.latestMarkPrice)
                 && Objects.equals(windowStartTime, that.windowStartTime)
                 && Objects.equals(windowEndTime, that.windowEndTime);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(updateType, state, addedClosedCandle, latestTopOfBook,
+        return Objects.hash(updateType, state, addedClosedCandle, latestTopOfBook, latestMarkPrice,
                 closedCandleCount, windowStartTime, windowEndTime);
     }
 }

@@ -4,6 +4,7 @@ import com.aiprovider.quant.account.paper.PaperAccountSnapshot;
 import com.aiprovider.quant.market.history.model.HistoricalCandle;
 import com.aiprovider.quant.market.stream.model.StreamBookTickerEvent;
 import com.aiprovider.quant.market.stream.model.StreamKlineEvent;
+import com.aiprovider.quant.market.stream.model.StreamMarkPriceEvent;
 
 import java.util.List;
 
@@ -15,4 +16,6 @@ public interface PaperRuntimeEngine {
     PaperRuntimeStepResult onKline(PaperRuntimeSnapshot runtime, StreamKlineEvent event);
 
     PaperRuntimeStepResult onBookTicker(PaperRuntimeSnapshot runtime, StreamBookTickerEvent event);
+
+    PaperRuntimeStepResult onMarkPrice(PaperRuntimeSnapshot runtime, StreamMarkPriceEvent event);
 }

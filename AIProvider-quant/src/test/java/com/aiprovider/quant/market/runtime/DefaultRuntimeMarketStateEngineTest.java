@@ -6,6 +6,7 @@ import com.aiprovider.quant.market.model.MarketProviderId;
 import com.aiprovider.quant.market.model.MarketType;
 import com.aiprovider.quant.market.stream.model.StreamBookTickerEvent;
 import com.aiprovider.quant.market.stream.model.StreamKlineEvent;
+import com.aiprovider.quant.market.stream.model.StreamMarkPriceEvent;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -39,6 +40,120 @@ class DefaultRuntimeMarketStateEngineTest {
         assertEquals(3, state.getMaxClosedCandles());
         assertEquals(Collections.emptyList(), state.getClosedCandles());
         assertNull(state.getLastKlineEventTime());
+        assertNull(state.getLatestMarkPrice());
+        assertNull(state.getLastMarkPriceEventTime());
+        assertNull(state.getLastMarkPriceEventFingerprint());
+    }
+
+    @Test
+    void writesCompleteMarkPriceStateWithoutRetainingMutableEvent() {
+        RuntimeMarketState state = engine.initialize(KEY, 3, Collections.emptyList());
+        StreamMarkPriceEvent event = mark(BASE.plusSeconds(1), "101.25");
+
+        RuntimeMarketUpdateResult result = engine.onMarkPrice(state, event);
+        RuntimeMarkPrice mark = result.getLatestMarkPrice();
+
+        assertEquals(RuntimeMarketUpdateType.MARK_PRICE_UPDATED, result.getUpdateType());
+        assertEquals(MarketProviderId.BINANCE_USDM, mark.getProvider());
+        assertEquals(MarketType.USDM_PERPETUAL, mark.getMarketType());
+        assertEquals("BTCUSDT", mark.getSymbol());
+        assertEquals(event.getEventTime(), mark.getEventTime());
+        assertEquals(new BigDecimal("101.25"), mark.getMarkPrice());
+        assertEquals(new BigDecimal("101.00"), mark.getIndexPrice());
+        assertEquals(new BigDecimal("100.50"), mark.getEstimatedSettlePrice());
+        assertEquals(new BigDecimal("-0.0001"), mark.getLastFundingRate());
+        assertEquals(new BigDecimal("0.0001"), mark.getInterestRate());
+        assertEquals(BASE.plusSeconds(3600), mark.getNextFundingTime());
+        assertEquals(event.getEventTime(), result.getState().getLastMarkPriceEventTime());
+        assertNotNull(result.getState().getLastMarkPriceEventFingerprint());
+
+        event.setMarkPrice(BigDecimal.ONE);
+        event.setSymbol("ETHUSDT");
+        assertEquals(new BigDecimal("101.25"), mark.getMarkPrice());
+        assertEquals("BTCUSDT", mark.getSymbol());
+    }
+
+    @Test
+    void rejectsOldDuplicateAndConflictingMarkPriceEvents() {
+        StreamMarkPriceEvent first = mark(BASE.plusSeconds(2), "101");
+        RuntimeMarketState updated = engine.onMarkPrice(
+                engine.initialize(KEY, 3, Collections.emptyList()), first).getState();
+
+        assertEquals(RuntimeMarketUpdateType.DUPLICATE_MARK_PRICE_IGNORED,
+                engine.onMarkPrice(updated, first).getUpdateType());
+        assertError(RuntimeMarketStateException.EVENT_TIME_INVALID,
+                () -> engine.onMarkPrice(updated, mark(BASE.plusSeconds(1), "101")));
+
+        StreamMarkPriceEvent conflict = mark(BASE.plusSeconds(2), "102");
+        assertError("RUNTIME_MARKET_MARK_PRICE_CONFLICT",
+                () -> engine.onMarkPrice(updated, conflict));
+    }
+
+    @Test
+    void markPriceFingerprintUsesNumericBigDecimalEquality() {
+        StreamMarkPriceEvent first = mark(BASE.plusSeconds(1), "101.0");
+        RuntimeMarketState updated = engine.onMarkPrice(
+                engine.initialize(KEY, 3, Collections.emptyList()), first).getState();
+        StreamMarkPriceEvent scaled = mark(BASE.plusSeconds(1), "101.00");
+        scaled.setIndexPrice(new BigDecimal("101.000"));
+        scaled.setEstimatedSettlePrice(new BigDecimal("100.5000"));
+        scaled.setLastFundingRate(new BigDecimal("-0.00010"));
+        scaled.setInterestRate(new BigDecimal("0.00010"));
+
+        RuntimeMarketUpdateResult replay = engine.onMarkPrice(updated, scaled);
+
+        assertEquals(RuntimeMarketUpdateType.DUPLICATE_MARK_PRICE_IGNORED,
+                replay.getUpdateType());
+        assertSame(updated, replay.getState());
+    }
+
+    @Test
+    void rejectsMarkPriceContextMismatchAndNonPositivePrice() {
+        RuntimeMarketState state = engine.initialize(KEY, 3, Collections.emptyList());
+        StreamMarkPriceEvent providerMismatch = mark(BASE.plusSeconds(1), "101");
+        providerMismatch.setProvider(null);
+        assertError(RuntimeMarketStateException.CONTEXT_MISMATCH,
+                () -> engine.onMarkPrice(state, providerMismatch));
+
+        StreamMarkPriceEvent marketMismatch = mark(BASE.plusSeconds(1), "101");
+        marketMismatch.setMarketType(null);
+        assertError(RuntimeMarketStateException.CONTEXT_MISMATCH,
+                () -> engine.onMarkPrice(state, marketMismatch));
+
+        StreamMarkPriceEvent symbolMismatch = mark(BASE.plusSeconds(1), "101");
+        symbolMismatch.setSymbol("ETHUSDT");
+        assertError(RuntimeMarketStateException.CONTEXT_MISMATCH,
+                () -> engine.onMarkPrice(state, symbolMismatch));
+
+        StreamMarkPriceEvent zero = mark(BASE.plusSeconds(1), "0");
+        assertError(RuntimeMarkPrice.MARK_PRICE_INVALID,
+                () -> engine.onMarkPrice(state, zero));
+
+        StreamMarkPriceEvent negativeIndex = mark(BASE.plusSeconds(1), "101");
+        negativeIndex.setIndexPrice(new BigDecimal("-1"));
+        assertError(RuntimeMarkPrice.MARK_PRICE_INVALID,
+                () -> engine.onMarkPrice(state, negativeIndex));
+    }
+
+    @Test
+    void markPriceUpdatePreservesKlineBookAndWindowState() {
+        RuntimeMarketState state = engine.initialize(
+                KEY, 3, Collections.singletonList(candle(0)));
+        state = engine.onKline(state, kline(1, true)).getState();
+        state = engine.onBookTicker(state, book(0)).getState();
+        List<RuntimeClosedCandle> candlesBefore = state.getClosedCandles();
+        RuntimeTopOfBook bookBefore = state.getLatestTopOfBook();
+        Instant klineWatermark = state.getLastKlineEventTime();
+        Instant bookWatermark = state.getLastBookTickerEventTime();
+
+        RuntimeMarketState marked = engine.onMarkPrice(
+                state, mark(BASE.plusSeconds(200), "101")).getState();
+
+        assertEquals(candlesBefore, marked.getClosedCandles());
+        assertSame(bookBefore, marked.getLatestTopOfBook());
+        assertEquals(klineWatermark, marked.getLastKlineEventTime());
+        assertEquals(bookWatermark, marked.getLastBookTickerEventTime());
+        assertEquals(2, marked.getClosedCandles().size());
     }
 
     @Test
@@ -494,6 +609,21 @@ class DefaultRuntimeMarketStateEngineTest {
         event.setBidQuantity(new BigDecimal("2.0"));
         event.setAskPrice(new BigDecimal("101.0"));
         event.setAskQuantity(new BigDecimal("2.5"));
+        return event;
+    }
+
+    private static StreamMarkPriceEvent mark(Instant eventTime, String price) {
+        StreamMarkPriceEvent event = new StreamMarkPriceEvent();
+        event.setProvider(MarketProviderId.BINANCE_USDM);
+        event.setMarketType(MarketType.USDM_PERPETUAL);
+        event.setSymbol("BTCUSDT");
+        event.setEventTime(eventTime);
+        event.setMarkPrice(new BigDecimal(price));
+        event.setIndexPrice(new BigDecimal("101.00"));
+        event.setEstimatedSettlePrice(new BigDecimal("100.50"));
+        event.setLastFundingRate(new BigDecimal("-0.0001"));
+        event.setInterestRate(new BigDecimal("0.0001"));
+        event.setNextFundingTime(BASE.plusSeconds(3600));
         return event;
     }
 

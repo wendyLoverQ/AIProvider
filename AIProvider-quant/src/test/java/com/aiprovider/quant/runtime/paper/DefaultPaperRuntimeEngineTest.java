@@ -2,7 +2,9 @@ package com.aiprovider.quant.runtime.paper;
 
 import com.aiprovider.quant.account.paper.DefaultPaperAccountEngine;
 import com.aiprovider.quant.account.paper.PaperAccountEngine;
+import com.aiprovider.quant.account.paper.PaperAccountException;
 import com.aiprovider.quant.account.paper.PaperAccountSnapshot;
+import com.aiprovider.quant.account.paper.PaperAccountUpdateResult;
 import com.aiprovider.quant.engine.paper.DefaultPaperTradingEngine;
 import com.aiprovider.quant.engine.paper.PaperTradingEngine;
 import com.aiprovider.quant.engine.paper.PaperTradingException;
@@ -11,6 +13,11 @@ import com.aiprovider.quant.engine.paper.PaperTradingSessionSnapshot;
 import com.aiprovider.quant.engine.paper.PaperTradingStepResult;
 import com.aiprovider.quant.engine.paper.PaperTradingStepType;
 import com.aiprovider.quant.execution.order.ExecutionOrderStatus;
+import com.aiprovider.quant.execution.OrderSide;
+import com.aiprovider.quant.execution.PositionSide;
+import com.aiprovider.quant.execution.order.ExecutionFill;
+import com.aiprovider.quant.execution.order.ExecutionOrderRequest;
+import com.aiprovider.quant.execution.order.ExecutionOrderType;
 import com.aiprovider.quant.execution.simulation.SimulatedExecutionPolicy;
 import com.aiprovider.quant.execution.simulation.SimulatedTopOfBook;
 import com.aiprovider.quant.market.history.model.HistoricalCandle;
@@ -25,6 +32,7 @@ import com.aiprovider.quant.market.runtime.RuntimeMarketStateException;
 import com.aiprovider.quant.market.runtime.RuntimeMarketUpdateResult;
 import com.aiprovider.quant.market.stream.model.StreamBookTickerEvent;
 import com.aiprovider.quant.market.stream.model.StreamKlineEvent;
+import com.aiprovider.quant.market.stream.model.StreamMarkPriceEvent;
 import com.aiprovider.quant.portfolio.sizing.MarketOrderQuantityRules;
 import com.aiprovider.quant.portfolio.sizing.PositionSizingPolicyType;
 import com.aiprovider.quant.risk.pretrade.PreTradeRiskPolicy;
@@ -177,6 +185,119 @@ class DefaultPaperRuntimeEngineTest {
     }
 
     @Test
+    void markPriceRevaluesOpenAccountAndPreservesCompleteSessionState() {
+        PaperRuntimeEngine engine = new DefaultPaperRuntimeEngine();
+        PaperRuntimeSnapshot initial = initialize(engine, candles(100, 99, 98, 97, 98));
+        PaperRuntimeStepResult cachedBook = engine.onBookTicker(
+                initial, book(BASE.plusSeconds(299), "98", "99", "10"));
+        StreamKlineEvent crossing = kline(5, "99", true);
+        crossing.setEventTime(BASE.plusSeconds(360));
+        PaperRuntimeSnapshot pending = engine.onKline(cachedBook.getRuntime(), crossing).getRuntime();
+        PaperRuntimeSnapshot partial = engine.onBookTicker(
+                pending, book(BASE.plusSeconds(361), "98", "99", "1")).getRuntime();
+        PaperTradingSessionSnapshot before = partial.getTradingSession();
+
+        PaperRuntimeStepResult result = engine.onMarkPrice(
+                partial, mark(BASE.plusSeconds(362), "110"));
+
+        PaperTradingSessionSnapshot after = result.getRuntime().getTradingSession();
+        PaperAccountSnapshot account = after.getPaperAccountSnapshot();
+        assertThat(result.getStepType()).isEqualTo(PaperRuntimeStepType.MARK_PRICE_UPDATED);
+        assertThat(account.getPosition().getMarkPrice()).isEqualByComparingTo("110");
+        assertThat(account.getUnrealizedPnl()).isEqualByComparingTo("11");
+        assertThat(account.getTotalEquity()).isEqualByComparingTo("10010.901");
+        assertThat(account.getAvailableCapital()).isEqualByComparingTo("9900.901");
+        assertThat(after.getPendingOrderSnapshot()).isSameAs(before.getPendingOrderSnapshot());
+        assertThat(after.getLastOrderSnapshot()).isSameAs(before.getLastOrderSnapshot());
+        assertThat(after.getLastSignalDecision()).isSameAs(before.getLastSignalDecision());
+        assertThat(after.getLastSizingResult()).isSameAs(before.getLastSizingResult());
+        assertThat(after.getLastRiskDecision()).isSameAs(before.getLastRiskDecision());
+        assertThat(after.getLastEvaluatedCandle()).isSameAs(before.getLastEvaluatedCandle());
+    }
+
+    @Test
+    void markPriceAdvancesFlatAccountAndSessionTime() {
+        PaperRuntimeEngine engine = new DefaultPaperRuntimeEngine();
+        PaperRuntimeSnapshot initial = initialize(engine, candles(100, 100, 100, 100, 100));
+        Instant eventTime = BASE.plusSeconds(301);
+
+        PaperRuntimeStepResult result = engine.onMarkPrice(initial, mark(eventTime, "101"));
+
+        PaperAccountSnapshot account =
+                result.getRuntime().getTradingSession().getPaperAccountSnapshot();
+        assertThat(account.getPosition().isFlat()).isTrue();
+        assertThat(account.getLastUpdatedAt()).isEqualTo(eventTime);
+        assertThat(result.getRuntime().getTradingSession().getLastUpdatedAt()).isEqualTo(eventTime);
+        assertThat(result.getRuntime().getLastProcessedEventTime()).isEqualTo(eventTime);
+    }
+
+    @Test
+    void markPriceRollsUtcDayBeforeValuingFirstPrice() {
+        Instant initializedAt = Instant.parse("2026-07-28T23:59:50Z");
+        PaperAccountSnapshot openAccount = openAccount(
+                initializedAt, initializedAt.plusSeconds(5), "100", "1");
+        PaperRuntimeEngine engine = new DefaultPaperRuntimeEngine();
+        PaperRuntimeSnapshot runtime = engine.initialize(
+                config(6), candlesAt(initializedAt.minusSeconds(300), 100, 100, 100, 100, 100),
+                openAccount);
+        Instant eventTime = Instant.parse("2026-07-29T00:00:01Z");
+
+        PaperRuntimeStepResult result = engine.onMarkPrice(runtime, mark(eventTime, "110"));
+
+        PaperAccountSnapshot account =
+                result.getRuntime().getTradingSession().getPaperAccountSnapshot();
+        assertThat(result.isUtcTradingDayRolled()).isTrue();
+        assertThat(account.getTradingDayState().getUtcDate())
+                .isEqualTo(LocalDate.of(2026, 7, 29));
+        assertThat(account.getTradingDayState().getDayStartEquity())
+                .isEqualByComparingTo("9999");
+        assertThat(account.getUnrealizedPnl()).isEqualByComparingTo("10");
+        assertThat(account.getTotalEquity()).isEqualByComparingTo("10009");
+        assertThat(account.getAvailableCapital()).isEqualByComparingTo("9899");
+    }
+
+    @Test
+    void duplicateMarkPriceDoesNotRepeatAccountValuation() {
+        CountingAccountEngine countingAccount = new CountingAccountEngine(accountEngine);
+        PaperRuntimeEngine engine = new DefaultPaperRuntimeEngine(
+                new DefaultRuntimeMarketStateEngine(), new DefaultPaperTradingEngine(),
+                countingAccount);
+        PaperRuntimeSnapshot initial = engine.initialize(
+                config(6), candles(100, 100, 100, 100, 100), account(BASE));
+        StreamMarkPriceEvent event = mark(BASE.plusSeconds(301), "101");
+        PaperRuntimeStepResult first = engine.onMarkPrice(initial, event);
+        PaperAccountSnapshot firstAccount =
+                first.getRuntime().getTradingSession().getPaperAccountSnapshot();
+
+        PaperRuntimeStepResult duplicate = engine.onMarkPrice(first.getRuntime(), event);
+
+        assertThat(duplicate.getStepType())
+                .isEqualTo(PaperRuntimeStepType.DUPLICATE_MARK_PRICE_IGNORED);
+        assertThat(countingAccount.markToMarketCalls).isOne();
+        assertThat(duplicate.getRuntime().getTradingSession().getPaperAccountSnapshot())
+                .isSameAs(firstAccount);
+    }
+
+    @Test
+    void duplicateMarkPriceMayStillRollUtcTradingDay() {
+        PaperRuntimeEngine engine = new DefaultPaperRuntimeEngine();
+        PaperRuntimeSnapshot initial = initialize(engine, candles(100, 100, 100, 100, 100));
+        StreamMarkPriceEvent event = mark(Instant.parse("2026-07-29T00:00:01Z"), "101");
+        RuntimeMarketState markedState = new DefaultRuntimeMarketStateEngine()
+                .onMarkPrice(initial.getMarketState(), event).getState();
+        PaperRuntimeSnapshot detached = new PaperRuntimeSnapshot(
+                initial.getConfig(), markedState, initial.getTradingSession(), null, null);
+
+        PaperRuntimeStepResult duplicate = engine.onMarkPrice(detached, event);
+
+        assertThat(duplicate.getStepType())
+                .isEqualTo(PaperRuntimeStepType.DUPLICATE_MARK_PRICE_IGNORED);
+        assertThat(duplicate.isUtcTradingDayRolled()).isTrue();
+        assertThat(duplicate.getRuntime().getTradingSession().getPaperAccountSnapshot()
+                .getTradingDayState().getUtcDate()).isEqualTo(LocalDate.of(2026, 7, 29));
+    }
+
+    @Test
     void klineAndBookRollUtcDayAndKeepPendingOrder() {
         PaperRuntimeEngine engine = new DefaultPaperRuntimeEngine();
         Instant nearMidnight = Instant.parse("2026-07-28T23:54:00Z");
@@ -204,7 +325,7 @@ class DefaultPaperRuntimeEngineTest {
     }
 
     @Test
-    void rejectsOlderUtcDateButAllowsIndependentStreamWatermarksToInterleave() {
+    void rejectsOlderUtcDateAndCrossChannelOutOfOrderEvents() {
         PaperRuntimeEngine engine = new DefaultPaperRuntimeEngine();
         PaperRuntimeSnapshot initial = initialize(engine, candles(100, 100, 100, 100, 100));
 
@@ -218,11 +339,18 @@ class DefaultPaperRuntimeEngineTest {
                 initial, book(BASE.plusSeconds(400), "99", "100", "1"));
         StreamKlineEvent earlierKline = kline(5, "100", false);
         earlierKline.setEventTime(BASE.plusSeconds(350));
-        PaperRuntimeStepResult interleaved = engine.onKline(laterBook.getRuntime(), earlierKline);
-        assertThat(interleaved.getRuntime().getLastProcessedEventTime())
-                .isEqualTo(BASE.plusSeconds(350));
-        assertThat(interleaved.getRuntime().getMarketState().getLastBookTickerEventTime())
-                .isEqualTo(BASE.plusSeconds(400));
+        assertThatThrownBy(() -> engine.onKline(laterBook.getRuntime(), earlierKline))
+                .isInstanceOf(PaperRuntimeException.class)
+                .extracting("errorCode")
+                .isEqualTo(PaperRuntimeException.PAPER_RUNTIME_EVENT_TIME_INVALID);
+
+        PaperRuntimeStepResult laterMark = engine.onMarkPrice(
+                initial, mark(BASE.plusSeconds(500), "101"));
+        assertThatThrownBy(() -> engine.onBookTicker(
+                laterMark.getRuntime(), book(BASE.plusSeconds(499), "99", "100", "1")))
+                .isInstanceOf(PaperRuntimeException.class)
+                .extracting("errorCode")
+                .isEqualTo(PaperRuntimeException.PAPER_RUNTIME_EVENT_TIME_INVALID);
     }
 
     @Test
@@ -253,6 +381,41 @@ class DefaultPaperRuntimeEngineTest {
                     assertThat(exception.getMessage())
                             .contains(PaperTradingException.PAPER_TRADING_SIGNAL_FAILED);
                     assertThat(exception.getCause()).isSameAs(tradingCause);
+                });
+    }
+
+    @Test
+    void wrapsMarkPriceMarketAndAccountFailuresWithStableLowerCodeAndCause() {
+        PaperRuntimeSnapshot initial = initialize(
+                new DefaultPaperRuntimeEngine(), candles(100, 100, 100, 100, 100));
+        StreamMarkPriceEvent event = mark(BASE.plusSeconds(301), "101");
+        RuntimeMarketStateException marketCause = new RuntimeMarketStateException(
+                RuntimeMarketStateException.EVENT_TIME_INVALID, "market-time");
+        PaperRuntimeEngine marketRuntime = new DefaultPaperRuntimeEngine(
+                new ThrowingMarketEngine(marketCause), new DefaultPaperTradingEngine(),
+                accountEngine);
+
+        assertThatThrownBy(() -> marketRuntime.onMarkPrice(initial, event))
+                .isInstanceOfSatisfying(PaperRuntimeException.class, exception -> {
+                    assertThat(exception.getErrorCode())
+                            .isEqualTo(PaperRuntimeException.PAPER_RUNTIME_MARKET_FAILED);
+                    assertThat(exception.getMessage())
+                            .contains(RuntimeMarketStateException.EVENT_TIME_INVALID);
+                    assertThat(exception.getCause()).isSameAs(marketCause);
+                });
+
+        PaperAccountException accountCause = new PaperAccountException(
+                "PAPER_ACCOUNT_MARK_TEST_FAILED", "account-mark");
+        PaperRuntimeEngine accountRuntime = new DefaultPaperRuntimeEngine(
+                new DefaultRuntimeMarketStateEngine(), new DefaultPaperTradingEngine(),
+                new ThrowingAccountEngine(accountEngine, accountCause));
+
+        assertThatThrownBy(() -> accountRuntime.onMarkPrice(initial, event))
+                .isInstanceOfSatisfying(PaperRuntimeException.class, exception -> {
+                    assertThat(exception.getErrorCode())
+                            .isEqualTo(PaperRuntimeException.PAPER_RUNTIME_ACCOUNT_FAILED);
+                    assertThat(exception.getMessage()).contains("PAPER_ACCOUNT_MARK_TEST_FAILED");
+                    assertThat(exception.getCause()).isSameAs(accountCause);
                 });
     }
 
@@ -305,6 +468,18 @@ class DefaultPaperRuntimeEngineTest {
         return accountEngine.initialize(
                 "runtime-account", PROVIDER, MARKET_TYPE, "USDT", new BigDecimal("10000"),
                 initializedAt.atZone(ZoneOffset.UTC).toLocalDate(), initializedAt);
+    }
+
+    private PaperAccountSnapshot openAccount(
+            Instant initializedAt, Instant filledAt, String price, String fee) {
+        PaperAccountSnapshot account = account(initializedAt);
+        ExecutionOrderRequest order = new ExecutionOrderRequest(
+                "runtime-open", PROVIDER, MARKET_TYPE, SYMBOL, ExecutionOrderType.MARKET,
+                OrderSide.BUY, PositionSide.LONG, BigDecimal.ONE, false, initializedAt);
+        ExecutionFill fill = new ExecutionFill(
+                "runtime-entry", BigDecimal.ONE, new BigDecimal(price), new BigDecimal(fee),
+                "USDT", filledAt);
+        return accountEngine.applyFill(account, order, fill).getAccount();
     }
 
     private List<HistoricalCandle> candles(int... closes) {
@@ -378,6 +553,100 @@ class DefaultPaperRuntimeEngineTest {
         event.setAskPrice(new BigDecimal(ask));
         event.setAskQuantity(new BigDecimal(quantity));
         return event;
+    }
+
+    private StreamMarkPriceEvent mark(Instant eventTime, String price) {
+        StreamMarkPriceEvent event = new StreamMarkPriceEvent();
+        event.setProvider(PROVIDER);
+        event.setMarketType(MARKET_TYPE);
+        event.setSymbol(SYMBOL);
+        event.setEventTime(eventTime);
+        event.setMarkPrice(new BigDecimal(price));
+        event.setIndexPrice(new BigDecimal(price));
+        event.setEstimatedSettlePrice(new BigDecimal(price));
+        event.setLastFundingRate(new BigDecimal("-0.0001"));
+        event.setInterestRate(new BigDecimal("0.0001"));
+        event.setNextFundingTime(eventTime.plusSeconds(3600));
+        return event;
+    }
+
+    private static final class CountingAccountEngine implements PaperAccountEngine {
+        private final PaperAccountEngine delegate;
+        private int markToMarketCalls;
+
+        private CountingAccountEngine(PaperAccountEngine delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public PaperAccountSnapshot initialize(
+                String accountId, MarketProviderId provider, MarketType marketType,
+                String quoteAsset, BigDecimal initialCapital, LocalDate initialUtcDate,
+                Instant initializedAt) {
+            return delegate.initialize(accountId, provider, marketType, quoteAsset, initialCapital,
+                    initialUtcDate, initializedAt);
+        }
+
+        @Override
+        public PaperAccountUpdateResult applyFill(
+                PaperAccountSnapshot account, ExecutionOrderRequest orderRequest,
+                ExecutionFill fill) {
+            return delegate.applyFill(account, orderRequest, fill);
+        }
+
+        @Override
+        public PaperAccountSnapshot markToMarket(
+                PaperAccountSnapshot account, String symbol, BigDecimal markPrice,
+                Instant markedAt) {
+            markToMarketCalls++;
+            return delegate.markToMarket(account, symbol, markPrice, markedAt);
+        }
+
+        @Override
+        public PaperAccountSnapshot rollUtcTradingDay(
+                PaperAccountSnapshot account, LocalDate nextUtcDate, Instant rolledAt) {
+            return delegate.rollUtcTradingDay(account, nextUtcDate, rolledAt);
+        }
+    }
+
+    private static final class ThrowingAccountEngine implements PaperAccountEngine {
+        private final PaperAccountEngine delegate;
+        private final PaperAccountException failure;
+
+        private ThrowingAccountEngine(
+                PaperAccountEngine delegate, PaperAccountException failure) {
+            this.delegate = delegate;
+            this.failure = failure;
+        }
+
+        @Override
+        public PaperAccountSnapshot initialize(
+                String accountId, MarketProviderId provider, MarketType marketType,
+                String quoteAsset, BigDecimal initialCapital, LocalDate initialUtcDate,
+                Instant initializedAt) {
+            return delegate.initialize(accountId, provider, marketType, quoteAsset, initialCapital,
+                    initialUtcDate, initializedAt);
+        }
+
+        @Override
+        public PaperAccountUpdateResult applyFill(
+                PaperAccountSnapshot account, ExecutionOrderRequest orderRequest,
+                ExecutionFill fill) {
+            return delegate.applyFill(account, orderRequest, fill);
+        }
+
+        @Override
+        public PaperAccountSnapshot markToMarket(
+                PaperAccountSnapshot account, String symbol, BigDecimal markPrice,
+                Instant markedAt) {
+            throw failure;
+        }
+
+        @Override
+        public PaperAccountSnapshot rollUtcTradingDay(
+                PaperAccountSnapshot account, LocalDate nextUtcDate, Instant rolledAt) {
+            return delegate.rollUtcTradingDay(account, nextUtcDate, rolledAt);
+        }
     }
 
     private static final class CountingTradingEngine implements PaperTradingEngine {
@@ -465,6 +734,12 @@ class DefaultPaperRuntimeEngineTest {
         @Override
         public RuntimeMarketUpdateResult onBookTicker(
                 RuntimeMarketState state, StreamBookTickerEvent event) {
+            throw failure;
+        }
+
+        @Override
+        public RuntimeMarketUpdateResult onMarkPrice(
+                RuntimeMarketState state, StreamMarkPriceEvent event) {
             throw failure;
         }
     }

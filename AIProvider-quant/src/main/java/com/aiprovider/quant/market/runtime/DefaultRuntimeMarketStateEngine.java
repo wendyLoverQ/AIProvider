@@ -3,6 +3,7 @@ package com.aiprovider.quant.market.runtime;
 import com.aiprovider.quant.market.history.model.HistoricalCandle;
 import com.aiprovider.quant.market.stream.model.StreamBookTickerEvent;
 import com.aiprovider.quant.market.stream.model.StreamKlineEvent;
+import com.aiprovider.quant.market.stream.model.StreamMarkPriceEvent;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -11,6 +12,8 @@ import java.util.List;
 
 /** Pure deterministic state transition engine for one market stream. */
 public final class DefaultRuntimeMarketStateEngine implements RuntimeMarketStateEngine {
+    private static final String MARK_PRICE_CONFLICT = "RUNTIME_MARKET_MARK_PRICE_CONFLICT";
+
     @Override
     public RuntimeMarketState initialize(RuntimeMarketKey key, int maxClosedCandles,
                                          List<HistoricalCandle> seedCandles) {
@@ -40,8 +43,8 @@ public final class DefaultRuntimeMarketStateEngine implements RuntimeMarketState
         }
         int fromIndex = Math.max(0, validated.size() - maxClosedCandles);
         List<RuntimeClosedCandle> window = new ArrayList<>(validated.subList(fromIndex, validated.size()));
-        return new RuntimeMarketState(key, maxClosedCandles, window, null,
-                null, null, null, null);
+        return new RuntimeMarketState(key, maxClosedCandles, window, null, null,
+                null, null, null, null, null, null);
     }
 
     @Override
@@ -139,10 +142,46 @@ public final class DefaultRuntimeMarketStateEngine implements RuntimeMarketState
 
         RuntimeMarketState updated = new RuntimeMarketState(state.getKey(),
                 state.getMaxClosedCandles(), state.getClosedCandles(), incoming,
-                state.getLastKlineEventTime(), eventTime,
-                state.getLastKlineEventFingerprint(), fingerprint);
+                state.getLatestMarkPrice(), state.getLastKlineEventTime(), eventTime,
+                state.getLastMarkPriceEventTime(), state.getLastKlineEventFingerprint(),
+                fingerprint, state.getLastMarkPriceEventFingerprint());
         return new RuntimeMarketUpdateResult(RuntimeMarketUpdateType.TOP_OF_BOOK_UPDATED,
                 updated, null);
+    }
+
+    @Override
+    public RuntimeMarketUpdateResult onMarkPrice(
+            RuntimeMarketState state, StreamMarkPriceEvent event) {
+        requireState(state);
+        requireMarkPriceContext(state.getKey(), event);
+        RuntimeMarkPrice incoming = RuntimeMarkPrice.from(event);
+        String fingerprint = markPriceFingerprint(event);
+        Instant eventTime = event.getEventTime();
+
+        if (state.getLastMarkPriceEventTime() != null) {
+            int eventOrder = eventTime.compareTo(state.getLastMarkPriceEventTime());
+            if (eventOrder < 0) {
+                throw failure(RuntimeMarketStateException.EVENT_TIME_INVALID,
+                        "mark price eventTime is older than the event watermark");
+            }
+            if (eventOrder == 0) {
+                if (!fingerprint.equals(state.getLastMarkPriceEventFingerprint())) {
+                    throw failure(MARK_PRICE_CONFLICT,
+                            "same mark price eventTime has different content");
+                }
+                return new RuntimeMarketUpdateResult(
+                        RuntimeMarketUpdateType.DUPLICATE_MARK_PRICE_IGNORED, state, null);
+            }
+        }
+
+        RuntimeMarketState updated = new RuntimeMarketState(
+                state.getKey(), state.getMaxClosedCandles(), state.getClosedCandles(),
+                state.getLatestTopOfBook(), incoming, state.getLastKlineEventTime(),
+                state.getLastBookTickerEventTime(), eventTime,
+                state.getLastKlineEventFingerprint(), state.getLastBookTickerEventFingerprint(),
+                fingerprint);
+        return new RuntimeMarketUpdateResult(
+                RuntimeMarketUpdateType.MARK_PRICE_UPDATED, updated, null);
     }
 
     private static RuntimeMarketState replaceKlineWatermark(RuntimeMarketState state,
@@ -150,8 +189,10 @@ public final class DefaultRuntimeMarketStateEngine implements RuntimeMarketState
                                                              String fingerprint,
                                                              List<RuntimeClosedCandle> candles) {
         return new RuntimeMarketState(state.getKey(), state.getMaxClosedCandles(), candles,
-                state.getLatestTopOfBook(), eventTime, state.getLastBookTickerEventTime(),
-                fingerprint, state.getLastBookTickerEventFingerprint());
+                state.getLatestTopOfBook(), state.getLatestMarkPrice(), eventTime,
+                state.getLastBookTickerEventTime(), state.getLastMarkPriceEventTime(),
+                fingerprint, state.getLastBookTickerEventFingerprint(),
+                state.getLastMarkPriceEventFingerprint());
     }
 
     private static void requireState(RuntimeMarketState state) {
@@ -179,6 +220,16 @@ public final class DefaultRuntimeMarketStateEngine implements RuntimeMarketState
         }
     }
 
+    private static void requireMarkPriceContext(
+            RuntimeMarketKey key, StreamMarkPriceEvent event) {
+        if (event == null || event.getProvider() != key.getProvider()
+                || event.getMarketType() != key.getMarketType()
+                || !key.getSymbol().equals(event.getSymbol())) {
+            throw failure(RuntimeMarketStateException.CONTEXT_MISMATCH,
+                    "mark price event does not match the runtime market key");
+        }
+    }
+
     private static void requireCandleContext(RuntimeMarketKey key, RuntimeClosedCandle candle) {
         if (candle.getProvider() != key.getProvider()
                 || candle.getMarketType() != key.getMarketType()
@@ -201,6 +252,29 @@ public final class DefaultRuntimeMarketStateEngine implements RuntimeMarketState
         return fingerprint(event.getProvider(), event.getMarketType(), event.getSymbol(),
                 event.getEventTime(), event.getBidPrice(), event.getBidQuantity(),
                 event.getAskPrice(), event.getAskQuantity());
+    }
+
+    private static String markPriceFingerprint(StreamMarkPriceEvent event) {
+        return numericFingerprint(
+                event.getProvider(), event.getMarketType(), event.getSymbol(), event.getEventTime(),
+                event.getMarkPrice(), event.getIndexPrice(), event.getEstimatedSettlePrice(),
+                event.getLastFundingRate(), event.getInterestRate(), event.getNextFundingTime());
+    }
+
+    private static String numericFingerprint(Object... fields) {
+        StringBuilder result = new StringBuilder();
+        for (Object field : fields) {
+            String value;
+            if (field == null) value = null;
+            else if (field instanceof BigDecimal) {
+                value = ((BigDecimal) field).stripTrailingZeros().toPlainString();
+            } else if (field instanceof Instant) value = ((Instant) field).toString();
+            else value = String.valueOf(field);
+            if (value == null) result.append("-1:");
+            else result.append(value.length()).append(':').append(value);
+            result.append('|');
+        }
+        return result.toString();
     }
 
     private static String fingerprint(Object... fields) {

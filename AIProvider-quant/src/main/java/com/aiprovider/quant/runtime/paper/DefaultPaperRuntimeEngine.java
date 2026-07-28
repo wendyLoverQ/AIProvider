@@ -17,9 +17,11 @@ import com.aiprovider.quant.market.runtime.RuntimeMarketStateEngine;
 import com.aiprovider.quant.market.runtime.RuntimeMarketStateException;
 import com.aiprovider.quant.market.runtime.RuntimeMarketUpdateResult;
 import com.aiprovider.quant.market.runtime.RuntimeMarketUpdateType;
+import com.aiprovider.quant.market.runtime.RuntimeMarkPrice;
 import com.aiprovider.quant.market.runtime.RuntimeTopOfBook;
 import com.aiprovider.quant.market.stream.model.StreamBookTickerEvent;
 import com.aiprovider.quant.market.stream.model.StreamKlineEvent;
+import com.aiprovider.quant.market.stream.model.StreamMarkPriceEvent;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -150,6 +152,42 @@ public final class DefaultPaperRuntimeEngine implements PaperRuntimeEngine {
                 stepType, rollover);
     }
 
+    @Override
+    public PaperRuntimeStepResult onMarkPrice(
+            PaperRuntimeSnapshot runtime, StreamMarkPriceEvent event) {
+        requireRuntimeAndTime(runtime, event == null ? null : event.getEventTime(), event);
+        RuntimeMarketUpdateResult marketUpdate = updateMarkPrice(runtime, event);
+        Rollover rollover = rollTradingDay(runtime.getTradingSession(), event.getEventTime());
+        PaperTradingSessionSnapshot session = rollover.session;
+        PaperRuntimeStepType stepType;
+        RuntimeMarketUpdateType updateType = marketUpdate.getUpdateType();
+        if (updateType == RuntimeMarketUpdateType.DUPLICATE_MARK_PRICE_IGNORED) {
+            stepType = PaperRuntimeStepType.DUPLICATE_MARK_PRICE_IGNORED;
+        } else if (updateType == RuntimeMarketUpdateType.MARK_PRICE_UPDATED) {
+            RuntimeMarkPrice markPrice = marketUpdate.getLatestMarkPrice();
+            PaperAccountSnapshot markedAccount;
+            try {
+                markedAccount = accountEngine.markToMarket(
+                        session.getPaperAccountSnapshot(),
+                        markPrice.getSymbol(),
+                        markPrice.getMarkPrice(),
+                        markPrice.getEventTime());
+            } catch (PaperAccountException exception) {
+                throw lower(PaperRuntimeException.PAPER_RUNTIME_ACCOUNT_FAILED,
+                        exception.getErrorCode(), exception);
+            } catch (RuntimeException exception) {
+                throw lower(PaperRuntimeException.PAPER_RUNTIME_ACCOUNT_FAILED,
+                        exception.getClass().getSimpleName(), exception);
+            }
+            session = rebuildSession(session, markedAccount);
+            stepType = PaperRuntimeStepType.MARK_PRICE_UPDATED;
+        } else {
+            throw stateInvalid("unexpected mark price update type: " + updateType);
+        }
+        return result(runtime, event.getEventTime(), marketUpdate, session, null,
+                stepType, rollover);
+    }
+
     private RuntimeMarketUpdateResult updateKline(PaperRuntimeSnapshot runtime,
                                                    StreamKlineEvent event) {
         try {
@@ -167,6 +205,19 @@ public final class DefaultPaperRuntimeEngine implements PaperRuntimeEngine {
                                                   StreamBookTickerEvent event) {
         try {
             return marketEngine.onBookTicker(runtime.getMarketState(), event);
+        } catch (RuntimeMarketStateException exception) {
+            throw lower(PaperRuntimeException.PAPER_RUNTIME_MARKET_FAILED,
+                    exception.getErrorCode(), exception);
+        } catch (RuntimeException exception) {
+            throw lower(PaperRuntimeException.PAPER_RUNTIME_MARKET_FAILED,
+                    exception.getClass().getSimpleName(), exception);
+        }
+    }
+
+    private RuntimeMarketUpdateResult updateMarkPrice(
+            PaperRuntimeSnapshot runtime, StreamMarkPriceEvent event) {
+        try {
+            return marketEngine.onMarkPrice(runtime.getMarketState(), event);
         } catch (RuntimeMarketStateException exception) {
             throw lower(PaperRuntimeException.PAPER_RUNTIME_MARKET_FAILED,
                     exception.getErrorCode(), exception);
@@ -198,18 +249,25 @@ public final class DefaultPaperRuntimeEngine implements PaperRuntimeEngine {
             throw lower(PaperRuntimeException.PAPER_RUNTIME_ACCOUNT_FAILED,
                     exception.getClass().getSimpleName(), exception);
         }
-        PaperTradingSessionSnapshot rolledSession;
+        PaperTradingSessionSnapshot rolledSession = rebuildSession(session, rolledAccount);
+        return new Rollover(rolledSession, true, previousDate, eventDate);
+    }
+
+    private PaperTradingSessionSnapshot rebuildSession(
+            PaperTradingSessionSnapshot session, PaperAccountSnapshot account) {
         try {
-            rolledSession = new PaperTradingSessionSnapshot(
-                    session.getConfig(), rolledAccount, session.getPendingOrderSnapshot(),
+            return new PaperTradingSessionSnapshot(
+                    session.getConfig(), account, session.getPendingOrderSnapshot(),
                     session.getLastOrderSnapshot(), session.getLastSignalDecision(),
                     session.getLastSizingResult(), session.getLastRiskDecision(),
-                    session.getLastEvaluatedCandle(), rolledAccount.getLastUpdatedAt());
+                    session.getLastEvaluatedCandle(), account.getLastUpdatedAt());
         } catch (PaperTradingException exception) {
             throw lower(PaperRuntimeException.PAPER_RUNTIME_STATE_INVALID,
                     exception.getErrorCode(), exception);
+        } catch (RuntimeException exception) {
+            throw lower(PaperRuntimeException.PAPER_RUNTIME_STATE_INVALID,
+                    exception.getClass().getSimpleName(), exception);
         }
-        return new Rollover(rolledSession, true, previousDate, eventDate);
     }
 
     private PaperRuntimeStepResult result(
@@ -232,6 +290,12 @@ public final class DefaultPaperRuntimeEngine implements PaperRuntimeEngine {
             throw new PaperRuntimeException(
                     PaperRuntimeException.PAPER_RUNTIME_EVENT_TIME_INVALID,
                     "eventTime is required");
+        }
+        Instant lastProcessedEventTime = runtime.getLastProcessedEventTime();
+        if (lastProcessedEventTime != null && eventTime.isBefore(lastProcessedEventTime)) {
+            throw new PaperRuntimeException(
+                    PaperRuntimeException.PAPER_RUNTIME_EVENT_TIME_INVALID,
+                    "eventTime must not precede the global runtime watermark");
         }
     }
 
