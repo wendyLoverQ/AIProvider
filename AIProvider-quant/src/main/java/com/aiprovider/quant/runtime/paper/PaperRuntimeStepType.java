@@ -1,0 +1,10 @@
+package com.aiprovider.quant.runtime.paper;
+
+public enum PaperRuntimeStepType {
+    OPEN_KLINE_IGNORED,
+    DUPLICATE_CLOSED_CANDLE_IGNORED,
+    CLOSED_CANDLE_PROCESSED,
+    DUPLICATE_TOP_OF_BOOK_IGNORED,
+    TOP_OF_BOOK_UPDATED,
+    PENDING_ORDER_EXECUTED
+}
