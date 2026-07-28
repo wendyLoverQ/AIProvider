@@ -4,6 +4,9 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import javax.validation.constraints.DecimalMin;
+import javax.validation.constraints.Digits;
+import javax.validation.constraints.NotNull;
 
 public class ResearchStudyCreateRequest {
   private String name, description, strategyCode, strategyVersion, executionProfileCode, directionMode, orderSizingMode;
@@ -13,6 +16,8 @@ public class ResearchStudyCreateRequest {
   private Instant studyStartOpenTimeInclusive, studyEndOpenTimeExclusive;
   private int trainingBars, validationBars, minimumTrainTrades;
   private String selectionMetric;
+  @NotNull @Digits(integer=20, fraction=18) @DecimalMin(value="0", inclusive=false)
+  private BigDecimal initialCapital;
   private BigDecimal orderAmount, feeRate;
   private boolean forceCloseAtEnd;
 
@@ -50,6 +55,8 @@ public class ResearchStudyCreateRequest {
   public void setSelectionMetric(String value) { selectionMetric = value; }
   public int getMinimumTrainTrades() { return minimumTrainTrades; }
   public void setMinimumTrainTrades(int value) { minimumTrainTrades = value; }
+  public BigDecimal getInitialCapital() { return initialCapital; }
+  public void setInitialCapital(BigDecimal value) { initialCapital = value; }
   public BigDecimal getOrderAmount() { return orderAmount; }
   public void setOrderAmount(BigDecimal value) { orderAmount = value; }
   public BigDecimal getFeeRate() { return feeRate; }

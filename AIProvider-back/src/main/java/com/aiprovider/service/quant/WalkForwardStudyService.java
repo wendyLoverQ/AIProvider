@@ -230,7 +230,7 @@ public class WalkForwardStudyService {
         row.directionMode, row.orderSizingMode, readGrid(row.parameterGridJson),
         row.windowMode, Instant.ofEpochMilli(row.studyStartOpenTimeMs), Instant.ofEpochMilli(row.studyEndOpenTimeMs),
         row.trainingBars, row.validationBars, row.stepBars, row.foldCount, row.candidateCountPerFold,
-        row.totalChildRuns, row.selectionMetric, row.minimumTrainTrades, row.orderAmount, row.feeRate,
+        row.totalChildRuns, row.selectionMetric, row.minimumTrainTrades, row.initialCapital, row.orderAmount, row.feeRate,
         row.forceCloseAtEnd, row.status, row.progressPercent, aggregate.pending, aggregate.active,
         aggregate.completed, aggregate.failed, oos.parameterChanges, oos.successfulFolds,
         terminal(row.status) ? oos.hasGaps : null, oos.tradeCount, oos.fees, oos.returnRatio, oos.maximumDrawdown,
@@ -311,7 +311,7 @@ public class WalkForwardStudyService {
   }
 
   private BacktestDtos.Metrics metrics(BacktestRunRow r) {
-    return r == null ? null : new BacktestDtos.Metrics(r.tradeCount, r.winningTradeCount, r.losingTradeCount, r.breakEvenTradeCount, r.winRate, r.grossProfit, r.grossLoss, r.netProfit, r.totalReturnRatio, r.maximumDrawdownRatio, r.profitFactor, r.averageTradeReturnRatio, r.buyAndHoldReturnRatio, r.totalFees);
+    return r == null ? null : new BacktestDtos.Metrics(r.tradeCount, r.winningTradeCount, r.losingTradeCount, r.breakEvenTradeCount, r.winRate, r.grossProfit, r.grossLoss, r.netProfit, r.totalReturnRatio, r.maximumDrawdownRatio, r.profitFactor, r.averageTradeReturnRatio, r.buyAndHoldReturnRatio, r.totalFees, r.finalEquity, r.totalPnl, r.averageExposureRatio, r.maximumExposureRatio);
   }
 
   private WalkForwardStudySnapshot requiredSnapshot(Map<String, WalkForwardStudySnapshot> values, String id) {

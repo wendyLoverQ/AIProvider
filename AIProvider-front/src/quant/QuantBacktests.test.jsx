@@ -220,6 +220,10 @@ describe("Quant Walk-forward workspace lifecycle", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "策略" }), {
       target: { value: strategy.code },
     });
+    fireEvent.change(
+      screen.getByLabelText("初始资金（计价资产，当前为 USDT）"),
+      { target: { value: "1000" } },
+    );
     fireEvent.click(
       screen.getByRole("button", { name: "按 70% / 30% 填充窗口" }),
     );
@@ -585,6 +589,10 @@ describe("Quant backtest strategy handoff", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "策略" }), {
       target: { value: "rsi/mean" },
     });
+    fireEvent.change(
+      screen.getByLabelText("初始资金（计价资产，当前为 USDT）"),
+      { target: { value: "1000" } },
+    );
     fireEvent.click(screen.getByRole("button", { name: "创建异步回测" }));
     await waitFor(() => expect(document.activeElement).toBe(createButton));
     const postOptions = fetchMock.mock.calls.find(

@@ -126,6 +126,7 @@ class ExecutionContextChainValidationTest {
     request.setDirectionMode(direction);
     request.setOrderSizingMode(sizing);
     request.setStrategyParameters(Map.of("fastPeriod", 2, "slowPeriod", 4));
+    request.setInitialCapital(new BigDecimal("1000"));
     request.setOrderAmount(BigDecimal.ONE);
     request.setFeeRate(BigDecimal.ZERO);
     request.setForceCloseAtEnd(true);
@@ -146,6 +147,7 @@ class ExecutionContextChainValidationTest {
     request.setTrainingEndOpenTimeExclusive(Instant.ofEpochMilli(300_000));
     request.setValidationStartOpenTimeInclusive(Instant.ofEpochMilli(300_000));
     request.setValidationEndOpenTimeExclusive(Instant.ofEpochMilli(600_000));
+    request.setInitialCapital(new BigDecimal("1000"));
     request.setOrderAmount(BigDecimal.ONE);
     request.setFeeRate(BigDecimal.ZERO);
     request.setForceCloseAtEnd(true);
@@ -168,6 +170,7 @@ class ExecutionContextChainValidationTest {
     request.setValidationBars(5);
     request.setSelectionMetric("TRAIN_TOTAL_RETURN_RATIO");
     request.setMinimumTrainTrades(0);
+    request.setInitialCapital(new BigDecimal("1000"));
     request.setOrderAmount(BigDecimal.ONE);
     request.setFeeRate(BigDecimal.ZERO);
     request.setForceCloseAtEnd(true);

@@ -1,6 +1,7 @@
 package com.aiprovider.service.quant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.*;
 
 import com.aiprovider.config.quant.QuantExperimentProperties;
@@ -41,6 +42,8 @@ class ExecutionContextResponseMappingTest {
     BacktestDtos.RunDetail detail = service.get("r");
     assertContext(
         detail.executionProfileCode(), detail.directionMode(), detail.orderSizingMode());
+    assertNull(detail.initialCapital());
+    assertNull(detail.finalEquity());
     BacktestDtos.Trade response = service.trades("r", 1, 100).records().get(0);
     assertEquals("LONG", response.positionSide());
     assertEquals("BUY", response.entryOrderSide());
@@ -80,6 +83,7 @@ class ExecutionContextResponseMappingTest {
         experimentResponse.executionProfileCode(),
         experimentResponse.directionMode(),
         experimentResponse.orderSizingMode());
+    assertNull(experimentResponse.initialCapital());
 
     WalkForwardStudyMapper studyMapper = mock(WalkForwardStudyMapper.class);
     WalkForwardFoldMapper foldMapper = mock(WalkForwardFoldMapper.class);
@@ -99,6 +103,7 @@ class ExecutionContextResponseMappingTest {
         studyResponse.executionProfileCode(),
         studyResponse.directionMode(),
         studyResponse.orderSizingMode());
+    assertNull(studyResponse.initialCapital());
   }
 
   private void assertContext(String profile, String direction, String sizing) {

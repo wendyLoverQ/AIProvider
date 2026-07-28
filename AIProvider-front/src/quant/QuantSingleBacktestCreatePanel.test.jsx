@@ -65,7 +65,12 @@ function setup(props = {}) {
   return { onClose, onCreated, onSavingChange, ...rendered };
 }
 
-async function chooseContext() {
+async function chooseContext(initialCapital = "1000.000000000000000001") {
+  if (initialCapital !== "")
+    fireEvent.change(
+      screen.getByLabelText("初始资金（计价资产，当前为 USDT）"),
+      { target: { value: initialCapital } },
+    );
   fireEvent.change(screen.getByRole("combobox", { name: "数据集 / 交易对" }), {
     target: { value: "1" },
   });
@@ -110,6 +115,7 @@ describe("QuantSingleBacktestCreatePanel", () => {
       executionProfileCode: "USDM_PERPETUAL_LONG_ONLY_1X_V1",
       directionMode: "LONG_ONLY",
       orderSizingMode: "BASE_QUANTITY",
+      initialCapital: "1000.000000000000000001",
       orderAmount: "1",
       feeRate: "0",
       strategyParameters: { period: 14 },
@@ -138,6 +144,14 @@ describe("QuantSingleBacktestCreatePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "创建异步回测" }));
     expect(createBacktestRun).not.toHaveBeenCalled();
     expect(screen.getByRole("alert").textContent).toContain("执行模型");
+  });
+
+  it.each(["", "0", "-1"])("does not submit initialCapital=%s", async (value) => {
+    setup();
+    await chooseContext(value);
+    fireEvent.click(screen.getByRole("button", { name: "创建异步回测" }));
+    expect(createBacktestRun).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("初始资金");
   });
 
   it("does not repeatedly preselect a route strategy that is incompatible with the dataset", async () => {

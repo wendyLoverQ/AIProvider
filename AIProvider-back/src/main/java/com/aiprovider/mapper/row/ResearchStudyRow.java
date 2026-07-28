@@ -11,7 +11,7 @@ public class ResearchStudyRow {
   public String evaluationMode, parameterSpaceMode, parameterSpaceJson, expandedParameterGridJson, selectionMetric;
   public int candidateCount, trainingBars, validationBars, minimumTrainTrades;
   public long studyStartOpenTimeMs, studyEndOpenTimeMs;
-  public BigDecimal orderAmount, feeRate, progressPercent;
+  public BigDecimal initialCapital, orderAmount, feeRate, progressPercent;
   public Integer successfulOosFolds, failedFolds, oosTradeCount, parameterChanges;
   public Short oosAggregateVersion;
   public Boolean hasOosGaps;

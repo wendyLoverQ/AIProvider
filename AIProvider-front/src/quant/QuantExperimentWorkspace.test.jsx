@@ -162,6 +162,7 @@ describe("QuantExperimentWorkspace", () => {
     );
     expect(screen.getByText("period")).toBeTruthy();
     expect(screen.getByText("7, 14")).toBeTruthy();
+    expect(screen.getByText("历史任务未记录")).toBeTruthy();
     expect(screen.getByText(/待处理 0 · 活跃 0 · 完成 2 · 失败 0/)).toBeTruthy();
     expect(fetchExperimentCandidates).toHaveBeenCalledWith(
       "experiment-1",
@@ -426,6 +427,10 @@ describe("QuantExperimentWorkspace", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "策略" }), {
       target: { value: "RSI" },
     });
+    fireEvent.change(
+      screen.getByLabelText("初始资金（计价资产，当前为 USDT）"),
+      { target: { value: "1000" } },
+    );
     fireEvent.click(screen.getByRole("button", { name: "按 70% / 30% 填充" }));
     const submit = screen.getByRole("button", { name: "创建异步实验" });
     fireEvent.click(submit);

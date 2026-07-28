@@ -5,6 +5,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import javax.validation.constraints.NotBlank;
+import javax.validation.constraints.DecimalMin;
+import javax.validation.constraints.Digits;
+import javax.validation.constraints.NotNull;
 
 public class WalkForwardStudyCreateRequest {
   private long datasetId;
@@ -16,6 +19,8 @@ public class WalkForwardStudyCreateRequest {
   private Instant studyStartOpenTimeInclusive, studyEndOpenTimeExclusive;
   private int trainingBars, validationBars, minimumTrainTrades;
   private String selectionMetric;
+  @NotNull @Digits(integer=20, fraction=18) @DecimalMin(value="0", inclusive=false)
+  private BigDecimal initialCapital;
   private BigDecimal orderAmount, feeRate;
   private boolean forceCloseAtEnd;
 
@@ -101,6 +106,10 @@ public class WalkForwardStudyCreateRequest {
   public int getMinimumTrainTrades() {
     return minimumTrainTrades;
   }
+
+  public BigDecimal getInitialCapital() { return initialCapital; }
+
+  public void setInitialCapital(BigDecimal v) { initialCapital = v; }
 
   public void setMinimumTrainTrades(int v) {
     minimumTrainTrades = v;

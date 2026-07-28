@@ -36,6 +36,7 @@ public final class WalkForwardStudyDtos {
       int totalChildRuns,
       String selectionMetric,
       int minimumTrainTrades,
+      BigDecimal initialCapital,
       BigDecimal orderAmount,
       BigDecimal feeRate,
       boolean forceCloseAtEnd,

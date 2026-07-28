@@ -46,6 +46,7 @@ export default function QuantWalkForwardCreatePanel({
     "TRAIN_TOTAL_RETURN_RATIO",
   );
   const [minimumTrainTrades, setMinimumTrainTrades] = useState("10");
+  const [initialCapital, setInitialCapital] = useState("");
   const [orderAmount, setOrderAmount] = useState("1");
   const [feeRate, setFeeRate] = useState("0.001");
   const [error, setError] = useState("");
@@ -177,6 +178,10 @@ export default function QuantWalkForwardCreatePanel({
     const trades = Number(minimumTrainTrades);
     if (!Number.isSafeInteger(trades) || trades < 0)
       return setError("minimumTrainTrades 必须为非负安全整数");
+    const normalizedInitialCapital = normalizeDecimalString(initialCapital, {
+      maxIntegerDigits: 20,
+      maxFractionDigits: 18,
+    });
     const normalizedOrder = normalizeDecimalString(orderAmount, {
       maxIntegerDigits: 20,
       maxFractionDigits: 18,
@@ -185,6 +190,8 @@ export default function QuantWalkForwardCreatePanel({
       maxIntegerDigits: 1,
       maxFractionDigits: 18,
     });
+    if (!normalizedInitialCapital || !isPositiveDecimal(normalizedInitialCapital))
+      return setError("初始资金必须是大于 0 的十进制字符串，整数最多 20 位、小数最多 18 位");
     if (!normalizedOrder || !isPositiveDecimal(normalizedOrder))
       return setError("基础资产数量必须是大于 0 的十进制字符串");
     if (
@@ -205,6 +212,7 @@ export default function QuantWalkForwardCreatePanel({
       validationBars: Number(validationBars),
       selectionMetric,
       minimumTrainTrades: trades,
+      initialCapital: normalizedInitialCapital,
       orderAmount: normalizedOrder,
       feeRate: normalizedFee,
       forceCloseAtEnd: true,
@@ -296,6 +304,18 @@ export default function QuantWalkForwardCreatePanel({
           </p>
         )}
         <div className="backtest-form-grid">
+          <label>
+            初始资金（计价资产，当前为 USDT）
+            <input
+              aria-label="初始资金（计价资产，当前为 USDT）"
+              inputMode="decimal"
+              value={initialCapital}
+              onChange={(event) => setInitialCapital(event.target.value)}
+            />
+            <small>
+              回测研究账户的初始权益，不代表 Binance 真实余额。
+            </small>
+          </label>
           <label>
             研究开始
             <input

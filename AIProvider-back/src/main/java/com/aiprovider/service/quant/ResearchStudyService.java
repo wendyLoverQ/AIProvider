@@ -59,7 +59,7 @@ public class ResearchStudyService {
     ResearchStudyRow row = require(id);
     return new ResearchStudyDtos.Detail(summary(row), readRanges(row.parameterSpaceJson), readGrid(row.expandedParameterGridJson),
         Instant.ofEpochMilli(row.studyStartOpenTimeMs), Instant.ofEpochMilli(row.studyEndOpenTimeMs), row.trainingBars, row.validationBars,
-        row.selectionMetric, row.minimumTrainTrades, row.orderAmount, row.feeRate, row.forceCloseAtEnd);
+        row.selectionMetric, row.minimumTrainTrades, row.initialCapital, row.orderAmount, row.feeRate, row.forceCloseAtEnd);
   }
 
   public ResearchStudyDtos.ParameterSpaceResponse parameterSpace(String id) {
@@ -76,7 +76,7 @@ public class ResearchStudyService {
   private ResearchStudyDtos.Summary summary(ResearchStudyRow row) {
     OosValues oos = oosValues(row);
     return new ResearchStudyDtos.Summary(row.researchStudyId, row.name, row.description, row.datasetId, row.provider, row.marketType, row.dataType, row.symbol, row.intervalCode,
-        row.strategyCode, row.strategyVersion, row.executionProfileCode, row.directionMode, row.orderSizingMode, row.evaluationMode, row.parameterSpaceMode, row.candidateCount,
+        row.strategyCode, row.strategyVersion, row.executionProfileCode, row.directionMode, row.orderSizingMode, row.evaluationMode, row.parameterSpaceMode, row.candidateCount, row.initialCapital,
         row.comparisonGroupKey, row.walkForwardStudyId, row.status, row.progressPercent, oos.successfulFolds, oos.failedFolds, oos.hasGaps, oos.totalReturnRatio,
         oos.maximumDrawdownRatio, oos.tradeCount, oos.totalFees, oos.parameterChanges, row.errorCode, row.errorMessage, row.createdAt, row.startedAt, row.finishedAt, row.updatedAt);
   }

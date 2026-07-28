@@ -115,6 +115,10 @@ export function parseMetrics(value) {
     "totalFees",
     "buyAndHoldReturnRatio",
     "averageTradeReturnRatio",
+    "finalEquity",
+    "totalPnl",
+    "averageExposureRatio",
+    "maximumExposureRatio",
   ].forEach((key) => decimal(metrics[key], `实验指标 ${key} 格式异常`));
   if (metrics.tradeCount != null)
     safeCount(metrics.tradeCount, "实验指标 tradeCount 格式异常");
@@ -234,6 +238,7 @@ export function parseExperimentSummary(value) {
   nullableInstant(summary.finishedAt, "参数实验 finishedAt 格式异常");
   if (summary.totalLegs != null)
     safeCount(summary.totalLegs, "参数实验 totalLegs 格式异常");
+  decimal(summary.initialCapital, "参数实验 initialCapital 格式异常");
   return summary;
 }
 

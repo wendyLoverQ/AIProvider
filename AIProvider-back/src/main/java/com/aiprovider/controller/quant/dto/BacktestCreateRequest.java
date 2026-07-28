@@ -16,6 +16,7 @@ public class BacktestCreateRequest {
     @NotBlank(message="directionMode 不能为空") private String directionMode;
     @NotBlank(message="orderSizingMode 不能为空") private String orderSizingMode;
     private Map<String,Integer> strategyParameters;
+    @NotNull @Digits(integer=20, fraction=18) @DecimalMin(value="0", inclusive=false) private BigDecimal initialCapital;
     @NotNull @Digits(integer=20, fraction=18) @DecimalMin(value="0", inclusive=false) private BigDecimal orderAmount;
     @NotNull @Digits(integer=20, fraction=18) @DecimalMin(value="0", inclusive=true) @DecimalMax(value="0.01", inclusive=true) private BigDecimal feeRate;
     private boolean forceCloseAtEnd;
@@ -30,6 +31,7 @@ public class BacktestCreateRequest {
     public String getDirectionMode(){return directionMode;} public void setDirectionMode(String v){directionMode=v;}
     public String getOrderSizingMode(){return orderSizingMode;} public void setOrderSizingMode(String v){orderSizingMode=v;}
     public Map<String,Integer> getStrategyParameters(){return strategyParameters;} public void setStrategyParameters(Map<String,Integer> v){strategyParameters=v;}
+    public BigDecimal getInitialCapital(){return initialCapital;} public void setInitialCapital(BigDecimal v){initialCapital=v;}
     public BigDecimal getOrderAmount(){return orderAmount;} public void setOrderAmount(BigDecimal v){orderAmount=v;}
     public BigDecimal getFeeRate(){return feeRate;} public void setFeeRate(BigDecimal v){feeRate=v;}
     public boolean isForceCloseAtEnd(){return forceCloseAtEnd;} public void setForceCloseAtEnd(boolean v){forceCloseAtEnd=v;}

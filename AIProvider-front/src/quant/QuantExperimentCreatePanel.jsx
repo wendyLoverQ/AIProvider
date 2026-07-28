@@ -72,6 +72,7 @@ export default function QuantExperimentCreatePanel({
     validationStart: "",
     validationEnd: "",
   });
+  const [initialCapital, setInitialCapital] = useState("");
   const [orderAmount, setOrderAmount] = useState("1");
   const [feeRate, setFeeRate] = useState("0.001");
   const [error, setError] = useState("");
@@ -194,6 +195,10 @@ export default function QuantExperimentCreatePanel({
       setError(rangeResult.error);
       return;
     }
+    const normalizedInitialCapital = normalizeDecimalString(initialCapital, {
+      maxIntegerDigits: 20,
+      maxFractionDigits: 18,
+    });
     const normalizedOrderAmount = normalizeDecimalString(orderAmount, {
       maxIntegerDigits: 20,
       maxFractionDigits: 18,
@@ -202,6 +207,10 @@ export default function QuantExperimentCreatePanel({
       maxIntegerDigits: 1,
       maxFractionDigits: 18,
     });
+    if (!normalizedInitialCapital || !isPositiveDecimal(normalizedInitialCapital)) {
+      setError("初始资金必须大于 0，整数最多 20 位、小数最多 18 位");
+      return;
+    }
     if (!normalizedOrderAmount || !isPositiveDecimal(normalizedOrderAmount)) {
       setError("基础资产数量必须大于 0，整数最多 20 位、小数最多 18 位");
       return;
@@ -224,6 +233,7 @@ export default function QuantExperimentCreatePanel({
       trainingEndOpenTimeExclusive: toUtcIso(ranges.trainingEnd),
       validationStartOpenTimeInclusive: toUtcIso(ranges.validationStart),
       validationEndOpenTimeExclusive: toUtcIso(ranges.validationEnd),
+      initialCapital: normalizedInitialCapital,
       orderAmount: normalizedOrderAmount,
       feeRate: normalizedFeeRate,
       forceCloseAtEnd: true,
@@ -334,6 +344,18 @@ export default function QuantExperimentCreatePanel({
           按 70% / 30% 填充
         </button>
         <div className="backtest-form-grid">
+          <label>
+            初始资金（计价资产，当前为 USDT）
+            <input
+              aria-label="初始资金（计价资产，当前为 USDT）"
+              inputMode="decimal"
+              value={initialCapital}
+              onChange={(event) => setInitialCapital(event.target.value)}
+            />
+            <small>
+              回测研究账户的初始权益，不代表 Binance 真实余额。
+            </small>
+          </label>
           <label>
             TRAIN 开始
             <input

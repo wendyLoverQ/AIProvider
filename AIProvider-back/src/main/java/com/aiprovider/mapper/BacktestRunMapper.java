@@ -11,7 +11,7 @@ import org.apache.ibatis.annotations.*;
 @Mapper
 public interface BacktestRunMapper {
   String COLUMNS =
-      "Id,RunId,DatasetId,DatasetLastValidatedAt,DatasetLastSyncTaskId,Provider,MarketType,DataType,Symbol,IntervalCode,StartOpenTimeMs,EndOpenTimeExclusiveMs,StrategyCode,StrategyVersion,ExecutionProfileCode,DirectionMode,OrderSizingMode,RequestedParametersJson,ResolvedParametersJson,OrderAmount,FeeRate,ForceCloseAtEnd,Status,ProgressPercent,BarCount,TradeCount,WinningTradeCount,LosingTradeCount,BreakEvenTradeCount,WinRate,GrossProfit,GrossLoss,NetProfit,TotalReturnRatio,MaximumDrawdownRatio,ProfitFactor,AverageTradeReturnRatio,BuyAndHoldReturnRatio,TotalFees,ExecutionModel,WarningsJson,EquityPointCount,ErrorCode,ErrorMessage,QueuedAt,StartedAt,FinishedAt,UpdatedAt";
+      "Id,RunId,DatasetId,DatasetLastValidatedAt,DatasetLastSyncTaskId,Provider,MarketType,DataType,Symbol,IntervalCode,StartOpenTimeMs,EndOpenTimeExclusiveMs,StrategyCode,StrategyVersion,ExecutionProfileCode,DirectionMode,OrderSizingMode,RequestedParametersJson,ResolvedParametersJson,InitialCapital,OrderAmount,FeeRate,ForceCloseAtEnd,Status,ProgressPercent,BarCount,TradeCount,WinningTradeCount,LosingTradeCount,BreakEvenTradeCount,WinRate,GrossProfit,GrossLoss,NetProfit,TotalReturnRatio,MaximumDrawdownRatio,ProfitFactor,AverageTradeReturnRatio,BuyAndHoldReturnRatio,TotalFees,FinalEquity,TotalPnl,AverageExposureRatio,MaximumExposureRatio,ExecutionModel,WarningsJson,EquityPointCount,ErrorCode,ErrorMessage,QueuedAt,StartedAt,FinishedAt,UpdatedAt";
 
   @Results(
       id = "backtestRunRow",
@@ -35,6 +35,7 @@ public interface BacktestRunMapper {
         @Result(column = "OrderSizingMode", property = "orderSizingMode"),
         @Result(column = "RequestedParametersJson", property = "requestedParametersJson"),
         @Result(column = "ResolvedParametersJson", property = "resolvedParametersJson"),
+        @Result(column = "InitialCapital", property = "initialCapital"),
         @Result(column = "OrderAmount", property = "orderAmount"),
         @Result(column = "FeeRate", property = "feeRate"),
         @Result(column = "ForceCloseAtEnd", property = "forceCloseAtEnd"),
@@ -55,6 +56,10 @@ public interface BacktestRunMapper {
         @Result(column = "AverageTradeReturnRatio", property = "averageTradeReturnRatio"),
         @Result(column = "BuyAndHoldReturnRatio", property = "buyAndHoldReturnRatio"),
         @Result(column = "TotalFees", property = "totalFees"),
+        @Result(column = "FinalEquity", property = "finalEquity"),
+        @Result(column = "TotalPnl", property = "totalPnl"),
+        @Result(column = "AverageExposureRatio", property = "averageExposureRatio"),
+        @Result(column = "MaximumExposureRatio", property = "maximumExposureRatio"),
         @Result(column = "ExecutionModel", property = "executionModel"),
         @Result(column = "WarningsJson", property = "warningsJson"),
         @Result(column = "EquityPointCount", property = "equityPointCount"),
@@ -89,8 +94,8 @@ public interface BacktestRunMapper {
 
   @Insert(
       "INSERT INTO"
-          + " q_backtest_run(RunId,DatasetId,Provider,MarketType,DataType,Symbol,IntervalCode,StartOpenTimeMs,EndOpenTimeExclusiveMs,StrategyCode,StrategyVersion,ExecutionProfileCode,DirectionMode,OrderSizingMode,RequestedParametersJson,OrderAmount,FeeRate,ForceCloseAtEnd,Status,ProgressPercent,QueuedAt,UpdatedAt)"
-          + " VALUES(#{runId},#{datasetId},#{provider},#{marketType},#{dataType},#{symbol},#{intervalCode},#{startOpenTimeMs},#{endOpenTimeExclusiveMs},#{strategyCode},#{strategyVersion},#{executionProfileCode},#{directionMode},#{orderSizingMode},#{requestedParametersJson},#{orderAmount},#{feeRate},#{forceCloseAtEnd},'QUEUED',0,#{queuedAt},#{updatedAt})")
+          + " q_backtest_run(RunId,DatasetId,Provider,MarketType,DataType,Symbol,IntervalCode,StartOpenTimeMs,EndOpenTimeExclusiveMs,StrategyCode,StrategyVersion,ExecutionProfileCode,DirectionMode,OrderSizingMode,RequestedParametersJson,InitialCapital,OrderAmount,FeeRate,ForceCloseAtEnd,Status,ProgressPercent,QueuedAt,UpdatedAt)"
+          + " VALUES(#{runId},#{datasetId},#{provider},#{marketType},#{dataType},#{symbol},#{intervalCode},#{startOpenTimeMs},#{endOpenTimeExclusiveMs},#{strategyCode},#{strategyVersion},#{executionProfileCode},#{directionMode},#{orderSizingMode},#{requestedParametersJson},#{initialCapital},#{orderAmount},#{feeRate},#{forceCloseAtEnd},'QUEUED',0,#{queuedAt},#{updatedAt})")
   int insert(BacktestRunRow row);
 
   @Update(
@@ -154,7 +159,7 @@ public interface BacktestRunMapper {
 
   @Update(
       "UPDATE q_backtest_run SET"
-          + " ResolvedParametersJson=#{resolvedParametersJson},BarCount=#{barCount},TradeCount=#{tradeCount},WinningTradeCount=#{winningTradeCount},LosingTradeCount=#{losingTradeCount},BreakEvenTradeCount=#{breakEvenTradeCount},WinRate=#{winRate},GrossProfit=#{grossProfit},GrossLoss=#{grossLoss},NetProfit=#{netProfit},TotalReturnRatio=#{totalReturnRatio},MaximumDrawdownRatio=#{maximumDrawdownRatio},ProfitFactor=#{profitFactor},AverageTradeReturnRatio=#{averageTradeReturnRatio},BuyAndHoldReturnRatio=#{buyAndHoldReturnRatio},TotalFees=#{totalFees},ExecutionModel=#{executionModel},WarningsJson=#{warningsJson},EquityPointCount=#{equityPointCount},Status='COMPLETED',ProgressPercent=100,FinishedAt=#{finishedAt},UpdatedAt=#{updatedAt}"
+          + " ResolvedParametersJson=#{resolvedParametersJson},BarCount=#{barCount},TradeCount=#{tradeCount},WinningTradeCount=#{winningTradeCount},LosingTradeCount=#{losingTradeCount},BreakEvenTradeCount=#{breakEvenTradeCount},WinRate=#{winRate},GrossProfit=#{grossProfit},GrossLoss=#{grossLoss},NetProfit=#{netProfit},TotalReturnRatio=#{totalReturnRatio},MaximumDrawdownRatio=#{maximumDrawdownRatio},ProfitFactor=#{profitFactor},AverageTradeReturnRatio=#{averageTradeReturnRatio},BuyAndHoldReturnRatio=#{buyAndHoldReturnRatio},TotalFees=#{totalFees},FinalEquity=#{finalEquity},TotalPnl=#{totalPnl},AverageExposureRatio=#{averageExposureRatio},MaximumExposureRatio=#{maximumExposureRatio},ExecutionModel=#{executionModel},WarningsJson=#{warningsJson},EquityPointCount=#{equityPointCount},Status='COMPLETED',ProgressPercent=100,FinishedAt=#{finishedAt},UpdatedAt=#{updatedAt}"
           + " WHERE RunId=#{runId} AND Status='PERSISTING'")
   int complete(BacktestRunRow row);
 

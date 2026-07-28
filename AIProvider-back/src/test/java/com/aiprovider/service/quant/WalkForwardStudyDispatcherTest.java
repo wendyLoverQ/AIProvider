@@ -57,6 +57,7 @@ class WalkForwardStudyDispatcherTest {
         "USDM_PERPETUAL_LONG_ONLY_1X_V1", request.getValue().getExecutionProfileCode());
     assertEquals("LONG_ONLY", request.getValue().getDirectionMode());
     assertEquals("BASE_QUANTITY", request.getValue().getOrderSizingMode());
+    assertEquals(new BigDecimal("1000"), request.getValue().getInitialCapital());
   }
 
   @Test
@@ -171,6 +172,7 @@ class WalkForwardStudyDispatcherTest {
     row.candidateCountPerFold = 1;
     row.totalChildRuns = 2;
     row.selectionMetric = "TRAIN_TOTAL_RETURN_RATIO";
+    row.initialCapital = new BigDecimal("1000");
     row.orderAmount = BigDecimal.ONE;
     row.feeRate = BigDecimal.ZERO;
     row.forceCloseAtEnd = true;

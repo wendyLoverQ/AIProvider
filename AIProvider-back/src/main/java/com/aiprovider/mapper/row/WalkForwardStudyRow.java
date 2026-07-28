@@ -16,7 +16,7 @@ public class WalkForwardStudyRow {
       totalChildRuns;
   public int minimumTrainTrades;
   public long studyStartOpenTimeMs, studyEndOpenTimeMs;
-  public BigDecimal orderAmount, feeRate, progressPercent;
+  public BigDecimal initialCapital, orderAmount, feeRate, progressPercent;
   public Integer successfulOosFolds, failedFolds, oosTradeCount, parameterChanges;
   public Short oosAggregateVersion;
   public Boolean hasOosGaps;

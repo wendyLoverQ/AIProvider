@@ -39,6 +39,10 @@ const METRICS = [
   "totalFees",
   "buyAndHoldReturnRatio",
   "averageTradeReturnRatio",
+  "finalEquity",
+  "totalPnl",
+  "averageExposureRatio",
+  "maximumExposureRatio",
 ];
 const EXECUTION_PROFILE_CODES = new Set(["USDM_PERPETUAL_LONG_ONLY_1X_V1"]);
 const DIRECTION_MODES = new Set(["LONG_ONLY"]);
@@ -114,6 +118,7 @@ function validateSummary(value) {
   if (!WALK_FORWARD_SELECTION_METRICS.has(summary.selectionMetric)) fail("Study selectionMetric 非法");
   safeInt(required(summary.minimumTrainTrades, "Study 缺少 minimumTrainTrades"), "Study minimumTrainTrades 格式异常");
   decimal(required(summary.orderAmount, "Study 缺少 orderAmount"), "Study orderAmount 格式异常", { nullable: false });
+  decimal(summary.initialCapital, "Study initialCapital 格式异常");
   decimal(required(summary.feeRate, "Study 缺少 feeRate"), "Study feeRate 格式异常", { nullable: false });
   if (summary.forceCloseAtEnd !== true) fail("Study forceCloseAtEnd 必须为 true");
   if (!WALK_FORWARD_STUDY_STATUSES.has(summary.status)) fail("Study status 非法");

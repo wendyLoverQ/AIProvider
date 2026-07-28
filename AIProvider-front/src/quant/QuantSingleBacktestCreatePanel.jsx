@@ -41,6 +41,7 @@ export default function QuantSingleBacktestCreatePanel({
       [],
     ),
   );
+  const [initialCapital, setInitialCapital] = useState("");
   const [orderAmount, setOrderAmount] = useState("1");
   const [feeRate, setFeeRate] = useState("0");
   const [error, setError] = useState("");
@@ -137,6 +138,10 @@ export default function QuantSingleBacktestCreatePanel({
       value: executionContext,
     });
     setContextErrors(contextResult.errors);
+    const normalizedInitialCapital = normalizeDecimalString(initialCapital, {
+      maxIntegerDigits: 20,
+      maxFractionDigits: 18,
+    });
     const normalizedOrderAmount = normalizeDecimalString(orderAmount, {
       maxIntegerDigits: 20,
       maxFractionDigits: 18,
@@ -177,6 +182,10 @@ export default function QuantSingleBacktestCreatePanel({
       return setError(
         `${invalidParameter.name} 必须为 ${invalidParameter.minValue}～${invalidParameter.maxValue} 的整数`,
       );
+    if (!normalizedInitialCapital || !isPositiveDecimal(normalizedInitialCapital))
+      return setError(
+        "初始资金必须是大于 0、20 位整数且最多 18 位小数的十进制字符串",
+      );
     if (!normalizedOrderAmount || !isPositiveDecimal(normalizedOrderAmount))
       return setError(
         "数量必须是大于 0、20 位整数且最多 18 位小数的十进制字符串",
@@ -201,6 +210,7 @@ export default function QuantSingleBacktestCreatePanel({
         strategyCode: strategy.code,
         strategyVersion: strategy.version,
         ...executionContextPayload(contextResult.profile),
+        initialCapital: normalizedInitialCapital,
         orderAmount: normalizedOrderAmount,
         feeRate: normalizedFeeRate,
         strategyParameters: Object.fromEntries(
@@ -301,6 +311,18 @@ export default function QuantSingleBacktestCreatePanel({
           </label>
         ))}
         <div className="backtest-form-grid">
+          <label>
+            初始资金（计价资产，当前为 USDT）
+            <input
+              aria-label="初始资金（计价资产，当前为 USDT）"
+              inputMode="decimal"
+              value={initialCapital}
+              onChange={(event) => setInitialCapital(event.target.value)}
+            />
+            <small>
+              回测研究账户的初始权益，不代表 Binance 真实余额。
+            </small>
+          </label>
           <label>
             开始时间
             <input

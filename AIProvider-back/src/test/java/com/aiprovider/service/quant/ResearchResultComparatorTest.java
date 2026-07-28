@@ -23,6 +23,6 @@ class ResearchResultComparatorTest {
   }
 
   private ResearchStudyDtos.Summary summary(String id, BigDecimal returns, BigDecimal drawdown, int trades, int successful, int changes) {
-    return new ResearchStudyDtos.Summary(id, id, null, 1, "BINANCE", "USDM_PERPETUAL", "CANDLE", "BTCUSDT", "1h", "EMA", "1", "PROFILE", "LONG_ONLY", "BASE_QUANTITY", "WALK_FORWARD", "STRATEGY_DEFAULT", 12, "g", "child-" + id, "COMPLETED", BigDecimal.valueOf(100), successful, 0, false, returns, drawdown, trades, BigDecimal.ZERO, changes, null, null, null, null, null, null);
+    return new ResearchStudyDtos.Summary(id, id, null, 1, "BINANCE", "USDM_PERPETUAL", "CANDLE", "BTCUSDT", "1h", "EMA", "1", "PROFILE", "LONG_ONLY", "BASE_QUANTITY", "WALK_FORWARD", "STRATEGY_DEFAULT", 12, new BigDecimal("1000"), "g", "child-" + id, "COMPLETED", BigDecimal.valueOf(100), successful, 0, false, returns, drawdown, trades, BigDecimal.ZERO, changes, null, null, null, null, null, null);
   }
 }

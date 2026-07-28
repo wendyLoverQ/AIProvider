@@ -57,6 +57,9 @@ function Metric({ label, value, tone }) {
   );
 }
 
+const formatCapitalContext = (value) =>
+  value == null ? "历史任务未记录" : formatDecimalString(value);
+
 export default function QuantSingleBacktestRunDetail({
   run,
   loading,
@@ -116,6 +119,7 @@ export default function QuantSingleBacktestRunDetail({
               "基础资产数量 / 手续费",
               `${run.orderAmount ?? "—"} / ${run.feeRate ?? "—"}`,
             ],
+            ["初始资金", formatCapitalContext(run.initialCapital)],
             [
               "K 线数 / 交易数",
               `${run.barCount ?? "—"} / ${run.tradeCount ?? "—"}`,
@@ -175,6 +179,10 @@ export default function QuantSingleBacktestRunDetail({
                   : "negative",
               ],
               ["最大回撤", formatRatioString(metrics.maximumDrawdownRatio)],
+              ["最终权益", formatCapitalContext(run.finalEquity)],
+              ["总盈亏", formatCapitalContext(run.totalPnl)],
+              ["平均资金暴露", formatRatioString(run.averageExposureRatio)],
+              ["最大资金暴露", formatRatioString(run.maximumExposureRatio)],
               ["胜率", formatRatioString(metrics.winRate)],
               [
                 "交易数",

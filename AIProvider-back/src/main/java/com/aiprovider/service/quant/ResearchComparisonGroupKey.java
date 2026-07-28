@@ -23,6 +23,7 @@ public final class ResearchComparisonGroupKey {
     values.put("executionProfileCode", clean(request.getExecutionProfileCode()));
     values.put("directionMode", clean(request.getDirectionMode()));
     values.put("orderSizingMode", clean(request.getOrderSizingMode()));
+    values.put("initialCapital", decimal(request.getInitialCapital()));
     values.put("orderAmount", decimal(request.getOrderAmount()));
     values.put("feeRate", decimal(request.getFeeRate()));
     values.put("forceCloseAtEnd", request.isForceCloseAtEnd());

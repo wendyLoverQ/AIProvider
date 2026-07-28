@@ -205,6 +205,7 @@ public class BacktestExperimentDispatcher {
       throw new BacktestTaskException(
           "BACKTEST_EXPERIMENT_DISPATCH_FAILED", "candidate parameters are invalid");
     }
+    request.setInitialCapital(experiment.initialCapital);
     request.setOrderAmount(experiment.orderAmount);
     request.setFeeRate(experiment.feeRate);
     request.setForceCloseAtEnd(true);

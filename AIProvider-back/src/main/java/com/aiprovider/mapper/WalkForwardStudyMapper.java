@@ -9,7 +9,7 @@ import org.apache.ibatis.annotations.*;
 @Mapper
 public interface WalkForwardStudyMapper {
   String COLUMNS =
-      "Id,StudyId,DatasetId,Provider,MarketType,DataType,Symbol,IntervalCode,StrategyCode,StrategyVersion,ExecutionProfileCode,DirectionMode,OrderSizingMode,ParameterGridJson,WindowMode,StudyStartOpenTimeMs,StudyEndOpenTimeMs,TrainingBars,ValidationBars,StepBars,FoldCount,CandidateCountPerFold,TotalChildRuns,SelectionMetric,MinimumTrainTrades,OrderAmount,FeeRate,ForceCloseAtEnd,Status,ProgressPercent,ErrorCode,ErrorMessage,CreatedAt,UpdatedAt,StartedAt,FinishedAt,SuccessfulOosFolds,FailedFolds,HasOosGaps,OosTotalReturnRatio,OosMaximumDrawdownRatio,OosTradeCount,OosTotalFees,ParameterChanges,OosAggregateVersion";
+      "Id,StudyId,DatasetId,Provider,MarketType,DataType,Symbol,IntervalCode,StrategyCode,StrategyVersion,ExecutionProfileCode,DirectionMode,OrderSizingMode,ParameterGridJson,WindowMode,StudyStartOpenTimeMs,StudyEndOpenTimeMs,TrainingBars,ValidationBars,StepBars,FoldCount,CandidateCountPerFold,TotalChildRuns,SelectionMetric,MinimumTrainTrades,InitialCapital,OrderAmount,FeeRate,ForceCloseAtEnd,Status,ProgressPercent,ErrorCode,ErrorMessage,CreatedAt,UpdatedAt,StartedAt,FinishedAt,SuccessfulOosFolds,FailedFolds,HasOosGaps,OosTotalReturnRatio,OosMaximumDrawdownRatio,OosTradeCount,OosTotalFees,ParameterChanges,OosAggregateVersion";
 
   @Results(
       id = "walkForwardStudyRow",
@@ -39,6 +39,7 @@ public interface WalkForwardStudyMapper {
         @Result(column = "TotalChildRuns", property = "totalChildRuns"),
         @Result(column = "SelectionMetric", property = "selectionMetric"),
         @Result(column = "MinimumTrainTrades", property = "minimumTrainTrades"),
+        @Result(column = "InitialCapital", property = "initialCapital"),
         @Result(column = "OrderAmount", property = "orderAmount"),
         @Result(column = "FeeRate", property = "feeRate"),
         @Result(column = "ForceCloseAtEnd", property = "forceCloseAtEnd"),
@@ -104,8 +105,8 @@ public interface WalkForwardStudyMapper {
 
   @Insert(
       "INSERT INTO"
-          + " q_walk_forward_study(StudyId,DatasetId,Provider,MarketType,DataType,Symbol,IntervalCode,StrategyCode,StrategyVersion,ExecutionProfileCode,DirectionMode,OrderSizingMode,ParameterGridJson,WindowMode,StudyStartOpenTimeMs,StudyEndOpenTimeMs,TrainingBars,ValidationBars,StepBars,FoldCount,CandidateCountPerFold,TotalChildRuns,SelectionMetric,MinimumTrainTrades,OrderAmount,FeeRate,ForceCloseAtEnd,Status,CreatedAt,UpdatedAt)"
-          + " VALUES(#{studyId},#{datasetId},#{provider},#{marketType},#{dataType},#{symbol},#{intervalCode},#{strategyCode},#{strategyVersion},#{executionProfileCode},#{directionMode},#{orderSizingMode},#{parameterGridJson},#{windowMode},#{studyStartOpenTimeMs},#{studyEndOpenTimeMs},#{trainingBars},#{validationBars},#{stepBars},#{foldCount},#{candidateCountPerFold},#{totalChildRuns},#{selectionMetric},#{minimumTrainTrades},#{orderAmount},#{feeRate},#{forceCloseAtEnd},'QUEUED',#{createdAt},#{updatedAt})")
+          + " q_walk_forward_study(StudyId,DatasetId,Provider,MarketType,DataType,Symbol,IntervalCode,StrategyCode,StrategyVersion,ExecutionProfileCode,DirectionMode,OrderSizingMode,ParameterGridJson,WindowMode,StudyStartOpenTimeMs,StudyEndOpenTimeMs,TrainingBars,ValidationBars,StepBars,FoldCount,CandidateCountPerFold,TotalChildRuns,SelectionMetric,MinimumTrainTrades,InitialCapital,OrderAmount,FeeRate,ForceCloseAtEnd,Status,CreatedAt,UpdatedAt)"
+          + " VALUES(#{studyId},#{datasetId},#{provider},#{marketType},#{dataType},#{symbol},#{intervalCode},#{strategyCode},#{strategyVersion},#{executionProfileCode},#{directionMode},#{orderSizingMode},#{parameterGridJson},#{windowMode},#{studyStartOpenTimeMs},#{studyEndOpenTimeMs},#{trainingBars},#{validationBars},#{stepBars},#{foldCount},#{candidateCountPerFold},#{totalChildRuns},#{selectionMetric},#{minimumTrainTrades},#{initialCapital},#{orderAmount},#{feeRate},#{forceCloseAtEnd},'QUEUED',#{createdAt},#{updatedAt})")
   int insert(WalkForwardStudyRow row);
 
   @Update(

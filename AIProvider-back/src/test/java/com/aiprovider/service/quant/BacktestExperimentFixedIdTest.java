@@ -91,6 +91,7 @@ class BacktestExperimentFixedIdTest {
     request.setTrainingEndOpenTimeExclusive(Instant.ofEpochMilli(300_000));
     request.setValidationStartOpenTimeInclusive(Instant.ofEpochMilli(300_000));
     request.setValidationEndOpenTimeExclusive(Instant.ofEpochMilli(600_000));
+    request.setInitialCapital(new BigDecimal("1000"));
     request.setOrderAmount(BigDecimal.ONE);
     request.setFeeRate(BigDecimal.ZERO);
     request.setForceCloseAtEnd(true);
@@ -112,6 +113,7 @@ class BacktestExperimentFixedIdTest {
     row.trainingEndOpenTimeMs = 300_000;
     row.validationStartOpenTimeMs = 300_000;
     row.validationEndOpenTimeMs = 600_000;
+    row.initialCapital = new BigDecimal("1000");
     row.orderAmount = BigDecimal.ONE;
     row.feeRate = BigDecimal.ZERO;
     row.forceCloseAtEnd = true;

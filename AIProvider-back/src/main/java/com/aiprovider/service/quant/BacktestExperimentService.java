@@ -125,6 +125,7 @@ public class BacktestExperimentService {
     row.trainingEndOpenTimeMs = q.getTrainingEndOpenTimeExclusive().toEpochMilli();
     row.validationStartOpenTimeMs = q.getValidationStartOpenTimeInclusive().toEpochMilli();
     row.validationEndOpenTimeMs = q.getValidationEndOpenTimeExclusive().toEpochMilli();
+    row.initialCapital = q.getInitialCapital();
     row.orderAmount = q.getOrderAmount();
     row.feeRate = q.getFeeRate();
     row.forceCloseAtEnd = true;
@@ -182,6 +183,8 @@ public class BacktestExperimentService {
         && row.validationStartOpenTimeMs
             == request.getValidationStartOpenTimeInclusive().toEpochMilli()
         && row.validationEndOpenTimeMs == request.getValidationEndOpenTimeExclusive().toEpochMilli()
+        && row.initialCapital != null
+        && row.initialCapital.compareTo(request.getInitialCapital()) == 0
         && row.orderAmount != null
         && row.orderAmount.compareTo(request.getOrderAmount()) == 0
         && row.feeRate != null
@@ -392,6 +395,7 @@ public class BacktestExperimentService {
         Instant.ofEpochMilli(r.trainingEndOpenTimeMs),
         Instant.ofEpochMilli(r.validationStartOpenTimeMs),
         Instant.ofEpochMilli(r.validationEndOpenTimeMs),
+        r.initialCapital,
         r.orderAmount,
         r.feeRate,
         r.forceCloseAtEnd,
@@ -477,7 +481,11 @@ public class BacktestExperimentService {
             r.profitFactor,
             r.averageTradeReturnRatio,
             r.buyAndHoldReturnRatio,
-            r.totalFees);
+            r.totalFees,
+            r.finalEquity,
+            r.totalPnl,
+            r.averageExposureRatio,
+            r.maximumExposureRatio);
     return new BacktestExperimentDtos.SegmentResult(
         type,
         id,
@@ -554,6 +562,9 @@ public class BacktestExperimentService {
         || q.getTrainingEndOpenTimeExclusive() == null
         || q.getValidationStartOpenTimeInclusive() == null
         || q.getValidationEndOpenTimeExclusive() == null
+        || q.getInitialCapital() == null
+        || !decimal(q.getInitialCapital())
+        || q.getInitialCapital().signum() <= 0
         || q.getOrderAmount() == null
         || !decimal(q.getOrderAmount())
         || q.getOrderAmount().signum() <= 0

@@ -158,6 +158,16 @@ export function parseRunPage(data) {
 export function parseRunDetail(data) {
   if (!data || typeof data !== "object" || Array.isArray(data) || typeof data.runId !== "string" || typeof data.status !== "string")
     throw new Error("回测详情响应格式异常");
+  [
+    data.initialCapital,
+    data.finalEquity,
+    data.totalPnl,
+    data.averageExposureRatio,
+    data.maximumExposureRatio,
+  ].forEach((value) => {
+    if (value != null && normalizeDecimalString(value) == null)
+      throw new Error("回测资金字段响应格式异常");
+  });
   return executionFields(data, "回测详情响应格式异常");
 }
 export function parseTradePage(data) {
@@ -174,7 +184,17 @@ export function parseTradePage(data) {
   });
   return page;
 }
-export function parseEquityResponse(data) { if (!data || typeof data !== "object" || Array.isArray(data) || typeof data.sampled !== "boolean" || !Number.isSafeInteger(data.totalPoints) || data.totalPoints < 0 || !Array.isArray(data.points)) throw new Error("权益曲线响应格式异常"); return data; }
+export function parseEquityResponse(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data) || typeof data.sampled !== "boolean" || !Number.isSafeInteger(data.totalPoints) || data.totalPoints < 0 || !Array.isArray(data.points)) throw new Error("权益曲线响应格式异常");
+  const capitalFields = ["equityValue", "availableCapital", "realizedPnl", "unrealizedPnl", "positionQuantity", "positionNotional", "exposureRatio"];
+  data.points.forEach((point) => {
+    const values = capitalFields.map((field) => point?.[field]);
+    const historical = values.every((value) => value == null);
+    if (!historical && values.some((value) => value == null || normalizeDecimalString(value) == null))
+      throw new Error("权益曲线资金字段响应格式异常");
+  });
+  return data;
+}
 export const fetchStrategies = (signal) => request(BACKTEST_BASE, "/strategies", {}, signal).then(parseStrategyList);
 export const fetchExecutionProfiles = (signal) => request(BACKTEST_BASE, "/execution-profiles", {}, signal).then(parseExecutionProfileList);
 export const fetchDatasets = (signal) => request(MARKET_DATA_BASE, `/datasets${query({ status: "CONTIGUOUS", page: 1, pageSize: 100 })}`, {}, signal).then(parseDatasetList);

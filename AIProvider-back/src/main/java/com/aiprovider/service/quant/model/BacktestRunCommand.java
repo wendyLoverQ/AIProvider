@@ -11,7 +11,8 @@ public record BacktestRunCommand(String runId, long datasetId, Instant startOpen
         Instant endOpenTimeExclusive, String strategyCode, String strategyVersion,
         ExecutionProfileCode executionProfileCode, DirectionMode directionMode,
         OrderSizingMode orderSizingMode,
-        Map<String, Integer> strategyParameters, BigDecimal orderAmount, BigDecimal feeRate,
+        Map<String, Integer> strategyParameters, BigDecimal initialCapital,
+        BigDecimal orderAmount, BigDecimal feeRate,
         boolean forceCloseAtEnd) {
     public BacktestRunCommand {
         strategyParameters = strategyParameters == null ? Map.of() : Map.copyOf(strategyParameters);

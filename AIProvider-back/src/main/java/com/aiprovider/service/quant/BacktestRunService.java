@@ -124,6 +124,7 @@ public class BacktestRunService {
     row.directionMode = q.getDirectionMode();
     row.orderSizingMode = q.getOrderSizingMode();
     row.requestedParametersJson = write(params);
+    row.initialCapital = q.getInitialCapital();
     row.orderAmount = q.getOrderAmount();
     row.feeRate = q.getFeeRate();
     row.forceCloseAtEnd = q.isForceCloseAtEnd();
@@ -159,6 +160,7 @@ public class BacktestRunService {
             DirectionMode.valueOf(q.getDirectionMode()),
             OrderSizingMode.valueOf(q.getOrderSizingMode()),
             params,
+            q.getInitialCapital(),
             q.getOrderAmount(),
             q.getFeeRate(),
             q.isForceCloseAtEnd());
@@ -191,6 +193,7 @@ public class BacktestRunService {
               DirectionMode.valueOf(q.getDirectionMode()),
               OrderSizingMode.valueOf(q.getOrderSizingMode()),
               params,
+              q.getInitialCapital(),
               q.getOrderAmount(),
               q.getFeeRate(),
               q.isForceCloseAtEnd()));
@@ -232,6 +235,8 @@ public class BacktestRunService {
         && Objects.equals(q.getDirectionMode(), existing.directionMode)
         && Objects.equals(q.getOrderSizingMode(), existing.orderSizingMode)
         && Objects.equals(read(existing.requestedParametersJson), params)
+        && existing.initialCapital != null
+        && existing.initialCapital.compareTo(q.getInitialCapital()) == 0
         && existing.orderAmount != null
         && existing.orderAmount.compareTo(q.getOrderAmount()) == 0
         && existing.feeRate != null
@@ -271,12 +276,13 @@ public class BacktestRunService {
                   c.strategyCode(),
                   c.strategyVersion(),
                   c.strategyParameters(),
+                  c.initialCapital(),
                   c.orderAmount(),
                   c.feeRate(),
                   c.forceCloseAtEnd()),
               marketContext(s),
               s.getCandles());
-      validateResult(c.runId(), s, result);
+      validateResult(c.runId(), c.initialCapital(), s, result);
       cas(
           c.runId(),
           BacktestRunStatus.RUNNING_ENGINE,
@@ -319,15 +325,51 @@ public class BacktestRunService {
       throw error("BACKTEST_STATE_CONFLICT", "runId=" + id + " transition failed");
   }
 
-  private void validateResult(String id, MarketDataSnapshot s, BacktestResult r) {
+  private void validateResult(
+      String id, BigDecimal requestedInitialCapital, MarketDataSnapshot s, BacktestResult r) {
+    if (r == null) {
+      throw error("BACKTEST_RESULT_INVALID", "runId=" + id + " result is null");
+    }
+    BacktestMetrics metrics = r.getMetrics();
     if (r.getBarCount() != s.getActualCandleCount()
         || !s.getSymbol().equals(r.getSymbol())
         || s.getInterval() != r.getInterval()
-        || r.getTrades().size() != r.getMetrics().getTradeCount()
+        || metrics == null
+        || r.getTrades().size() != metrics.getTradeCount()
         || r.getEquityCurve().size() != r.getBarCount()
-        || r.getMetrics().getMaximumDrawdownRatio().signum() < 0
-        || r.getEquityCurve().isEmpty())
+        || metrics.getMaximumDrawdownRatio() == null
+        || metrics.getMaximumDrawdownRatio().signum() < 0
+        || r.getInitialCapital() == null
+        || r.getInitialCapital().compareTo(requestedInitialCapital) != 0
+        || r.getFinalEquity() == null
+        || metrics.getFinalEquity() == null
+        || metrics.getTotalPnl() == null
+        || metrics.getAverageExposureRatio() == null
+        || metrics.getMaximumExposureRatio() == null
+        || metrics.getAverageExposureRatio().signum() < 0
+        || metrics.getMaximumExposureRatio().signum() < 0
+        || r.getFinalEquity().compareTo(metrics.getFinalEquity()) != 0
+        || r.getFinalEquity().compareTo(r.getInitialCapital().add(metrics.getTotalPnl())) != 0
+        || r.getEquityCurve().isEmpty()
+        || r.getEquityCurve().stream().anyMatch(this::invalidCapitalPoint)
+        || r.getEquityCurve().get(r.getEquityCurve().size() - 1).equityValue()
+            .compareTo(r.getFinalEquity()) != 0)
       throw error("BACKTEST_RESULT_INVALID", "runId=" + id + " result consistency check failed");
+  }
+
+  private boolean invalidCapitalPoint(EquityPoint point) {
+    return point == null
+        || point.equityValue() == null
+        || point.availableCapital() == null
+        || point.realizedPnl() == null
+        || point.unrealizedPnl() == null
+        || point.positionQuantity() == null
+        || point.positionNotional() == null
+        || point.exposureRatio() == null
+        || point.availableCapital().signum() < 0
+        || point.positionQuantity().signum() < 0
+        || point.positionNotional().signum() < 0
+        || point.exposureRatio().signum() < 0;
   }
 
   public List<BacktestDtos.Strategy> strategies() {
@@ -423,6 +465,9 @@ public class BacktestRunService {
         || q.getStrategyCode().isBlank()
         || q.getStrategyVersion() == null
         || q.getStrategyVersion().isBlank()
+        || q.getInitialCapital() == null
+        || !fitsDecimal38_18(q.getInitialCapital())
+        || q.getInitialCapital().signum() <= 0
         || q.getOrderAmount() == null
         || !fitsDecimal38_18(q.getOrderAmount())
         || q.getOrderAmount().signum() <= 0
@@ -483,6 +528,10 @@ public class BacktestRunService {
     m.put("averageTradeReturnRatio", r.averageTradeReturnRatio);
     m.put("buyAndHoldReturnRatio", r.buyAndHoldReturnRatio);
     m.put("totalFees", r.totalFees);
+    m.put("finalEquity", r.finalEquity);
+    m.put("totalPnl", r.totalPnl);
+    m.put("averageExposureRatio", r.averageExposureRatio);
+    m.put("maximumExposureRatio", r.maximumExposureRatio);
     m.put("_executionModel", r.executionModel);
     m.put("_warnings", readWarnings(r.warningsJson));
     return new BacktestDtos.RunDetail(
@@ -504,6 +553,7 @@ public class BacktestRunService {
         r.orderSizingMode,
         req,
         res,
+        r.initialCapital,
         r.orderAmount,
         r.feeRate,
         r.forceCloseAtEnd,
@@ -553,7 +603,14 @@ public class BacktestRunService {
         Instant.ofEpochMilli(r.openTimeMs),
         r.equityRatio,
         r.drawdownRatio,
-        r.inPosition);
+        r.inPosition,
+        r.equityValue,
+        r.availableCapital,
+        r.realizedPnl,
+        r.unrealizedPnl,
+        r.positionQuantity,
+        r.positionNotional,
+        r.exposureRatio);
   }
 
   private Map<String, Integer> read(String s) {
@@ -628,6 +685,7 @@ public class BacktestRunService {
         direction,
         sizing,
         read(row.requestedParametersJson),
+        row.initialCapital,
         row.orderAmount,
         row.feeRate,
         row.forceCloseAtEnd);

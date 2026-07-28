@@ -74,6 +74,7 @@ class BacktestExperimentDispatcherTest {
       assertEquals("USDM_PERPETUAL_LONG_ONLY_1X_V1", child.getExecutionProfileCode());
       assertEquals("LONG_ONLY", child.getDirectionMode());
       assertEquals("BASE_QUANTITY", child.getOrderSizingMode());
+      assertEquals(new java.math.BigDecimal("1000"), child.getInitialCapital());
     }
     verify(candidates).markDispatched(eq("c"), anyString(), any());
   }
@@ -338,6 +339,7 @@ class BacktestExperimentDispatcherTest {
     row.trainingEndOpenTimeMs = 60000;
     row.validationStartOpenTimeMs = 60000;
     row.validationEndOpenTimeMs = 120000;
+    row.initialCapital = new java.math.BigDecimal("1000");
     row.orderAmount = java.math.BigDecimal.ONE;
     row.feeRate = new java.math.BigDecimal("0.001");
     return row;

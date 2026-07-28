@@ -95,6 +95,10 @@ export default function QuantExperimentDetail({
           </dd>
         </div>
         <div>
+          <dt>初始资金</dt>
+          <dd>{experiment.initialCapital ?? "历史任务未记录"}</dd>
+        </div>
+        <div>
           <dt>基础资产数量 / 手续费</dt>
           <dd>
             {experiment.orderAmount ?? "—"} / {experiment.feeRate ?? "—"}

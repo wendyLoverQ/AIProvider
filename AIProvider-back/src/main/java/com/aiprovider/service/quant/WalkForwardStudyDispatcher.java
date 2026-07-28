@@ -320,7 +320,7 @@ public class WalkForwardStudyDispatcher {
     request.setParameterGrid(readGrid(study.parameterGridJson));
     request.setTrainingStartOpenTimeInclusive(Instant.ofEpochMilli(fold.trainingStartOpenTimeMs)); request.setTrainingEndOpenTimeExclusive(Instant.ofEpochMilli(fold.trainingEndOpenTimeMs));
     request.setValidationStartOpenTimeInclusive(Instant.ofEpochMilli(fold.validationStartOpenTimeMs)); request.setValidationEndOpenTimeExclusive(Instant.ofEpochMilli(fold.validationEndOpenTimeMs));
-    request.setOrderAmount(study.orderAmount); request.setFeeRate(study.feeRate); request.setForceCloseAtEnd(study.forceCloseAtEnd);
+    request.setInitialCapital(study.initialCapital); request.setOrderAmount(study.orderAmount); request.setFeeRate(study.feeRate); request.setForceCloseAtEnd(study.forceCloseAtEnd);
     return request;
   }
 

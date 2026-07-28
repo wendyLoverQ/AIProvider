@@ -138,6 +138,7 @@ public class WalkForwardStudyCreationService {
     study.totalChildRuns = generated.totalChildRuns();
     study.selectionMetric = request.getSelectionMetric().trim().toUpperCase();
     study.minimumTrainTrades = request.getMinimumTrainTrades();
+    study.initialCapital = request.getInitialCapital();
     study.orderAmount = request.getOrderAmount();
     study.feeRate = request.getFeeRate();
     study.forceCloseAtEnd = true;
@@ -181,6 +182,7 @@ public class WalkForwardStudyCreationService {
         && row.stepBars == request.getValidationBars()
         && Objects.equals(row.selectionMetric, request.getSelectionMetric().trim().toUpperCase())
         && row.minimumTrainTrades == request.getMinimumTrainTrades()
+        && row.initialCapital != null && row.initialCapital.compareTo(request.getInitialCapital()) == 0
         && row.orderAmount != null && row.orderAmount.compareTo(request.getOrderAmount()) == 0
         && row.feeRate != null && row.feeRate.compareTo(request.getFeeRate()) == 0
         && row.forceCloseAtEnd == request.isForceCloseAtEnd();
@@ -201,6 +203,9 @@ public class WalkForwardStudyCreationService {
         || request.getMinimumTrainTrades() < 0
         || request.getMinimumTrainTrades() > 1_000_000
         || blank(request.getSelectionMetric())
+        || request.getInitialCapital() == null
+        || !decimal(request.getInitialCapital())
+        || request.getInitialCapital().signum() <= 0
         || request.getOrderAmount() == null
         || !decimal(request.getOrderAmount())
         || request.getOrderAmount().signum() <= 0

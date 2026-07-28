@@ -10,7 +10,7 @@ public class BacktestExperimentRow {
     public String parameterGridJson, status, errorCode, errorMessage;
     public int candidateCount;
     public long trainingStartOpenTimeMs, trainingEndOpenTimeMs, validationStartOpenTimeMs, validationEndOpenTimeMs;
-    public BigDecimal orderAmount, feeRate, progressPercent;
+    public BigDecimal initialCapital, orderAmount, feeRate, progressPercent;
     public boolean forceCloseAtEnd;
     public Instant createdAt, updatedAt, startedAt, finishedAt;
 }
