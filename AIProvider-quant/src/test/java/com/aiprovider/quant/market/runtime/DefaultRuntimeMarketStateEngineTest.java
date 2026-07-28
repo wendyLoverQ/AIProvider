@@ -16,9 +16,14 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DefaultRuntimeMarketStateEngineTest {
     private static final Instant BASE = Instant.parse("2026-07-28T00:00:00Z");
@@ -117,6 +122,71 @@ class DefaultRuntimeMarketStateEngineTest {
                 replay.getUpdateType());
         assertEquals(first.getState(), replay.getState());
         assertEquals(1, replay.getClosedCandleCount());
+    }
+
+    @Test
+    void handsHistoricalSeedToMatchingLiveClosedKline() {
+        RuntimeMarketState seeded = engine.initialize(KEY, 3, Collections.singletonList(candle(0)));
+        RuntimeClosedCandle historical = seeded.getClosedCandles().get(0);
+        StreamKlineEvent live = kline(0, true);
+        Instant originalWindowStart = historical.getOpenTime();
+        Instant originalWindowEnd = historical.getCloseTime();
+
+        RuntimeMarketUpdateResult result = engine.onKline(seeded, live);
+
+        assertEquals(RuntimeMarketUpdateType.DUPLICATE_CLOSED_CANDLE_IGNORED,
+                result.getUpdateType());
+        assertEquals(1, result.getClosedCandleCount());
+        assertSame(historical, result.getState().getClosedCandles().get(0));
+        assertEquals(seeded.getClosedCandles(), result.getState().getClosedCandles());
+        assertEquals(live.getEventTime(), result.getState().getLastKlineEventTime());
+        assertNotNull(result.getState().getLastKlineEventFingerprint());
+        assertEquals(originalWindowStart, result.getWindowStartTime());
+        assertEquals(originalWindowEnd, result.getWindowEndTime());
+    }
+
+    @Test
+    void rejectsConflictingLiveClosedKlineAtHistoricalSeedOpenTime() {
+        RuntimeMarketState seeded = engine.initialize(KEY, 3, Collections.singletonList(candle(0)));
+        StreamKlineEvent conflicting = kline(0, true);
+        conflicting.setClose(new BigDecimal("101.5"));
+
+        assertError(RuntimeMarketStateException.CANDLE_CONFLICT,
+                () -> engine.onKline(seeded, conflicting));
+    }
+
+    @Test
+    void candleContentComparisonExcludesOnlyEventTime() {
+        StreamKlineEvent firstEvent = kline(0, true);
+        StreamKlineEvent laterEvent = kline(0, true);
+        laterEvent.setEventTime(firstEvent.getEventTime().plusMillis(1));
+        RuntimeClosedCandle first = RuntimeClosedCandle.from(firstEvent);
+        RuntimeClosedCandle later = RuntimeClosedCandle.from(laterEvent);
+
+        assertNotEquals(first, later);
+        assertTrue(first.hasSameCandleContent(later));
+        assertTrue(later.hasSameCandleContent(first));
+
+        StreamKlineEvent changedEvent = kline(0, true);
+        changedEvent.setEventTime(firstEvent.getEventTime().plusMillis(1));
+        changedEvent.setClose(new BigDecimal("101.5"));
+        RuntimeClosedCandle changed = RuntimeClosedCandle.from(changedEvent);
+
+        assertFalse(first.hasSameCandleContent(changed));
+        assertFalse(first.hasSameCandleContent(null));
+    }
+
+    @Test
+    void matchingCandleContentDoesNotBypassKlineEventWatermark() {
+        RuntimeMarketState seeded = engine.initialize(KEY, 3, Collections.singletonList(candle(0)));
+        StreamKlineEvent newest = kline(0, true);
+        newest.setEventTime(newest.getCloseTime().plusMillis(10));
+        RuntimeMarketState handedOff = engine.onKline(seeded, newest).getState();
+        StreamKlineEvent older = kline(0, true);
+        older.setEventTime(older.getCloseTime().plusMillis(5));
+
+        assertError(RuntimeMarketStateException.EVENT_TIME_INVALID,
+                () -> engine.onKline(handedOff, older));
     }
 
     @Test

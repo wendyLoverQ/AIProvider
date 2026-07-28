@@ -82,7 +82,7 @@ public final class DefaultRuntimeMarketStateEngine implements RuntimeMarketState
         if (!candles.isEmpty()) {
             RuntimeClosedCandle last = candles.get(candles.size() - 1);
             if (incoming.getOpenTime().equals(last.getOpenTime())) {
-                if (!incoming.equals(last)) {
+                if (!incoming.hasSameCandleContent(last)) {
                     throw failure(RuntimeMarketStateException.CANDLE_CONFLICT,
                             "closed candle conflicts with the existing candle at the same openTime");
                 }

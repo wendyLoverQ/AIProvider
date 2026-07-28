@@ -197,6 +197,21 @@ public final class RuntimeClosedCandle {
     public BigDecimal getTakerBuyBaseVolume() { return copy(takerBuyBaseVolume); }
     public BigDecimal getTakerBuyQuoteVolume() { return copy(takerBuyQuoteVolume); }
 
+    /**
+     * Compares persisted candle content while deliberately excluding the stream message event time.
+     */
+    public boolean hasSameCandleContent(RuntimeClosedCandle other) {
+        return other != null && tradeCount == other.tradeCount
+                && provider == other.provider && marketType == other.marketType
+                && symbol.equals(other.symbol) && interval == other.interval
+                && openTime.equals(other.openTime) && closeTime.equals(other.closeTime)
+                && open.equals(other.open) && high.equals(other.high) && low.equals(other.low)
+                && close.equals(other.close) && volume.equals(other.volume)
+                && quoteVolume.equals(other.quoteVolume)
+                && takerBuyBaseVolume.equals(other.takerBuyBaseVolume)
+                && takerBuyQuoteVolume.equals(other.takerBuyQuoteVolume);
+    }
+
     @Override
     public boolean equals(Object other) {
         if (this == other) return true;
