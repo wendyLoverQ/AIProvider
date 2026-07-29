@@ -291,12 +291,6 @@ public final class DefaultPaperRuntimeEngine implements PaperRuntimeEngine {
                     PaperRuntimeException.PAPER_RUNTIME_EVENT_TIME_INVALID,
                     "eventTime is required");
         }
-        Instant lastProcessedEventTime = runtime.getLastProcessedEventTime();
-        if (lastProcessedEventTime != null && eventTime.isBefore(lastProcessedEventTime)) {
-            throw new PaperRuntimeException(
-                    PaperRuntimeException.PAPER_RUNTIME_EVENT_TIME_INVALID,
-                    "eventTime must not precede the global runtime watermark");
-        }
     }
 
     private static PaperRuntimeException requestInvalid(String message) {

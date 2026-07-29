@@ -45,6 +45,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiConsumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -325,7 +326,7 @@ class DefaultPaperRuntimeEngineTest {
     }
 
     @Test
-    void rejectsOlderUtcDateAndCrossChannelOutOfOrderEvents() {
+    void acceptsCrossChannelEventsAgainstIndependentWatermarks() {
         PaperRuntimeEngine engine = new DefaultPaperRuntimeEngine();
         PaperRuntimeSnapshot initial = initialize(engine, candles(100, 100, 100, 100, 100));
 
@@ -336,21 +337,98 @@ class DefaultPaperRuntimeEngineTest {
                 .isEqualTo(PaperRuntimeException.PAPER_RUNTIME_EVENT_DATE_INVALID);
 
         PaperRuntimeStepResult laterBook = engine.onBookTicker(
-                initial, book(BASE.plusSeconds(400), "99", "100", "1"));
+                initial, book(BASE.plusSeconds(3602), "99", "100", "1"));
         StreamKlineEvent earlierKline = kline(5, "100", false);
-        earlierKline.setEventTime(BASE.plusSeconds(350));
-        assertThatThrownBy(() -> engine.onKline(laterBook.getRuntime(), earlierKline))
-                .isInstanceOf(PaperRuntimeException.class)
-                .extracting("errorCode")
-                .isEqualTo(PaperRuntimeException.PAPER_RUNTIME_EVENT_TIME_INVALID);
+        earlierKline.setEventTime(BASE.plusSeconds(3601));
+        PaperRuntimeStepResult acceptedKline = engine.onKline(laterBook.getRuntime(), earlierKline);
+        assertThat(acceptedKline.getRuntime().getLastProcessedEventTime())
+                .isEqualTo(BASE.plusSeconds(3601));
+        assertThat(acceptedKline.getRuntime().getMarketState().getLastKlineEventTime())
+                .isEqualTo(BASE.plusSeconds(3601));
+        assertThat(acceptedKline.getRuntime().getMarketState().getLastBookTickerEventTime())
+                .isEqualTo(BASE.plusSeconds(3602));
 
+        PaperRuntimeSnapshot markInitial = initialize(engine, candles(100, 100, 100, 100, 100));
         PaperRuntimeStepResult laterMark = engine.onMarkPrice(
-                initial, mark(BASE.plusSeconds(500), "101"));
+                markInitial, mark(BASE.plusSeconds(3603), "101"));
+        PaperRuntimeStepResult acceptedBook = engine.onBookTicker(
+                laterMark.getRuntime(), book(BASE.plusSeconds(3602), "99", "100", "1"));
+        assertThat(acceptedBook.getRuntime().getMarketState().getLastMarkPriceEventTime())
+                .isEqualTo(BASE.plusSeconds(3603));
+        assertThat(acceptedBook.getRuntime().getMarketState().getLastBookTickerEventTime())
+                .isEqualTo(BASE.plusSeconds(3602));
+
+        PaperRuntimeSnapshot klineInitial = initialize(engine, candles(100, 100, 100, 100, 100));
+        StreamKlineEvent laterKline = kline(5, "100", false);
+        laterKline.setEventTime(BASE.plusSeconds(3603));
+        PaperRuntimeStepResult klineResult = engine.onKline(klineInitial, laterKline);
+        PaperRuntimeStepResult acceptedMark = engine.onMarkPrice(
+                klineResult.getRuntime(), mark(BASE.plusSeconds(3602), "101"));
+        assertThat(acceptedMark.getRuntime().getMarketState().getLastKlineEventTime())
+                .isEqualTo(BASE.plusSeconds(3603));
+        assertThat(acceptedMark.getRuntime().getMarketState().getLastMarkPriceEventTime())
+                .isEqualTo(BASE.plusSeconds(3602));
+        assertThat(acceptedMark.getRuntime().getTradingSession().getPaperAccountSnapshot()
+                .getLastUpdatedAt()).isEqualTo(BASE.plusSeconds(3602));
+    }
+
+    @Test
+    void rejectsEventWithoutEventTime() {
+        PaperRuntimeEngine engine = new DefaultPaperRuntimeEngine();
+        StreamBookTickerEvent event = book(BASE.plusSeconds(1), "99", "100", "1");
+        event.setEventTime(null);
+
         assertThatThrownBy(() -> engine.onBookTicker(
-                laterMark.getRuntime(), book(BASE.plusSeconds(499), "99", "100", "1")))
+                initialize(engine, candles(100, 100, 100, 100, 100)), event))
                 .isInstanceOf(PaperRuntimeException.class)
                 .extracting("errorCode")
                 .isEqualTo(PaperRuntimeException.PAPER_RUNTIME_EVENT_TIME_INVALID);
+    }
+
+    @Test
+    void rejectsKlineThatMovesItsOwnWatermarkBackward() {
+        assertOwnStreamTimeFailure((engine, runtime) -> {
+            StreamKlineEvent later = kline(5, "100", false);
+            later.setEventTime(BASE.plusSeconds(3603));
+            PaperRuntimeSnapshot updated = engine.onKline(runtime, later).getRuntime();
+            StreamKlineEvent earlier = kline(6, "100", false);
+            earlier.setEventTime(BASE.plusSeconds(3602));
+            engine.onKline(updated, earlier);
+        });
+    }
+
+    @Test
+    void rejectsBookTickerThatMovesItsOwnWatermarkBackward() {
+        assertOwnStreamTimeFailure((engine, runtime) -> {
+            PaperRuntimeSnapshot updated = engine.onBookTicker(
+                    runtime, book(BASE.plusSeconds(3603), "99", "100", "1")).getRuntime();
+            engine.onBookTicker(updated, book(BASE.plusSeconds(3602), "98", "100", "1"));
+        });
+    }
+
+    @Test
+    void rejectsMarkPriceThatMovesItsOwnWatermarkBackward() {
+        assertOwnStreamTimeFailure((engine, runtime) -> {
+            PaperRuntimeSnapshot updated = engine.onMarkPrice(
+                    runtime, mark(BASE.plusSeconds(3603), "101")).getRuntime();
+            engine.onMarkPrice(updated, mark(BASE.plusSeconds(3602), "102"));
+        });
+    }
+
+    private void assertOwnStreamTimeFailure(
+            BiConsumer<PaperRuntimeEngine, PaperRuntimeSnapshot> operation) {
+        PaperRuntimeEngine engine = new DefaultPaperRuntimeEngine();
+        PaperRuntimeSnapshot initial = initialize(engine, candles(100, 100, 100, 100, 100));
+
+        assertThatThrownBy(() -> operation.accept(engine, initial))
+                .isInstanceOfSatisfying(PaperRuntimeException.class, exception -> {
+                    assertThat(exception.getErrorCode())
+                            .isEqualTo(PaperRuntimeException.PAPER_RUNTIME_MARKET_FAILED);
+                    assertThat(exception.getMessage())
+                            .contains(RuntimeMarketStateException.EVENT_TIME_INVALID);
+                    assertThat(exception.getCause())
+                            .isInstanceOf(RuntimeMarketStateException.class);
+                });
     }
 
     @Test
