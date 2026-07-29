@@ -360,15 +360,68 @@ class DefaultPaperSessionSupervisorTest {
         assertThat(fixture.supervisor.getSnapshot().getState()).isEqualTo(PaperSessionSupervisorState.FAILED);
     }
 
-    @Test void failedStopCanCloseWithoutSecondUnsubscribe() {
+    @Test void failedStopRetriesUnsubscribeAndThenBecomesIdempotent() {
         Fixture fixture = fixture();
         fixture.supervisor.start(BASE.plusSeconds(1));
         fixture.stream.unsubscribeFailure = new IllegalStateException("close");
         assertThatThrownBy(() -> fixture.supervisor.stop(BASE.plusSeconds(2)))
                 .extracting("errorCode").isEqualTo(PaperSessionSupervisorException.PAPER_SUPERVISOR_STREAM_UNSUBSCRIBE_FAILED);
+        assertThat(fixture.supervisor.getSnapshot().getState()).isEqualTo(PaperSessionSupervisorState.FAILED);
+        assertThat(fixture.stream.unsubscribeCount).isOne();
+
+        fixture.stream.unsubscribeFailure = null;
         PaperSessionSupervisorSnapshot stopped = fixture.supervisor.stop(BASE.plusSeconds(3));
         assertThat(stopped.getState()).isEqualTo(PaperSessionSupervisorState.STOPPED);
+        assertThat(stopped.getFailure()).isNull();
+        assertThat(fixture.stream.unsubscribeCount).isEqualTo(2);
+
+        assertThat(fixture.supervisor.stop(BASE.plusSeconds(4)).getState())
+                .isEqualTo(PaperSessionSupervisorState.STOPPED);
+        assertThat(fixture.stream.unsubscribeCount).isEqualTo(2);
+    }
+
+    @Test void repeatedUnsubscribeFailureKeepsSupervisorFailed() {
+        Fixture fixture = fixture();
+        fixture.supervisor.start(BASE.plusSeconds(1));
+        fixture.stream.unsubscribeFailure = new IllegalStateException("close");
+
+        assertThatThrownBy(() -> fixture.supervisor.stop(BASE.plusSeconds(2)))
+                .extracting("errorCode").isEqualTo(PaperSessionSupervisorException.PAPER_SUPERVISOR_STREAM_UNSUBSCRIBE_FAILED);
+        assertThatThrownBy(() -> fixture.supervisor.stop(BASE.plusSeconds(3)))
+                .extracting("errorCode").isEqualTo(PaperSessionSupervisorException.PAPER_SUPERVISOR_STREAM_UNSUBSCRIBE_FAILED);
+
+        PaperSessionSupervisorSnapshot failed = fixture.supervisor.getSnapshot();
+        assertThat(fixture.stream.unsubscribeCount).isEqualTo(2);
+        assertThat(failed.getState()).isEqualTo(PaperSessionSupervisorState.FAILED);
+        assertThat(failed.getFailure().getErrorCode())
+                .isEqualTo(PaperSessionSupervisorException.PAPER_SUPERVISOR_STREAM_UNSUBSCRIBE_FAILED);
+    }
+
+    @Test void runtimeFailureKeepsPrimaryCauseWhenAutomaticUnsubscribeFailsAndStopRetries() {
+        Fixture fixture = fixture(new ThrowingRuntime());
+        fixture.supervisor.start(BASE.plusSeconds(1));
+        IllegalStateException unsubscribeFailure = new IllegalStateException("close");
+        fixture.stream.unsubscribeFailure = unsubscribeFailure;
+
+        assertThatThrownBy(() -> fixture.supervisor.onBookTicker(book(BASE.plusSeconds(2), "99", "100", "1")))
+                .extracting("errorCode").isEqualTo(PaperSessionSupervisorException.PAPER_SUPERVISOR_RUNTIME_FAILED);
+
+        PaperSessionSupervisorSnapshot failed = fixture.supervisor.getSnapshot();
+        assertThat(failed.getState()).isEqualTo(PaperSessionSupervisorState.FAILED);
+        assertThat(failed.getFailure().getErrorCode())
+                .isEqualTo(PaperSessionSupervisorException.PAPER_SUPERVISOR_RUNTIME_FAILED);
+        assertThat(failed.getFailure().getCause()).isInstanceOf(PaperSessionSupervisorException.class);
+        assertThat(failed.getFailure().getCause().getCause())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("runtime");
+        assertThat(failed.getFailure().getCause().getSuppressed()).containsExactly(unsubscribeFailure);
         assertThat(fixture.stream.unsubscribeCount).isOne();
+
+        fixture.stream.unsubscribeFailure = null;
+        PaperSessionSupervisorSnapshot stopped = fixture.supervisor.stop(BASE.plusSeconds(3));
+        assertThat(stopped.getState()).isEqualTo(PaperSessionSupervisorState.STOPPED);
+        assertThat(stopped.getFailure()).isNull();
+        assertThat(fixture.stream.unsubscribeCount).isEqualTo(2);
     }
 
     @Test void snapshotEqualityIncludesAllStateFields() {

@@ -65,7 +65,7 @@ public final class DefaultPaperSessionSupervisor implements PaperSessionSupervis
     private PaperSessionSupervisorFailure failure;
     private Instant startedAt;
     private Instant stoppedAt;
-    private boolean unsubscribeAttempted;
+    private boolean unsubscribeInProgress;
     private boolean subscribed;
 
     public DefaultPaperSessionSupervisor(
@@ -140,21 +140,18 @@ public final class DefaultPaperSessionSupervisor implements PaperSessionSupervis
                 lastEventType = PaperSessionSupervisorEventType.STOPPED;
                 return snapshot();
             }
-            if (state == PaperSessionSupervisorState.FAILED) {
+            try {
+                unsubscribeLocked();
                 state = PaperSessionSupervisorState.STOPPED;
                 stoppedAt = copy(requestedStoppedAt);
                 failure = null;
                 lastEventType = PaperSessionSupervisorEventType.STOPPED;
                 return snapshot();
-            }
-            try {
-                unsubscribeLocked();
-                state = PaperSessionSupervisorState.STOPPED;
-                stoppedAt = copy(requestedStoppedAt);
-                lastEventType = PaperSessionSupervisorEventType.STOPPED;
-                return snapshot();
             } catch (RuntimeException exception) {
-                failLocked(STREAM_UNSUBSCRIBE_FAILED, "Market stream unsubscription failed", exception);
+                state = PaperSessionSupervisorState.FAILED;
+                failure = new PaperSessionSupervisorFailure(
+                        STREAM_UNSUBSCRIBE_FAILED, "Market stream unsubscription failed", exception);
+                lastEventType = PaperSessionSupervisorEventType.FAILED;
                 throw error(STREAM_UNSUBSCRIBE_FAILED, "Market stream unsubscription failed", exception);
             }
         } finally {
@@ -391,9 +388,16 @@ public final class DefaultPaperSessionSupervisor implements PaperSessionSupervis
     }
 
     private void unsubscribeLocked() {
-        if (unsubscribeAttempted || !subscribed) return;
-        unsubscribeAttempted = true;
-        marketStreamClient.unsubscribe(provider, symbol, interval, this);
+        if (!subscribed || unsubscribeInProgress) {
+            return;
+        }
+        unsubscribeInProgress = true;
+        try {
+            marketStreamClient.unsubscribe(provider, symbol, interval, this);
+            subscribed = false;
+        } finally {
+            unsubscribeInProgress = false;
+        }
     }
 
     private PaperSessionSupervisorSnapshot snapshot() {
