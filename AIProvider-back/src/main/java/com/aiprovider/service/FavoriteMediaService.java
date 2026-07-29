@@ -56,7 +56,8 @@ public class FavoriteMediaService {
     @Transactional
     public FavoriteMediaVO upload(MultipartFile file, Long assetId, String title, Integer width, Integer height,
                                   String prompt, String sourcePlatform) throws IOException {
-        if (file == null || file.isEmpty()) throw new IllegalArgumentException("请选择要上传的文件");
+                                  com.aiprovider.logging.BusinessOperationLogger.start("service.FavoriteMediaService.upload", new String[] { "file", "assetId", "title", "width", "height", "prompt", "sourcePlatform" }, new Object[] { file, assetId, title, width, height, prompt, sourcePlatform });
+                                  if (file == null || file.isEmpty()) throw new IllegalArgumentException("请选择要上传的文件");
         if (file.getSize() > MAX_MEDIA_BYTES) throw new IllegalArgumentException("单个文件不能超过 500MB");
         if (assetId != null && assetId > 0 && assetRepository.findById(assetId) == null)
             throw new IllegalArgumentException("来源资产不存在：" + assetId);
@@ -80,7 +81,7 @@ public class FavoriteMediaService {
             file.transferTo(temporary);
             String sha256 = sha256(temporary);
             Map<String,Object> existing = repository.findBySha256(sha256);
-            if (existing != null) return toVO(existing);
+            if (existing != null) return com.aiprovider.logging.BusinessOperationLogger.success("service.FavoriteMediaService.upload", toVO(existing));
             target = storageRoot.resolve(sha256.substring(0, 2)).resolve(sha256 + extension(contentType)).normalize();
             ensureWithinRoot(target);
             thumbnailFile = thumbnailPath(sha256);
@@ -111,7 +112,7 @@ public class FavoriteMediaService {
             else { moveAtomically(temporary, target); targetCreated = true; }
             Map<String,Object> saved = repository.findById(row.getId());
             if (saved == null) throw new IllegalStateException("我的最爱记录保存后无法读取");
-            return toVO(saved);
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.FavoriteMediaService.upload", toVO(saved));
         } catch (RuntimeException | IOException exception) {
             if (targetCreated && target != null) Files.deleteIfExists(target);
             if (thumbnailFile != null) Files.deleteIfExists(thumbnailFile);
@@ -123,7 +124,8 @@ public class FavoriteMediaService {
 
     @Transactional
     public int uploadBatch(List<MultipartFile> files, String metadataJson) throws IOException {
-        if (files == null || files.isEmpty() || files.size() > 100) throw new IllegalArgumentException("批量文件数量必须在 1 到 100 之间");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.FavoriteMediaService.uploadBatch", new String[] { "files", "metadataJson" }, new Object[] { files, metadataJson });
+    if (files == null || files.isEmpty() || files.size() > 100) throw new IllegalArgumentException("批量文件数量必须在 1 到 100 之间");
         final List<FavoriteMediaBatchItemDTO> metadata;
         try {
             metadata = new ObjectMapper().readValue(metadataJson, new TypeReference<List<FavoriteMediaBatchItemDTO>>() {});
@@ -194,7 +196,7 @@ public class FavoriteMediaService {
                 if (Files.exists(item.target)) Files.deleteIfExists(item.temporary);
                 else { moveAtomically(item.temporary, item.target); createdFiles.add(item.target); }
             }
-            return files.size();
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.FavoriteMediaService.uploadBatch", files.size());
         } catch (RuntimeException | IOException exception) {
             for (Path path : createdFiles) Files.deleteIfExists(path);
             throw exception;
@@ -204,37 +206,41 @@ public class FavoriteMediaService {
     }
 
     public FavoriteMediaPageVO page(int page, int pageSize) {
-        if (page < 1) throw new IllegalArgumentException("page 必须大于等于 1");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.FavoriteMediaService.page", new String[] { "page", "pageSize" }, new Object[] { page, pageSize });
+    if (page < 1) throw new IllegalArgumentException("page 必须大于等于 1");
         if (pageSize < 1 || pageSize > 100) throw new IllegalArgumentException("pageSize 必须在 1 到 100 之间");
         List<FavoriteMediaVO> items = new ArrayList<>();
         for (Map<String,Object> row : repository.findPage(pageSize, (page - 1) * pageSize)) items.add(toVO(row));
-        return new FavoriteMediaPageVO(items, repository.count(), page, pageSize);
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.FavoriteMediaService.page", new FavoriteMediaPageVO(items, repository.count(), page, pageSize));
     }
 
     public FavoriteMediaContent content(long id) throws IOException {
-        Map<String,Object> row = required(id);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.FavoriteMediaService.content", new String[] { "id" }, new Object[] { id });
+    Map<String,Object> row = required(id);
         Path path = storedPath(text(row.get("storagePath"), 1000));
         if (!Files.isRegularFile(path)) throw new IllegalStateException("我的最爱服务器文件不存在");
-        return new FavoriteMediaContent(text(row.get("originalFileName"), 255), text(row.get("contentType"), 100),
-                Files.size(path), new FileSystemResource(path.toFile()));
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.FavoriteMediaService.content", new FavoriteMediaContent(text(row.get("originalFileName"), 255), text(row.get("contentType"), 100),
+                Files.size(path), new FileSystemResource(path.toFile())));
     }
 
     public FavoriteMediaContent thumbnail(long id) throws IOException {
-        Map<String,Object> row = required(id);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.FavoriteMediaService.thumbnail", new String[] { "id" }, new Object[] { id });
+    Map<String,Object> row = required(id);
         String thumbnailRelative = text(row.get("thumbnailPath"), 1000);
         if (thumbnailRelative == null) {
             // 没有缩略图时回退到原图；视频会回退到 404 由前端兜底
-            return content(id);
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.FavoriteMediaService.thumbnail", content(id));
         }
         Path path = storedPath(thumbnailRelative);
         if (!Files.isRegularFile(path)) throw new IllegalStateException("我的最爱缩略图文件不存在");
         String fileName = "thumbnail-" + id + "." + THUMBNAIL_FORMAT;
-        return new FavoriteMediaContent(fileName, "image/jpeg", Files.size(path), new FileSystemResource(path.toFile()));
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.FavoriteMediaService.thumbnail", new FavoriteMediaContent(fileName, "image/jpeg", Files.size(path), new FileSystemResource(path.toFile())));
     }
 
     @Transactional
     public int delete(List<Long> suppliedIds) throws IOException {
-        List<Long> ids = new ArrayList<>(new LinkedHashSet<>(suppliedIds == null ? Collections.emptyList() : suppliedIds));
+    com.aiprovider.logging.BusinessOperationLogger.start("service.FavoriteMediaService.delete", new String[] { "suppliedIds" }, new Object[] { suppliedIds });
+    List<Long> ids = new ArrayList<>(new LinkedHashSet<>(suppliedIds == null ? Collections.emptyList() : suppliedIds));
         ids.removeIf(id -> id == null || id <= 0);
         if (ids.isEmpty() || ids.size() > 100) throw new IllegalArgumentException("媒体 ID 数量必须在 1 到 100 之间");
         List<Path> files = new ArrayList<>();
@@ -248,7 +254,7 @@ public class FavoriteMediaService {
         }
         int deleted = repository.deleteByIds(ids);
         for (Path file : files) Files.deleteIfExists(file);
-        return deleted;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.FavoriteMediaService.delete", deleted);
     }
 
     private Map<String,Object> required(long id) {

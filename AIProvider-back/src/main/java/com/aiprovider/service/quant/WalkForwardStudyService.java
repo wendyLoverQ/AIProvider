@@ -46,7 +46,8 @@ public class WalkForwardStudyService {
 
   public BacktestDtos.Page<WalkForwardStudyDtos.StudySummary> page(
       int page, int pageSize, String status, String symbol, String strategyCode) {
-    validatePage(page, pageSize);
+      com.aiprovider.logging.BusinessOperationLogger.start("service.quant.WalkForwardStudyService.page", new String[] { "page", "pageSize", "status", "symbol", "strategyCode" }, new Object[] { page, pageSize, status, symbol, strategyCode });
+      validatePage(page, pageSize);
     String s = clean(status, true), sym = clean(symbol, true), code = clean(strategyCode, false);
     if (s != null)
       try {
@@ -59,33 +60,36 @@ public class WalkForwardStudyService {
     Map<String, WalkForwardStudySnapshot> loaded = snapshots.loadMany(rows, true);
     List<WalkForwardStudyDtos.StudySummary> result =
         rows.stream().map(row -> refreshSummary(requiredSnapshot(loaded, row.studyId))).toList();
-    return new BacktestDtos.Page<>(result, studies.count(s, sym, code), page, pageSize);
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardStudyService.page", new BacktestDtos.Page<>(result, studies.count(s, sym, code), page, pageSize));
   }
 
   public WalkForwardStudyDtos.StudyDetail get(String studyId) {
-    WalkForwardStudyRow row = require(studyId);
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.WalkForwardStudyService.get", new String[] { "studyId" }, new Object[] { studyId });
+  WalkForwardStudyRow row = require(studyId);
     WalkForwardStudySnapshot snapshot =
         snapshots.load(row, folds.findAllByStudyId(studyId), true);
-    return new WalkForwardStudyDtos.StudyDetail(
-        refreshSummary(snapshot), frequencies(snapshot.folds()));
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardStudyService.get", new WalkForwardStudyDtos.StudyDetail(
+        refreshSummary(snapshot), frequencies(snapshot.folds())));
   }
 
   public BacktestDtos.Page<WalkForwardStudyDtos.FoldResult> folds(
       String studyId, int page, int pageSize) {
-    WalkForwardStudyRow study = require(studyId);
+      com.aiprovider.logging.BusinessOperationLogger.start("service.quant.WalkForwardStudyService.folds", new String[] { "studyId", "page", "pageSize" }, new Object[] { studyId, page, pageSize });
+      WalkForwardStudyRow study = require(studyId);
     validatePage(page, pageSize);
     long offset = offset(page, pageSize);
     List<WalkForwardFoldRow> pageRows = folds.findPage(studyId, pageSize, offset);
     WalkForwardStudySnapshot snapshot = snapshots.load(study, pageRows, false);
-    return new BacktestDtos.Page<>(
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardStudyService.folds", new BacktestDtos.Page<>(
         pageRows.stream().map(fold -> foldResult(fold, snapshot)).toList(),
         folds.count(studyId),
         page,
-        pageSize);
+        pageSize));
   }
 
   public WalkForwardStudyDtos.OosEquity oosEquity(String studyId, int limit) {
-    if (limit < 100 || limit > 5000)
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.WalkForwardStudyService.oosEquity", new String[] { "studyId", "limit" }, new Object[] { studyId, limit });
+  if (limit < 100 || limit > 5000)
       fail("WALK_FORWARD_REQUEST_INVALID", "limit must be 100..5000");
     WalkForwardStudyRow study = require(studyId);
     WalkForwardStudySnapshot snapshot = snapshots.load(study, folds.findAllByStudyId(studyId), true);
@@ -93,7 +97,7 @@ public class WalkForwardStudyService {
     WalkForwardOosCalculation calculation = oosCalculator.calculate(study, snapshot.folds(), snapshot.runs(), snapshot.equities());
     List<WalkForwardStudyDtos.OosPoint> points = calculation.points();
     List<WalkForwardStudyDtos.OosPoint> sampled = sample(points, limit);
-    return new WalkForwardStudyDtos.OosEquity(
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardStudyService.oosEquity", new WalkForwardStudyDtos.OosEquity(
         points.size() > sampled.size(),
         points.size(),
         calculation.successfulFolds(),
@@ -101,7 +105,7 @@ public class WalkForwardStudyService {
         calculation.hasGaps(),
         calculation.totalReturnRatio(),
         calculation.maximumDrawdownRatio(),
-        sampled);
+        sampled));
   }
 
   WalkForwardStudyDtos.StudySummary refreshAggregate(WalkForwardStudySnapshot snapshot) {
@@ -110,7 +114,8 @@ public class WalkForwardStudyService {
 
   /** Batch result view used by Research Study; it never performs one child GET per study. */
   public Map<String, WalkForwardStudyDtos.StudySummary> batchSummary(List<WalkForwardStudyRow> rows) {
-    if (rows == null || rows.isEmpty()) return Map.of();
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.WalkForwardStudyService.batchSummary", new String[] { "rows" }, new Object[] { rows });
+  if (rows == null || rows.isEmpty()) return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardStudyService.batchSummary", Map.of());
     Map<String, WalkForwardStudySnapshot> loaded = snapshots.loadMany(rows, true);
     Map<String, WalkForwardStudyDtos.StudySummary> result = new LinkedHashMap<>();
     for (WalkForwardStudyRow row : rows) {
@@ -118,7 +123,7 @@ public class WalkForwardStudyService {
       if (snapshot == null) fail("WALK_FORWARD_STATE_CONFLICT", "study snapshot missing");
       result.put(row.studyId, refreshSummary(snapshot));
     }
-    return Map.copyOf(result);
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardStudyService.batchSummary", Map.copyOf(result));
   }
 
   private WalkForwardStudyDtos.StudySummary refreshSummary(WalkForwardStudySnapshot snapshot) {

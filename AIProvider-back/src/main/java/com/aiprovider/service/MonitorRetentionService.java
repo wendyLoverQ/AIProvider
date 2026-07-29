@@ -14,7 +14,8 @@ public class MonitorRetentionService {
     private final MonitorRepository repository; private final int retentionDays;
     public MonitorRetentionService(MonitorRepository repository,@Value("${monitor.detail-retention-days:30}") int retentionDays){this.repository=repository;this.retentionDays=Math.max(30,retentionDays);}
     @Scheduled(cron="0 25 3 * * *") @Transactional public void cleanup(){
-        try {
+    com.aiprovider.logging.BusinessOperationLogger.start("service.MonitorRetentionService.cleanup", new String[] {}, new Object[] {});
+    try {
             int requested=repository.countExpiredHttpRequests(retentionDays),deleted=repository.deleteExpiredHttpRequests(retentionDays);
             if(deleted==requested)log.info("HTTP request metric retention completed operation=delete_expired_http_requests retentionDays={} requestCount={} affectedRows={}",retentionDays,requested,deleted);
             else {log.warn("HTTP request metric retention mismatch operation=delete_expired_http_requests retentionDays={} requestCount={} affectedRows={}",retentionDays,requested,deleted);throw new IllegalStateException("HTTP request metric retention affected-row mismatch");}

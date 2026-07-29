@@ -97,16 +97,24 @@ public class BusinessOperationLoggingAspect {
 
     private static InvocationSummary summarizeRequest(Method method, Object[] arguments) {
         Parameter[] parameters = method.getParameters();
+        String[] parameterNames = new String[parameters.length];
+        for (int index = 0; index < parameters.length; index++) {
+            parameterNames[index] = parameters[index].getName();
+        }
+        return summarizeRequest(parameterNames, arguments);
+    }
+
+    static InvocationSummary summarizeRequest(String[] parameterNames, Object[] arguments) {
         List<String> identifiers = new ArrayList<>();
         int requestedCount = -1;
 
         for (int index = 0; index < arguments.length; index++) {
             Object argument = arguments[index];
             requestedCount = Math.max(requestedCount, requestCountOf(argument));
-            if (index >= parameters.length) {
+            if (index >= parameterNames.length) {
                 continue;
             }
-            String parameterName = parameters[index].getName();
+            String parameterName = parameterNames[index];
             if (isIdentifierName(parameterName)) {
                 appendIdentifiers(identifiers, parameterName, argument);
             }
@@ -334,7 +342,7 @@ public class BusinessOperationLoggingAspect {
         }
     }
 
-    private static boolean isReadOnly(String methodName) {
+    static boolean isReadOnly(String methodName) {
         String normalized = methodName.toLowerCase(Locale.ROOT);
         for (String prefix : READ_PREFIXES) {
             if (normalized.startsWith(prefix)) {
@@ -383,9 +391,9 @@ public class BusinessOperationLoggingAspect {
         return root.getClass().getSimpleName();
     }
 
-    private static final class InvocationSummary {
-        private final String businessIds;
-        private final int requestedCount;
+    static final class InvocationSummary {
+        final String businessIds;
+        final int requestedCount;
 
         private InvocationSummary(String businessIds, int requestedCount) {
             this.businessIds = businessIds;

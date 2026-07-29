@@ -15,10 +15,15 @@ public class BacktestRunRecoveryService {
     public BacktestRunRecoveryService(BacktestRunMapper runs, BacktestRunService service) { this.runs=runs; this.service=service; }
     @EventListener(ApplicationReadyEvent.class)
     public void recover() {
-        if (!executed.compareAndSet(false,true)) return;
+    com.aiprovider.logging.BusinessOperationLogger.start("service.quant.BacktestRunRecoveryService.recover", new String[] {}, new Object[] {});
+    if (!executed.compareAndSet(false,true)) {
+        com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestRunRecoveryService.recover", null);
+        return;
+    }
         for (BacktestRunRow row : runs.findNonTerminal()) {
             if ("QUEUED".equals(row.status)) service.resubmitQueued(row);
             else service.markInterruptedOnRestart(row.runId, row.status);
         }
+        com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestRunRecoveryService.recover", null);
     }
 }

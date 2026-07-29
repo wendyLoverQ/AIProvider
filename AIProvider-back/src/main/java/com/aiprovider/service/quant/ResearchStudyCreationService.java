@@ -44,7 +44,8 @@ public class ResearchStudyCreationService {
 
   @Transactional
   public ResearchStudyDtos.CreateResponse create(ResearchStudyCreateRequest request) {
-    validateRequest(request);
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.ResearchStudyCreationService.create", new String[] { "request" }, new Object[] { request });
+  validateRequest(request);
     MarketDataset dataset = datasets.findById(request.getDatasetId());
     if (dataset == null) throw error("RESEARCH_REQUEST_INVALID", "datasetId not found");
     QuantStrategyDefinition definition;
@@ -68,7 +69,7 @@ public class ResearchStudyCreationService {
     row.initialCapital = request.getInitialCapital(); row.orderAmount = request.getOrderAmount(); row.feeRate = request.getFeeRate(); row.forceCloseAtEnd = true; row.comparisonGroupKey = ResearchComparisonGroupKey.sha256(request); row.walkForwardStudyId = childId; row.createdAt = now; row.updatedAt = now;
     if (research.insert(row) != 1) throw error("RESEARCH_PERSISTENCE_FAILED", "research study insert affected an unexpected number of rows");
     walkForward.createWithStudyId(childId, childRequest(request, expansion.grid()));
-    return new ResearchStudyDtos.CreateResponse(researchId, childId, expansion.candidateCount());
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.ResearchStudyCreationService.create", new ResearchStudyDtos.CreateResponse(researchId, childId, expansion.candidateCount()));
   }
 
   private Map<String, ResearchStudyDtos.IntegerRange> spaceJsonValue(StrategyResearchSpace space) {

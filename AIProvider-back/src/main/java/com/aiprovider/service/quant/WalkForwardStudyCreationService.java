@@ -52,13 +52,15 @@ public class WalkForwardStudyCreationService {
 
   @Transactional
   public WalkForwardStudyDtos.CreateResponse create(WalkForwardStudyCreateRequest request) {
-    return createWithStudyId(UUID.randomUUID().toString(), request);
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.WalkForwardStudyCreationService.create", new String[] { "request" }, new Object[] { request });
+  return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardStudyCreationService.create", createWithStudyId(UUID.randomUUID().toString(), request));
   }
 
   @Transactional
   public WalkForwardStudyDtos.CreateResponse createWithStudyId(
       String studyId, WalkForwardStudyCreateRequest request) {
-    try {
+      com.aiprovider.logging.BusinessOperationLogger.start("service.quant.WalkForwardStudyCreationService.createWithStudyId", new String[] { "studyId", "request" }, new Object[] { studyId, request });
+      try {
       UUID.fromString(studyId);
     } catch (IllegalArgumentException exception) {
       throw error("WALK_FORWARD_STUDY_ID_CONFLICT", "studyId must be a UUID");
@@ -87,8 +89,8 @@ public class WalkForwardStudyCreationService {
     if (existing != null) {
       if (!sameImmutableRequest(existing, request, canonicalGrid, dataset))
         throw error("WALK_FORWARD_STUDY_ID_CONFLICT", "studyId belongs to a different request");
-      return new WalkForwardStudyDtos.CreateResponse(
-          existing.studyId, existing.foldCount, existing.candidateCountPerFold, existing.totalChildRuns);
+      return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardStudyCreationService.createWithStudyId", new WalkForwardStudyDtos.CreateResponse(
+          existing.studyId, existing.foldCount, existing.candidateCountPerFold, existing.totalChildRuns));
     }
     try {
       for (var parameters : grid.combinations()) {
@@ -156,8 +158,8 @@ public class WalkForwardStudyCreationService {
     if (folds.insertBatch(foldRows) != foldRows.size())
       throw error(
           "WALK_FORWARD_STATE_CONFLICT", "fold insert affected an unexpected number of rows");
-    return new WalkForwardStudyDtos.CreateResponse(
-        studyId, study.foldCount, study.candidateCountPerFold, study.totalChildRuns);
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardStudyCreationService.createWithStudyId", new WalkForwardStudyDtos.CreateResponse(
+        studyId, study.foldCount, study.candidateCountPerFold, study.totalChildRuns));
   }
 
   private boolean sameImmutableRequest(

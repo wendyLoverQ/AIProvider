@@ -28,44 +28,49 @@ public class ResearchStudyService {
   }
 
   public static String normalizeComparisonGroupKey(String value) {
-    if (value == null || value.isBlank()) throw new ResearchStudyTaskException("RESEARCH_REQUEST_INVALID", "comparisonGroupKey is required");
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.ResearchStudyService.normalizeComparisonGroupKey", new String[] { "value" }, new Object[] { value });
+  if (value == null || value.isBlank()) throw new ResearchStudyTaskException("RESEARCH_REQUEST_INVALID", "comparisonGroupKey is required");
     String normalized = value.trim();
     if (!COMPARISON_GROUP_KEY.matcher(normalized).matches()) throw new ResearchStudyTaskException("RESEARCH_REQUEST_INVALID", "comparisonGroupKey format is invalid");
-    return normalized.toLowerCase(Locale.ROOT);
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.ResearchStudyService.normalizeComparisonGroupKey", normalized.toLowerCase(Locale.ROOT));
   }
 
   public BacktestDtos.Page<ResearchStudyDtos.Summary> page(int page, int pageSize, String status, Long datasetId, String strategyCode, String group) {
-    validatePage(page, pageSize);
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.ResearchStudyService.page", new String[] { "page", "pageSize", "status", "datasetId", "strategyCode", "group" }, new Object[] { page, pageSize, status, datasetId, strategyCode, group });
+  validatePage(page, pageSize);
     String cleanStatus = clean(status), cleanStrategy = clean(strategyCode), cleanGroup = group == null ? null : normalizeComparisonGroupKey(group);
     if (cleanStatus != null && !STATUSES.contains(cleanStatus)) throw error("RESEARCH_REQUEST_INVALID", "status is invalid");
     if (datasetId != null && datasetId <= 0) throw error("RESEARCH_REQUEST_INVALID", "datasetId is invalid");
     long offset = offset(page, pageSize);
     List<ResearchStudyRow> rows = research.findPage(cleanStatus, datasetId, cleanStrategy, cleanGroup, pageSize, offset);
-    return new BacktestDtos.Page<>(summaries(rows), research.count(cleanStatus, datasetId, cleanStrategy, cleanGroup), page, pageSize);
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.ResearchStudyService.page", new BacktestDtos.Page<>(summaries(rows), research.count(cleanStatus, datasetId, cleanStrategy, cleanGroup), page, pageSize));
   }
 
   public BacktestDtos.Page<ResearchStudyDtos.Summary> results(String group, int page, int pageSize, String sortBy, String sortDirection) {
-    String key = normalizeComparisonGroupKey(group);
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.ResearchStudyService.results", new String[] { "group", "page", "pageSize", "sortBy", "sortDirection" }, new Object[] { group, page, pageSize, sortBy, sortDirection });
+  String key = normalizeComparisonGroupKey(group);
     validatePage(page, pageSize);
     ResearchResultSort sort = ResearchResultSort.parse(sortBy);
     String direction = sortDirection == null || sortDirection.isBlank() ? sort.defaultDirection() : sortDirection.trim().toUpperCase(Locale.ROOT);
     if (!"ASC".equals(direction) && !"DESC".equals(direction)) throw error("RESEARCH_REQUEST_INVALID", "sortDirection is invalid");
     long offset = offset(page, pageSize);
     List<ResearchStudyRow> rows = research.findComparisonResultsPage(key, sort.name(), "DESC".equals(direction), pageSize, offset);
-    return new BacktestDtos.Page<>(summaries(rows), research.countByComparisonGroupKey(key), page, pageSize);
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.ResearchStudyService.results", new BacktestDtos.Page<>(summaries(rows), research.countByComparisonGroupKey(key), page, pageSize));
   }
 
   public ResearchStudyDtos.Detail get(String id) {
-    ResearchStudyRow row = require(id);
-    return new ResearchStudyDtos.Detail(summary(row), readRanges(row.parameterSpaceJson), readGrid(row.expandedParameterGridJson),
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.ResearchStudyService.get", new String[] { "id" }, new Object[] { id });
+  ResearchStudyRow row = require(id);
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.ResearchStudyService.get", new ResearchStudyDtos.Detail(summary(row), readRanges(row.parameterSpaceJson), readGrid(row.expandedParameterGridJson),
         Instant.ofEpochMilli(row.studyStartOpenTimeMs), Instant.ofEpochMilli(row.studyEndOpenTimeMs), row.trainingBars, row.validationBars,
-        row.selectionMetric, row.minimumTrainTrades, row.initialCapital, row.orderAmount, row.feeRate, row.forceCloseAtEnd);
+        row.selectionMetric, row.minimumTrainTrades, row.initialCapital, row.orderAmount, row.feeRate, row.forceCloseAtEnd));
   }
 
   public ResearchStudyDtos.ParameterSpaceResponse parameterSpace(String id) {
-    ResearchStudyRow row = require(id);
-    return new ResearchStudyDtos.ParameterSpaceResponse(row.researchStudyId, row.parameterSpaceMode,
-        readRanges(row.parameterSpaceJson), readGrid(row.expandedParameterGridJson), row.candidateCount);
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.ResearchStudyService.parameterSpace", new String[] { "id" }, new Object[] { id });
+  ResearchStudyRow row = require(id);
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.ResearchStudyService.parameterSpace", new ResearchStudyDtos.ParameterSpaceResponse(row.researchStudyId, row.parameterSpaceMode,
+        readRanges(row.parameterSpaceJson), readGrid(row.expandedParameterGridJson), row.candidateCount));
   }
 
   List<ResearchStudyDtos.Summary> summaries(List<ResearchStudyRow> rows) {

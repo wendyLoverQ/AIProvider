@@ -22,9 +22,10 @@ public class TwitterTimelineClient {
     @Autowired public TwitterTimelineClient(@Value("${content-platform.connect-timeout-ms:5000}") int connectTimeout,@Value("${content-platform.read-timeout-ms:30000}") int readTimeout){this(rest(connectTimeout,readTimeout));}
     TwitterTimelineClient(RestTemplate http){this.http=http;}
     public List<TwitterFetchedPost> fetch(String uid,String bearerToken,int limit){
-        URI uri=UriComponentsBuilder.fromHttpUrl("https://api.x.com/2/users/"+uid+"/tweets").queryParam("max_results",limit).queryParam("tweet.fields","created_at,lang,public_metrics").queryParam("exclude","retweets,replies").build().encode().toUri();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterTimelineClient.fetch", new String[] { "uid", "bearerToken", "limit" }, new Object[] { uid, bearerToken, limit });
+    URI uri=UriComponentsBuilder.fromHttpUrl("https://api.x.com/2/users/"+uid+"/tweets").queryParam("max_results",limit).queryParam("tweet.fields","created_at,lang,public_metrics").queryParam("exclude","retweets,replies").build().encode().toUri();
         HttpHeaders headers=new HttpHeaders();headers.setBearerAuth(bearerToken);headers.setAccept(java.util.Collections.singletonList(MediaType.APPLICATION_JSON));
-        try{ResponseEntity<JsonNode> response=http.exchange(uri,HttpMethod.GET,new HttpEntity<Void>(headers),JsonNode.class);return parse(response.getBody());}
+        try{ResponseEntity<JsonNode> response=http.exchange(uri,HttpMethod.GET,new HttpEntity<Void>(headers),JsonNode.class);return com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterTimelineClient.fetch", parse(response.getBody()));}
         catch(HttpStatusCodeException e){throw new ContentSourceException("TWITTER_HTTP_"+e.getRawStatusCode(),"Twitter 拉取失败（HTTP "+e.getRawStatusCode()+"）");}
         catch(RestClientException e){throw new ContentSourceException("TWITTER_UNAVAILABLE","Twitter API 不可用或请求超时",e);}
     }

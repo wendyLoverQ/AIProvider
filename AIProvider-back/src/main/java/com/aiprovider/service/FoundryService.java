@@ -54,27 +54,32 @@ public class FoundryService {
     }
 
     public FoundryStatusVO status() {
-        List<FoundryStatusVO.Tool> tools = Arrays.asList(
+    com.aiprovider.logging.BusinessOperationLogger.start("service.FoundryService.status", new String[] {}, new Object[] {});
+    List<FoundryStatusVO.Tool> tools = Arrays.asList(
             inspect("Forge", forgeCommand), inspect("Cast", castCommand),
             inspect("Anvil", anvilCommand), inspect("Chisel", chiselCommand)
         );
-        return new FoundryStatusVO(!rpcUrl.isEmpty(), rpcHost, true, tools, OffsetDateTime.now());
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.FoundryService.status", new FoundryStatusVO(!rpcUrl.isEmpty(), rpcHost, true, tools, OffsetDateTime.now()));
     }
 
     public FoundryQueryVO blockNumber() {
-        return query("block-number", command("block-number"));
+    com.aiprovider.logging.BusinessOperationLogger.start("service.FoundryService.blockNumber", new String[] {}, new Object[] {});
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.FoundryService.blockNumber", query("block-number", command("block-number")));
     }
 
     public FoundryQueryVO balance(String address) {
-        return query("balance", command("balance", requireAddress(address), "--ether"));
+    com.aiprovider.logging.BusinessOperationLogger.start("service.FoundryService.balance", new String[] { "address" }, new Object[] { address });
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.FoundryService.balance", query("balance", command("balance", requireAddress(address), "--ether")));
     }
 
     public FoundryQueryVO code(String address) {
-        return query("code", command("code", requireAddress(address)));
+    com.aiprovider.logging.BusinessOperationLogger.start("service.FoundryService.code", new String[] { "address" }, new Object[] { address });
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.FoundryService.code", query("code", command("code", requireAddress(address))));
     }
 
     public FoundryQueryVO call(FoundryCallDTO dto) {
-        if (dto == null) throw new IllegalArgumentException("调用参数不能为空");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.FoundryService.call", new String[] { "dto" }, new Object[] { dto });
+    if (dto == null) throw new IllegalArgumentException("调用参数不能为空");
         String signature = dto.getSignature() == null ? "" : dto.getSignature().trim();
         if (!SIGNATURE.matcher(signature).matches()) throw new IllegalArgumentException("Solidity 函数签名格式不正确");
         List<String> arguments = dto.getArguments() == null ? Collections.emptyList() : dto.getArguments();
@@ -84,7 +89,7 @@ public class FoundryService {
         command.add(requireAddress(dto.getAddress()));
         command.add(signature);
         for (String value : arguments) command.add(requireArgument(value));
-        return query("call", command(command.toArray(new String[0])));
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.FoundryService.call", query("call", command(command.toArray(new String[0]))));
     }
 
     private FoundryStatusVO.Tool inspect(String name, String executable) {

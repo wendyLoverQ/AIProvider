@@ -15,10 +15,12 @@ public class TableMetadataService {
     }
 
     public List<Map<String, Object>> listTables() {
-        return tableMetadataRepo.listTables();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TableMetadataService.listTables", new String[] {}, new Object[] {});
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.TableMetadataService.listTables", tableMetadataRepo.listTables());
     }
 
     public List<Map<String, Object>> getColumns(String tableName) {
-        return tableMetadataRepo.getColumns(tableName);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TableMetadataService.getColumns", new String[] { "tableName" }, new Object[] { tableName });
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.TableMetadataService.getColumns", tableMetadataRepo.getColumns(tableName));
     }
 }

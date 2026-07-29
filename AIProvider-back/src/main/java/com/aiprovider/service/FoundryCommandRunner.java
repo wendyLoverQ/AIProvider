@@ -18,6 +18,7 @@ public class FoundryCommandRunner {
 
     public CommandResult run(List<String> command, long timeoutMs)
         throws IOException, InterruptedException, TimeoutException {
+        com.aiprovider.logging.BusinessOperationLogger.start("service.FoundryCommandRunner.run", new String[] { "command", "timeoutMs" }, new Object[] { command, timeoutMs });
         Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
         FutureTask<String> outputTask = new FutureTask<>(() -> readOutput(process));
         Thread outputThread = new Thread(outputTask, "foundry-command-output");
@@ -28,7 +29,7 @@ public class FoundryCommandRunner {
             throw new TimeoutException("Foundry 命令执行超时");
         }
         try {
-            return new CommandResult(process.exitValue(), outputTask.get().trim());
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.FoundryCommandRunner.run", new CommandResult(process.exitValue(), outputTask.get().trim()));
         } catch (ExecutionException exception) {
             Throwable cause = exception.getCause();
             if (cause instanceof IOException) throw (IOException) cause;

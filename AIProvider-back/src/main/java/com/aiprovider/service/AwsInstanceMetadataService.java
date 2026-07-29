@@ -23,10 +23,11 @@ public class AwsInstanceMetadataService {
     }
 
     public CloudServerMonitorVO.Instance current() {
-        Cache snapshot=cache; Instant now=Instant.now();
-        if(snapshot!=null&&Duration.between(snapshot.at,now).compareTo(Duration.ofHours(6))<0)return snapshot.value;
-        synchronized(this){snapshot=cache;now=Instant.now();if(snapshot!=null&&Duration.between(snapshot.at,now).compareTo(Duration.ofHours(6))<0)return snapshot.value;
-            CloudServerMonitorVO.Instance value=fetch();cache=new Cache(now,value);return value;}
+    com.aiprovider.logging.BusinessOperationLogger.start("service.AwsInstanceMetadataService.current", new String[] {}, new Object[] {});
+    Cache snapshot=cache; Instant now=Instant.now();
+        if(snapshot!=null&&Duration.between(snapshot.at,now).compareTo(Duration.ofHours(6))<0)return com.aiprovider.logging.BusinessOperationLogger.success("service.AwsInstanceMetadataService.current", snapshot.value);
+        synchronized(this){snapshot=cache;now=Instant.now();if(snapshot!=null&&Duration.between(snapshot.at,now).compareTo(Duration.ofHours(6))<0)return com.aiprovider.logging.BusinessOperationLogger.success("service.AwsInstanceMetadataService.current", snapshot.value);
+            CloudServerMonitorVO.Instance value=fetch();cache=new Cache(now,value);return com.aiprovider.logging.BusinessOperationLogger.success("service.AwsInstanceMetadataService.current", value);}
     }
 
     private CloudServerMonitorVO.Instance fetch() {

@@ -68,10 +68,11 @@ public class AwsBillingMonitorService {
     }
 
     public AwsBillingMonitorVO current() {
-        Instant now=Instant.now();Cached value=cached;
-        if(value!=null&&Duration.between(value.at,now).compareTo(cacheTtl)<0)return value.value;
-        synchronized(lock){now=Instant.now();value=cached;if(value!=null&&Duration.between(value.at,now).compareTo(cacheTtl)<0)return value.value;
-            AwsBillingMonitorVO result=fetch();cached=new Cached(now,result);return result;}
+    com.aiprovider.logging.BusinessOperationLogger.start("service.AwsBillingMonitorService.current", new String[] {}, new Object[] {});
+    Instant now=Instant.now();Cached value=cached;
+        if(value!=null&&Duration.between(value.at,now).compareTo(cacheTtl)<0)return com.aiprovider.logging.BusinessOperationLogger.success("service.AwsBillingMonitorService.current", value.value);
+        synchronized(lock){now=Instant.now();value=cached;if(value!=null&&Duration.between(value.at,now).compareTo(cacheTtl)<0)return com.aiprovider.logging.BusinessOperationLogger.success("service.AwsBillingMonitorService.current", value.value);
+            AwsBillingMonitorVO result=fetch();cached=new Cached(now,result);return com.aiprovider.logging.BusinessOperationLogger.success("service.AwsBillingMonitorService.current", result);}
     }
 
     private AwsBillingMonitorVO fetch() {

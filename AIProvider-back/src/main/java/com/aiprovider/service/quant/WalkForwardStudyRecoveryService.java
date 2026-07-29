@@ -18,7 +18,9 @@ public class WalkForwardStudyRecoveryService {
 
   @EventListener(ApplicationReadyEvent.class)
   public void recover() {
-    dispatcher.recoverStaleClaims(properties.getStaleClaimSeconds());
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.WalkForwardStudyRecoveryService.recover", new String[] {}, new Object[] {});
+  dispatcher.recoverStaleClaims(properties.getStaleClaimSeconds());
     dispatcher.tick();
+    com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardStudyRecoveryService.recover", null);
   }
 }

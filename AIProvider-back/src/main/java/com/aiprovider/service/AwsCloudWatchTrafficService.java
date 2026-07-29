@@ -52,10 +52,11 @@ public class AwsCloudWatchTrafficService {
     }
 
     public Snapshot current() {
-        Cached value=cached;Instant now=Instant.now();
-        if(value!=null&&Duration.between(value.at,now).compareTo(CACHE_TTL)<0)return value.snapshot;
-        synchronized(lock){value=cached;now=Instant.now();if(value!=null&&Duration.between(value.at,now).compareTo(CACHE_TTL)<0)return value.snapshot;
-            Snapshot snapshot=fetch();cached=new Cached(now,snapshot);return snapshot;}
+    com.aiprovider.logging.BusinessOperationLogger.start("service.AwsCloudWatchTrafficService.current", new String[] {}, new Object[] {});
+    Cached value=cached;Instant now=Instant.now();
+        if(value!=null&&Duration.between(value.at,now).compareTo(CACHE_TTL)<0)return com.aiprovider.logging.BusinessOperationLogger.success("service.AwsCloudWatchTrafficService.current", value.snapshot);
+        synchronized(lock){value=cached;now=Instant.now();if(value!=null&&Duration.between(value.at,now).compareTo(CACHE_TTL)<0)return com.aiprovider.logging.BusinessOperationLogger.success("service.AwsCloudWatchTrafficService.current", value.snapshot);
+            Snapshot snapshot=fetch();cached=new Cached(now,snapshot);return com.aiprovider.logging.BusinessOperationLogger.success("service.AwsCloudWatchTrafficService.current", snapshot);}
     }
 
     private Snapshot fetch() {
@@ -83,16 +84,19 @@ public class AwsCloudWatchTrafficService {
     }
 
     public MonitorSummaryVO.Traffic traffic() {
-        Snapshot value=current();if(!value.available)return MonitorSummaryVO.Traffic.unavailable(value.reason);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.AwsCloudWatchTrafficService.traffic", new String[] {}, new Object[] {});
+    Snapshot value=current();if(!value.available)return com.aiprovider.logging.BusinessOperationLogger.success("service.AwsCloudWatchTrafficService.traffic", MonitorSummaryVO.Traffic.unavailable(value.reason));
         OffsetDateTime end=value.periodStart.plusMonths(1);long remaining=Math.max(0,value.quotaBytes-value.monthOutboundBytes);
         long overflow=Math.max(0,value.monthOutboundBytes-value.quotaBytes);
-        return new MonitorSummaryVO.Traffic(value.monthOutboundBytes,value.quotaBytes,remaining,overflow,value.periodStart,end,end,
-            "CLOUDWATCH_API_AWS_100GB_FREE_DTO",true,false,value.collectedAt);
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.AwsCloudWatchTrafficService.traffic", new MonitorSummaryVO.Traffic(value.monthOutboundBytes,value.quotaBytes,remaining,overflow,value.periodStart,end,end,
+            "CLOUDWATCH_API_AWS_100GB_FREE_DTO",true,false,value.collectedAt));
     }
-    public CloudServerMonitorVO.Network network() { Snapshot value=current();return new CloudServerMonitorVO.Network(
+    public CloudServerMonitorVO.Network network() {
+        com.aiprovider.logging.BusinessOperationLogger.start("service.AwsCloudWatchTrafficService.network", new String[] {}, new Object[] {});
+        Snapshot value=current();return com.aiprovider.logging.BusinessOperationLogger.success("service.AwsCloudWatchTrafficService.network", new CloudServerMonitorVO.Network(
         value.available?value.inboundBytesPerSecond:null,value.available?value.outboundBytesPerSecond:null,
         value.available?value.monthInboundBytes:null,value.available?value.monthOutboundBytes:null,"CLOUDWATCH_API",
-        value.periodStart,value.available,value.reason); }
+        value.periodStart,value.available,value.reason)); }
 
     public static class Snapshot {
         private final boolean available;private final long inboundBytesPerSecond,outboundBytesPerSecond,monthInboundBytes,monthOutboundBytes,quotaBytes;

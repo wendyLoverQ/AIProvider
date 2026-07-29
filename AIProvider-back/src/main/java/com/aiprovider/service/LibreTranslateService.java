@@ -49,7 +49,8 @@ public class LibreTranslateService {
     }
 
     public PromptTranslationVO translateToChinese(PromptTranslationDTO dto) {
-        if (dto == null) throw new IllegalArgumentException("长文翻译内容不能为空");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.LibreTranslateService.translateToChinese", new String[] { "dto" }, new Object[] { dto });
+    if (dto == null) throw new IllegalArgumentException("长文翻译内容不能为空");
         String positive = validate(dto.getPositivePrompt(), "长文正向描述", false);
         String negative = validate(dto.getNegativePrompt(), "长文反向约束", true);
         List<String> requested = new ArrayList<>();
@@ -65,7 +66,7 @@ public class LibreTranslateService {
         if (source.isEmpty()) {
             log.info("prose_prompt_translation_cache_hit operation=translate targetLanguage=zh requestedCount={} cacheHits={} externalRequests=0 affectedRows={}",
                     requested.size(), requested.size(), requested.size());
-            return result(positive, negative, resolved);
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.LibreTranslateService.translateToChinese", result(positive, negative, resolved));
         }
 
         Map<String, Object> request = new LinkedHashMap<>();
@@ -85,7 +86,7 @@ public class LibreTranslateService {
             }
             log.info("prose_prompt_translated operation=translate targetLanguage=zh requestedCount={} cacheHits={} externalRequests={} affectedRows={} sourceCharacters={}",
                     requested.size(), requested.size() - source.size(), source.size(), affectedRows, positive.length() + negative.length());
-            return result(positive, negative, resolved);
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.LibreTranslateService.translateToChinese", result(positive, negative, resolved));
         } catch (RestClientException exception) {
             log.warn("prose_prompt_translation_failed operation=translate targetLanguage=zh requestedCount={} affectedRows=0 sourceCharacters={} errorType={}",
                     source.size(), positive.length() + negative.length(), exception.getClass().getSimpleName());
@@ -93,7 +94,9 @@ public class LibreTranslateService {
         }
     }
 
-    public String findCached(String sourceText) { return cache.find(sourceText); }
+    public String findCached(String sourceText) {
+        com.aiprovider.logging.BusinessOperationLogger.start("service.LibreTranslateService.findCached", new String[] { "sourceText" }, new Object[] { sourceText });
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.LibreTranslateService.findCached", cache.find(sourceText)); }
 
     private PromptTranslationVO result(String positive, String negative, Map<String, String> resolved) {
         String translatedPositive = resolved.get(positive);

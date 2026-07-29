@@ -13,40 +13,48 @@ public class ComfyTaskService {
     public ComfyTaskService(ComfyTaskRepository repository) { this.repository = repository; }
 
     public void save(ComfyTaskRecordDTO dto) {
-        prepare(dto);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.ComfyTaskService.save", new String[] { "dto" }, new Object[] { dto });
+    prepare(dto);
         int affected = repository.save(dto);
         logMutation("save", Collections.singletonList(dto.getPromptId()), 1, affected);
+        com.aiprovider.logging.BusinessOperationLogger.success("service.ComfyTaskService.save", null);
     }
 
     public void saveBatch(List<ComfyTaskRecordDTO> items) {
-        if (items == null || items.isEmpty() || items.size() > 1000) throw new IllegalArgumentException("批量任务数量必须在 1 到 1000 之间");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.ComfyTaskService.saveBatch", new String[] { "items" }, new Object[] { items });
+    if (items == null || items.isEmpty() || items.size() > 1000) throw new IllegalArgumentException("批量任务数量必须在 1 到 1000 之间");
         items.forEach(this::prepare);
         int affected = repository.saveBatch(items);
         logMutation("saveBatch", items.stream().map(ComfyTaskRecordDTO::getPromptId).toList(), items.size(), affected);
+        com.aiprovider.logging.BusinessOperationLogger.success("service.ComfyTaskService.saveBatch", null);
     }
 
     public Map<String,Object> duplicate(String workflowId, String hash) {
-        validateHash(workflowId, hash);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.ComfyTaskService.duplicate", new String[] { "workflowId", "hash" }, new Object[] { workflowId, hash });
+    validateHash(workflowId, hash);
         Map<String,Object> row = repository.findDuplicate(workflowId, hash.toLowerCase(Locale.ROOT));
-        return row == null ? Collections.emptyMap() : row;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.ComfyTaskService.duplicate", row == null ? Collections.emptyMap() : row);
     }
 
     public List<String> duplicateHashes(String workflowId, List<String> hashes) {
-        if (hashes == null || hashes.isEmpty() || hashes.size() > 1000) throw new IllegalArgumentException("SHA-256 列表数量必须在 1 到 1000 之间");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.ComfyTaskService.duplicateHashes", new String[] { "workflowId", "hashes" }, new Object[] { workflowId, hashes });
+    if (hashes == null || hashes.isEmpty() || hashes.size() > 1000) throw new IllegalArgumentException("SHA-256 列表数量必须在 1 到 1000 之间");
         List<String> normalized = new ArrayList<>();
         for (String hash : hashes) {
             validateHash(workflowId, hash);
             String value = hash.toLowerCase(Locale.ROOT);
             if (!normalized.contains(value)) normalized.add(value);
         }
-        return repository.findDuplicateHashes(workflowId, normalized);
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.ComfyTaskService.duplicateHashes", repository.findDuplicateHashes(workflowId, normalized));
     }
 
     public void complete(String id, List<String> paths) {
-        if (blank(id)) throw new IllegalArgumentException("任务 ID 不能为空");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.ComfyTaskService.complete", new String[] { "id", "paths" }, new Object[] { id, paths });
+    if (blank(id)) throw new IllegalArgumentException("任务 ID 不能为空");
         List<String> clean = paths == null ? Collections.emptyList() : paths.stream().filter(x -> !blank(x)).toList();
         String json = "[" + clean.stream().map(x -> "\"" + x.replace("\\", "\\\\").replace("\"", "\\\"") + "\"").reduce((a,b) -> a + "," + b).orElse("") + "]";
         repository.complete(id, clean.isEmpty() ? null : clean.get(0), json);
+        com.aiprovider.logging.BusinessOperationLogger.success("service.ComfyTaskService.complete", null);
     }
 
     private void prepare(ComfyTaskRecordDTO dto) {

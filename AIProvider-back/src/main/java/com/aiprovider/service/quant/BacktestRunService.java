@@ -65,7 +65,8 @@ public class BacktestRunService {
   }
 
   public String create(BacktestCreateRequest q) {
-    return createWithRunId(UUID.randomUUID().toString(), q);
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.BacktestRunService.create", new String[] { "q" }, new Object[] { q });
+  return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestRunService.create", createWithRunId(UUID.randomUUID().toString(), q));
   }
 
   String createWithRunId(String id, BacktestCreateRequest q) {
@@ -373,7 +374,8 @@ public class BacktestRunService {
   }
 
   public List<BacktestDtos.Strategy> strategies() {
-    return strategies.list().stream()
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.BacktestRunService.strategies", new String[] {}, new Object[] {});
+  return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestRunService.strategies", strategies.list().stream()
         .map(
             d ->
                 new BacktestDtos.Strategy(
@@ -392,56 +394,61 @@ public class BacktestRunService {
                     d.supportedExecutionProfiles().stream().map(Enum::name).sorted().toList(),
                     d.supportedDirectionModes().stream().map(Enum::name).sorted().toList(),
                     d.requiredMarketFeatures().stream().map(Enum::name).sorted().toList()))
-        .toList();
+        .toList());
   }
 
   public BacktestDtos.Page<BacktestDtos.RunDetail> page(
       int page, int size, String status, String symbol, String code) {
-    if (page < 1 || size < 1 || size > 100)
+      com.aiprovider.logging.BusinessOperationLogger.start("service.quant.BacktestRunService.page", new String[] { "page", "size", "status", "symbol", "code" }, new Object[] { page, size, status, symbol, code });
+      if (page < 1 || size < 1 || size > 100)
       throw error("BACKTEST_REQUEST_INVALID", "page/pageSize invalid");
     long offset = calculateOffset(page, size);
     String s = status == null || status.isBlank() ? null : status.trim().toUpperCase(Locale.ROOT);
     String sym = symbol == null || symbol.isBlank() ? null : symbol.trim().toUpperCase(Locale.ROOT);
     String strategy = code == null || code.isBlank() ? null : code.trim();
-    return new BacktestDtos.Page<>(
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestRunService.page", new BacktestDtos.Page<>(
         runs.findPage(s, sym, strategy, size, offset).stream().map(this::detail).toList(),
         runs.count(s, sym, strategy),
         page,
-        size);
+        size));
   }
 
   public List<BacktestDtos.RunDetail> nonTerminal() {
-    return runs.findNonTerminal().stream().map(this::detail).toList();
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.BacktestRunService.nonTerminal", new String[] {}, new Object[] {});
+  return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestRunService.nonTerminal", runs.findNonTerminal().stream().map(this::detail).toList());
   }
 
   public BacktestDtos.RunDetail get(String id) {
-    return detail(require(id));
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.BacktestRunService.get", new String[] { "id" }, new Object[] { id });
+  return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestRunService.get", detail(require(id)));
   }
 
   public BacktestDtos.Page<BacktestDtos.Trade> trades(String id, int page, int size) {
-    BacktestRunRow run = require(id);
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.BacktestRunService.trades", new String[] { "id", "page", "size" }, new Object[] { id, page, size });
+  BacktestRunRow run = require(id);
     if (page < 1 || size < 1 || size > 500)
       throw error("BACKTEST_REQUEST_INVALID", "page/pageSize invalid");
     if (!BacktestRunStatus.COMPLETED.name().equals(run.status))
-      return new BacktestDtos.Page<>(List.of(), 0, page, size);
-    return new BacktestDtos.Page<>(
+      return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestRunService.trades", new BacktestDtos.Page<>(List.of(), 0, page, size));
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestRunService.trades", new BacktestDtos.Page<>(
         trades.findPage(id, size, calculateOffset(page, size)).stream().map(this::trade).toList(),
         trades.count(id),
         page,
-        size);
+        size));
   }
 
   public BacktestDtos.Equity equity(String id, int max) {
-    require(id);
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.BacktestRunService.equity", new String[] { "id", "max" }, new Object[] { id, max });
+  require(id);
     if (max < 100 || max > 5000)
       throw error("BACKTEST_REQUEST_INVALID", "maxPoints must be 100..5000");
     int total = equity.count(id);
-    if (total == 0) return new BacktestDtos.Equity(false, 0, List.of());
+    if (total == 0) return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestRunService.equity", new BacktestDtos.Equity(false, 0, List.of()));
     List<BacktestEquityRow> rows =
         total <= max
             ? equity.findAll(id)
             : equity.findAtIndices(id, BacktestEquitySampler.indices(total, max));
-    return new BacktestDtos.Equity(total > max, total, rows.stream().map(this::point).toList());
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestRunService.equity", new BacktestDtos.Equity(total > max, total, rows.stream().map(this::point).toList()));
   }
 
   private static long calculateOffset(int page, int size) {
@@ -631,12 +638,16 @@ public class BacktestRunService {
   }
 
   public void resubmitQueued(BacktestRunRow row) {
-    BacktestRunCommand command;
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.BacktestRunService.resubmitQueued", new String[] { "row" }, new Object[] { row });
+  BacktestRunCommand command;
     try {
       command = recoveryCommand(row);
     } catch (BacktestTaskException e) {
       failSafely(row.runId, e.getErrorCode(), descriptor(e.getMessage()));
-      return;
+      {
+          com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestRunService.resubmitQueued", null);
+          return;
+      }
     }
     try {
       executor.execute(() -> run(command));
@@ -692,10 +703,12 @@ public class BacktestRunService {
   }
 
   public void markInterruptedOnRestart(String runId, String previousStatus) {
-    failSafely(
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.BacktestRunService.markInterruptedOnRestart", new String[] { "runId", "previousStatus" }, new Object[] { runId, previousStatus });
+  failSafely(
         runId,
         "BACKTEST_INTERRUPTED_BY_RESTART",
         "previousStatus=" + previousStatus + " interrupted by application restart");
+  com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestRunService.markInterruptedOnRestart", null);
   }
 
   private BacktestMarketContext marketContext(

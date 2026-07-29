@@ -27,7 +27,8 @@ public class PromptOptionService {
         this.translationService = translationService;
     }
     public PromptOptionPageVO page(String query, String category, String status, String type, int page, int pageSize) {
-        if (page < 1) throw new IllegalArgumentException("page 必须大于等于 1");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.PromptOptionService.page", new String[] { "query", "category", "status", "type", "page", "pageSize" }, new Object[] { query, category, status, type, page, pageSize });
+    if (page < 1) throw new IllegalArgumentException("page 必须大于等于 1");
         if (pageSize < 1 || pageSize > 100) throw new IllegalArgumentException("pageSize 必须在 1 到 100 之间");
         String normalizedQuery = optional(query, "搜索词", 100);
         String normalizedCategory = optional(category, "分类", 40);
@@ -45,11 +46,12 @@ public class PromptOptionService {
         List<PromptOptionVO> result = new ArrayList<>();
         long offset = (long) (page - 1) * pageSize;
         for (Map<String, Object> row : repository.findOptionPage(normalizedQuery, normalizedCategory, enabled, normalizedType, pageSize, offset)) result.add(toVO(row));
-        return new PromptOptionPageVO(result, repository.countOptions(normalizedQuery, normalizedCategory, enabled, normalizedType), page, pageSize);
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.PromptOptionService.page", new PromptOptionPageVO(result, repository.countOptions(normalizedQuery, normalizedCategory, enabled, normalizedType), page, pageSize));
     }
 
     public List<PromptOptionVO> resolve(List<String> ids) {
-        if (ids == null || ids.isEmpty()) return Collections.emptyList();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.PromptOptionService.resolve", new String[] { "ids" }, new Object[] { ids });
+    if (ids == null || ids.isEmpty()) return com.aiprovider.logging.BusinessOperationLogger.success("service.PromptOptionService.resolve", Collections.emptyList());
         if (ids.size() > 500) throw new IllegalArgumentException("一次最多解析 500 个词条");
         LinkedHashSet<String> normalized = new LinkedHashSet<>();
         for (String id : ids) { validateId(id); normalized.add(id); }
@@ -59,11 +61,12 @@ public class PromptOptionService {
         }
         List<PromptOptionVO> result = new ArrayList<>();
         for (String id : normalized) if (byId.containsKey(id)) result.add(byId.get(id));
-        return result;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.PromptOptionService.resolve", result);
     }
 
     public List<PromptOptionVO> analyze(String positivePrompt, String negativePrompt) {
-        long started = System.nanoTime();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.PromptOptionService.analyze", new String[] { "positivePrompt", "negativePrompt" }, new Object[] { positivePrompt, negativePrompt });
+    long started = System.nanoTime();
         List<String> positiveTerms = promptTerms(positivePrompt, "正向 Prompt");
         List<String> negativeTerms = promptTerms(negativePrompt, "反向 Prompt");
         LinkedHashMap<String, PromptOptionVO> matches = new LinkedHashMap<>();
@@ -79,11 +82,12 @@ public class PromptOptionService {
         }
         log.info("prompt_options_analyzed positiveTerms={} negativeTerms={} matches={} elapsedMs={}",
                 positiveTerms.size(), negativeTerms.size(), matches.size(), (System.nanoTime() - started) / 1_000_000L);
-        return new ArrayList<>(matches.values());
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.PromptOptionService.analyze", new ArrayList<>(matches.values()));
     }
 
     public Map<String, Object> config() {
-        String generalNegativePrompt = repository.findGeneralNegativePrompt();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.PromptOptionService.config", new String[] {}, new Object[] {});
+    String generalNegativePrompt = repository.findGeneralNegativePrompt();
         if (generalNegativePrompt == null || generalNegativePrompt.trim().isEmpty())
             throw new IllegalStateException("通用反向模板未配置或未启用");
         List<PromptOptionCategoryVO> categories = new ArrayList<>();
@@ -94,31 +98,37 @@ public class PromptOptionService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("generalNegativePrompt", generalNegativePrompt.trim());
         result.put("categories", categories);
-        return result;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.PromptOptionService.config", result);
     }
 
     @Transactional
     public void create(PromptOptionDTO dto) {
-        PromptCatalogMapper.OptionRecord record = validate(dto);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.PromptOptionService.create", new String[] { "dto" }, new Object[] { dto });
+    PromptCatalogMapper.OptionRecord record = validate(dto);
         if (repository.existsOption(record.getId())) throw new IllegalArgumentException("词条 ID 已存在");
         repository.insertOption(record);
         translationService.invalidate();
+        com.aiprovider.logging.BusinessOperationLogger.success("service.PromptOptionService.create", null);
     }
 
     @Transactional
     public void update(String id, PromptOptionDTO dto) {
-        PromptCatalogMapper.OptionRecord record = validate(dto);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.PromptOptionService.update", new String[] { "id", "dto" }, new Object[] { id, dto });
+    PromptCatalogMapper.OptionRecord record = validate(dto);
         if (!record.getId().equals(id)) throw new IllegalArgumentException("词条 ID 创建后不能修改");
         if (!repository.updateOption(record)) throw new IllegalArgumentException("词条不存在");
         translationService.invalidate();
+        com.aiprovider.logging.BusinessOperationLogger.success("service.PromptOptionService.update", null);
     }
 
     @Transactional
     public void delete(String id) {
-        validateId(id);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.PromptOptionService.delete", new String[] { "id" }, new Object[] { id });
+    validateId(id);
         if (repository.countSchemeReferences(id) > 0) throw new IllegalArgumentException("词条正在被 Prompt 方案使用，请先从方案中移除该词条");
         if (!repository.deleteOption(id)) throw new IllegalArgumentException("词条不存在");
         translationService.invalidate();
+        com.aiprovider.logging.BusinessOperationLogger.success("service.PromptOptionService.delete", null);
     }
 
     private PromptCatalogMapper.OptionRecord validate(PromptOptionDTO dto) {

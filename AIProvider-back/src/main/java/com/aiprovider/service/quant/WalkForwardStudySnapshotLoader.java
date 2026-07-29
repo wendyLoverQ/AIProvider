@@ -32,12 +32,14 @@ public class WalkForwardStudySnapshotLoader {
 
   public WalkForwardStudySnapshot load(
       WalkForwardStudyRow study, List<WalkForwardFoldRow> foldRows, boolean includeEquity) {
-    return loadMany(List.of(study), foldRows, includeEquity).get(study.studyId);
+      com.aiprovider.logging.BusinessOperationLogger.start("service.quant.WalkForwardStudySnapshotLoader.load", new String[] { "study", "foldRows", "includeEquity" }, new Object[] { study, foldRows, includeEquity });
+      return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardStudySnapshotLoader.load", loadMany(List.of(study), foldRows, includeEquity).get(study.studyId));
   }
 
   public Map<String, WalkForwardStudySnapshot> loadMany(
       List<WalkForwardStudyRow> studies, List<WalkForwardFoldRow> foldRows, boolean includeEquity) {
-    if (studies == null || studies.isEmpty()) return Map.of();
+      com.aiprovider.logging.BusinessOperationLogger.start("service.quant.WalkForwardStudySnapshotLoader.loadMany", new String[] { "studies", "foldRows", "includeEquity" }, new Object[] { studies, foldRows, includeEquity });
+      if (studies == null || studies.isEmpty()) return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardStudySnapshotLoader.loadMany", Map.of());
     Map<String, List<WalkForwardFoldRow>> groupedFolds = new LinkedHashMap<>();
     for (WalkForwardStudyRow study : studies) groupedFolds.put(study.studyId, new ArrayList<>());
     for (WalkForwardFoldRow fold : foldRows)
@@ -76,14 +78,15 @@ public class WalkForwardStudySnapshotLoader {
               Map.copyOf(runRows),
               Map.copyOf(equityRows)));
     }
-    return Map.copyOf(result);
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardStudySnapshotLoader.loadMany", Map.copyOf(result));
   }
 
   public Map<String, WalkForwardStudySnapshot> loadMany(
       List<WalkForwardStudyRow> studies, boolean includeEquity) {
-    if (studies == null || studies.isEmpty()) return Map.of();
+      com.aiprovider.logging.BusinessOperationLogger.start("service.quant.WalkForwardStudySnapshotLoader.loadMany", new String[] { "studies", "includeEquity" }, new Object[] { studies, includeEquity });
+      if (studies == null || studies.isEmpty()) return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardStudySnapshotLoader.loadMany", Map.of());
     List<String> ids = studies.stream().map(row -> row.studyId).toList();
     List<WalkForwardFoldRow> foldRows = folds.findAllByStudyIds(ids);
-    return loadMany(studies, foldRows, includeEquity);
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardStudySnapshotLoader.loadMany", loadMany(studies, foldRows, includeEquity));
   }
 }

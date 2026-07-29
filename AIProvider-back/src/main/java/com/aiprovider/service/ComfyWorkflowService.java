@@ -15,12 +15,13 @@ public class ComfyWorkflowService {
     public ComfyWorkflowService(ComfyWorkflowRepository repository, ObjectMapper json) { this.repository = repository; this.json = json; }
 
     public List<ComfyWorkflowVO> list() {
-        List<ComfyWorkflowVO> result = new ArrayList<>();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.ComfyWorkflowService.list", new String[] {}, new Object[] {});
+    List<ComfyWorkflowVO> result = new ArrayList<>();
         for (Map<String, Object> row : repository.findActive()) {
             result.add(new ComfyWorkflowVO(text(row.get("id")), text(row.get("name")), text(row.get("description")),
                     parse(row.get("definitionJson")), parse(row.get("bindingJson")), parse(row.get("defaultsJson"))));
         }
-        return result;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.ComfyWorkflowService.list", result);
     }
     private Map<String, Object> parse(Object value) {
         try { return json.readValue(String.valueOf(value), new TypeReference<Map<String, Object>>() {}); }

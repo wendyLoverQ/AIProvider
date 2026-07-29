@@ -19,10 +19,16 @@ public class WalkForwardOosRecoveryScheduler {
   }
 
   @EventListener(ApplicationReadyEvent.class)
-  public void recoverOnStartup() { runOnce(); }
+  public void recoverOnStartup() {
+      com.aiprovider.logging.BusinessOperationLogger.start("service.quant.WalkForwardOosRecoveryScheduler.recoverOnStartup", new String[] {}, new Object[] {});
+      runOnce(); com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardOosRecoveryScheduler.recoverOnStartup", null);
+}
 
   @Scheduled(fixedDelayString = "${quant.research.oos-recovery-interval-ms:5000}")
-  public void scheduledRecovery() { runOnce(); }
+  public void scheduledRecovery() {
+      com.aiprovider.logging.BusinessOperationLogger.start("service.quant.WalkForwardOosRecoveryScheduler.scheduledRecovery", new String[] {}, new Object[] {});
+      runOnce(); com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardOosRecoveryScheduler.scheduledRecovery", null);
+}
 
   void runOnce() {
     try { recovery.recoverBatch(properties.getOosRecoveryBatchSize()); }

@@ -13,7 +13,8 @@ public class PromptCatalogService {
     private final PromptCatalogRepository repository;
     public PromptCatalogService(PromptCatalogRepository repository) { this.repository = repository; }
     public PromptCatalogVO get() {
-        String template = repository.findGeneralNegativePrompt();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.PromptCatalogService.get", new String[] {}, new Object[] {});
+    String template = repository.findGeneralNegativePrompt();
         if (template == null || template.trim().isEmpty()) throw new IllegalStateException("通用反向模板未配置或未启用");
         List<PromptOptionVO> options = new ArrayList<>();
         for (Map<String, Object> row : repository.findEnabledOptions()) {
@@ -25,7 +26,7 @@ public class PromptCatalogService {
             negativeOptions.add(new PromptOptionVO(text(row.get("id")), text(row.get("category")), text(row.get("name")), text(row.get("prompt")), text(row.get("type")), null,
                     null, text(row.get("negativePrompt")), integer(row.get("sortOrder")), true, false));
         }
-        return new PromptCatalogVO(options, negativeOptions, template.trim());
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.PromptCatalogService.get", new PromptCatalogVO(options, negativeOptions, template.trim()));
     }
     private String text(Object value) { return value == null ? null : String.valueOf(value); }
     private int integer(Object value) { return value instanceof Number ? ((Number) value).intValue() : Integer.parseInt(String.valueOf(value)); }

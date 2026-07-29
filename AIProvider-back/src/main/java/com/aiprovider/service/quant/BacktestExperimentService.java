@@ -49,12 +49,14 @@ public class BacktestExperimentService {
 
   @Transactional
   public BacktestExperimentDtos.CreateResponse create(BacktestExperimentCreateRequest q) {
-    return createWithExperimentId(UUID.randomUUID().toString(), q);
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.BacktestExperimentService.create", new String[] { "q" }, new Object[] { q });
+  return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestExperimentService.create", createWithExperimentId(UUID.randomUUID().toString(), q));
   }
 
   public BacktestExperimentDtos.CreateResponse createWithExperimentId(
       String experimentId, BacktestExperimentCreateRequest q) {
-    try {
+      com.aiprovider.logging.BusinessOperationLogger.start("service.quant.BacktestExperimentService.createWithExperimentId", new String[] { "experimentId", "q" }, new Object[] { experimentId, q });
+      try {
       UUID.fromString(experimentId);
     } catch (IllegalArgumentException e) {
       throw error("WALK_FORWARD_EXPERIMENT_CONFLICT", "experimentId must be a UUID");
@@ -103,7 +105,7 @@ public class BacktestExperimentService {
       if (!sameImmutableRequest(existing, q, canonicalGrid))
         throw error(
             "WALK_FORWARD_EXPERIMENT_CONFLICT", "experimentId belongs to a different request");
-      return response(existing);
+      return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestExperimentService.createWithExperimentId", response(existing));
     }
     Instant now = Instant.now();
     BacktestExperimentRow row = new BacktestExperimentRow();
@@ -142,7 +144,7 @@ public class BacktestExperimentService {
       if (!sameImmutableRequest(raced, q, canonicalGrid))
         throw error(
             "WALK_FORWARD_EXPERIMENT_CONFLICT", "experimentId belongs to a different request");
-      return response(raced);
+      return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestExperimentService.createWithExperimentId", response(raced));
     }
     List<BacktestExperimentCandidateRow> rows = new ArrayList<>();
     for (int i = 0; i < combinations.size(); i++) {
@@ -161,7 +163,7 @@ public class BacktestExperimentService {
       throw error(
           "BACKTEST_EXPERIMENT_STATE_CONFLICT",
           "candidate insert affected an unexpected number of rows");
-    return response(row);
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestExperimentService.createWithExperimentId", response(row));
   }
 
   private BacktestExperimentDtos.CreateResponse response(BacktestExperimentRow row) {
@@ -194,7 +196,8 @@ public class BacktestExperimentService {
 
   public BacktestDtos.Page<BacktestExperimentDtos.ExperimentSummary> page(
       int page, int size, String status, String symbol, String strategyCode) {
-    validatePage(page, size);
+      com.aiprovider.logging.BusinessOperationLogger.start("service.quant.BacktestExperimentService.page", new String[] { "page", "size", "status", "symbol", "strategyCode" }, new Object[] { page, size, status, symbol, strategyCode });
+      validatePage(page, size);
     long offset = offset(page, size);
     String s = clean(status, true), sym = clean(symbol, true), code = clean(strategyCode, false);
     if (s != null
@@ -203,21 +206,23 @@ public class BacktestExperimentService {
     List<BacktestExperimentRow> rows = experiments.findPage(s, sym, code, size, (int) offset);
     Map<String, BacktestExperimentSnapshot> snapshots =
         BacktestExperimentSnapshot.loadMany(rows, candidates, runs);
-    return new BacktestDtos.Page<>(
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestExperimentService.page", new BacktestDtos.Page<>(
         rows.stream().map(row -> summary(row, snapshots.get(row.experimentId))).toList(),
         experiments.count(s, sym, code),
         page,
-        size);
+        size));
   }
 
   public BacktestExperimentDtos.ExperimentSummary get(String id) {
-    return refresh(require(id));
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.BacktestExperimentService.get", new String[] { "id" }, new Object[] { id });
+  return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestExperimentService.get", refresh(require(id)));
   }
 
   /** Batch read used by Walk-forward; missing IDs remain absent so callers can expose them. */
   public Map<String, BacktestExperimentDtos.ExperimentSummary> getMany(
       Collection<String> experimentIds) {
-    if (experimentIds == null || experimentIds.isEmpty()) return Map.of();
+      com.aiprovider.logging.BusinessOperationLogger.start("service.quant.BacktestExperimentService.getMany", new String[] { "experimentIds" }, new Object[] { experimentIds });
+      if (experimentIds == null || experimentIds.isEmpty()) return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestExperimentService.getMany", Map.of());
     List<String> ids = new ArrayList<>(new LinkedHashSet<>(experimentIds));
     List<BacktestExperimentRow> rows = experiments.findByExperimentIds(ids);
     Map<String, BacktestExperimentSnapshot> snapshots =
@@ -249,12 +254,13 @@ public class BacktestExperimentService {
     Map<String, BacktestExperimentDtos.ExperimentSummary> result = new LinkedHashMap<>();
     for (BacktestExperimentRow row : rows)
       result.put(row.experimentId, summary(row, snapshots.get(row.experimentId)));
-    return Map.copyOf(result);
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestExperimentService.getMany", Map.copyOf(result));
   }
 
   public BacktestDtos.Page<BacktestExperimentDtos.CandidateResult> candidates(
       String id, int page, int size, String sortBy, String order) {
-    BacktestExperimentRow experiment = require(id);
+      com.aiprovider.logging.BusinessOperationLogger.start("service.quant.BacktestExperimentService.candidates", new String[] { "id", "page", "size", "sortBy", "order" }, new Object[] { id, page, size, sortBy, order });
+      BacktestExperimentRow experiment = require(id);
     if (page < 1 || size < 1 || size > 100)
       throw error("BACKTEST_EXPERIMENT_REQUEST_INVALID", "page/pageSize invalid");
     String sb = sortBy == null ? "CANDIDATE_INDEX" : sortBy.toUpperCase(Locale.ROOT),
@@ -265,8 +271,8 @@ public class BacktestExperimentService {
     List<BacktestExperimentCandidateRow> rows =
         candidates.findPageSorted(id, size, (int) offset, sortExpression(sb), ord);
     BacktestExperimentSnapshot snapshot = load(experiment, rows);
-    return new BacktestDtos.Page<>(
-        rows.stream().map(c -> candidate(c, snapshot)).toList(), candidates.count(id), page, size);
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestExperimentService.candidates", new BacktestDtos.Page<>(
+        rows.stream().map(c -> candidate(c, snapshot)).toList(), candidates.count(id), page, size));
   }
 
   private BacktestExperimentDtos.ExperimentSummary refresh(BacktestExperimentRow row) {

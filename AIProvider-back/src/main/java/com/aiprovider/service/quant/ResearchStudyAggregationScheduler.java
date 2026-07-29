@@ -28,8 +28,12 @@ public class ResearchStudyAggregationScheduler {
 
   @Scheduled(fixedDelayString = "${quant.research.aggregation-interval-ms:3000}")
   public void tick() {
-    List<ResearchStudyRow> parents = research.findNonTerminal(properties.getBatchSize());
-    if (parents.isEmpty()) return;
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.ResearchStudyAggregationScheduler.tick", new String[] {}, new Object[] {});
+  List<ResearchStudyRow> parents = research.findNonTerminal(properties.getBatchSize());
+    if (parents.isEmpty()) {
+        com.aiprovider.logging.BusinessOperationLogger.success("service.quant.ResearchStudyAggregationScheduler.tick", null);
+        return;
+    }
     Map<String, WalkForwardStudyRow> children = new LinkedHashMap<>();
     for (WalkForwardStudyRow child : walkForward.findByStudyIds(parents.stream().map(row -> row.walkForwardStudyId).toList())) children.put(child.studyId, child);
     for (ResearchStudyRow parent : parents) {
@@ -42,6 +46,7 @@ public class ResearchStudyAggregationScheduler {
       try { update(parent, child); }
       catch (RuntimeException exception) { log.error("operation=research-aggregate researchStudyId={} result=retryable", parent.researchStudyId, exception); }
     }
+    com.aiprovider.logging.BusinessOperationLogger.success("service.quant.ResearchStudyAggregationScheduler.tick", null);
   }
 
   void update(ResearchStudyRow parent, WalkForwardStudyRow child) {

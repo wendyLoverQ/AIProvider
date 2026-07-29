@@ -43,7 +43,8 @@ public class FileTransferService {
     }
 
     public FileTransferFileVO upload(MultipartFile file) throws IOException {
-        if (file == null) throw new IllegalArgumentException("请选择要上传的文件");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.FileTransferService.upload", new String[] { "file" }, new Object[] { file });
+    if (file == null) throw new IllegalArgumentException("请选择要上传的文件");
         String fileName = validateFileName(file.getOriginalFilename());
         Files.createDirectories(storageDirectory);
         Path target = resolve(fileName);
@@ -54,38 +55,42 @@ public class FileTransferService {
         } finally {
             Files.deleteIfExists(temporary);
         }
-        return describe(target);
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.FileTransferService.upload", describe(target));
     }
 
     public List<FileTransferFileVO> list() throws IOException {
-        Files.createDirectories(storageDirectory);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.FileTransferService.list", new String[] {}, new Object[] {});
+    Files.createDirectories(storageDirectory);
         try (Stream<Path> files = Files.list(storageDirectory)) {
-            return files.filter(Files::isRegularFile)
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.FileTransferService.list", files.filter(Files::isRegularFile)
                 .filter(path -> !path.getFileName().toString().startsWith(TEMP_PREFIX))
                 .map(this::describeUnchecked)
                 .sorted(Comparator.comparing(FileTransferFileVO::getUploadedAt).reversed()
                     .thenComparing(FileTransferFileVO::getFileName, String.CASE_INSENSITIVE_ORDER))
-                .collect(Collectors.toList());
+                .collect(Collectors.toList()));
         }
     }
 
     public FileTransferDownload download(String fileName) throws IOException {
-        Path path = requireExisting(fileName);
-        return new FileTransferDownload(path.getFileName().toString(), Files.size(path), new FileSystemResource(path));
+    com.aiprovider.logging.BusinessOperationLogger.start("service.FileTransferService.download", new String[] { "fileName" }, new Object[] { fileName });
+    Path path = requireExisting(fileName);
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.FileTransferService.download", new FileTransferDownload(path.getFileName().toString(), Files.size(path), new FileSystemResource(path)));
     }
 
     public FileTransferPreview preview(String fileName) throws IOException {
-        Path path = requireExisting(fileName);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.FileTransferService.preview", new String[] { "fileName" }, new Object[] { fileName });
+    Path path = requireExisting(fileName);
         String mediaType = imageMediaType(path.getFileName().toString());
         if (mediaType == null) throw new IllegalArgumentException("该文件不支持图片预览");
-        return new FileTransferPreview(path.getFileName().toString(), Files.size(path), mediaType, new FileSystemResource(path));
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.FileTransferService.preview", new FileTransferPreview(path.getFileName().toString(), Files.size(path), mediaType, new FileSystemResource(path)));
     }
 
     public StreamingResponseBody downloadBatch(List<String> fileNames) {
-        if (fileNames == null || fileNames.isEmpty()) throw new IllegalArgumentException("请选择要下载的文件");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.FileTransferService.downloadBatch", new String[] { "fileNames" }, new Object[] { fileNames });
+    if (fileNames == null || fileNames.isEmpty()) throw new IllegalArgumentException("请选择要下载的文件");
         Set<Path> uniquePaths = new LinkedHashSet<>();
         for (String fileName : fileNames) uniquePaths.add(requireExisting(fileName));
-        return outputStream -> {
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.FileTransferService.downloadBatch", outputStream -> {
             try (ZipOutputStream zip = new ZipOutputStream(outputStream)) {
                 byte[] buffer = new byte[64 * 1024];
                 for (Path path : uniquePaths) {
@@ -100,20 +105,24 @@ public class FileTransferService {
                 }
                 zip.finish();
             }
-        };
+        });
     }
 
     public void delete(String fileName) throws IOException {
-        Files.delete(requireExisting(fileName));
+    com.aiprovider.logging.BusinessOperationLogger.start("service.FileTransferService.delete", new String[] { "fileName" }, new Object[] { fileName });
+    Files.delete(requireExisting(fileName));
+    com.aiprovider.logging.BusinessOperationLogger.success("service.FileTransferService.delete", null);
     }
 
     public String readText() throws IOException {
-        if (!Files.isRegularFile(textStorageFile)) return "";
-        return new String(Files.readAllBytes(textStorageFile), java.nio.charset.StandardCharsets.UTF_8);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.FileTransferService.readText", new String[] {}, new Object[] {});
+    if (!Files.isRegularFile(textStorageFile)) return com.aiprovider.logging.BusinessOperationLogger.success("service.FileTransferService.readText", "");
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.FileTransferService.readText", new String(Files.readAllBytes(textStorageFile), java.nio.charset.StandardCharsets.UTF_8));
     }
 
     public void saveText(String text) throws IOException {
-        Path parent = textStorageFile.getParent();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.FileTransferService.saveText", new String[] { "text" }, new Object[] { text });
+    Path parent = textStorageFile.getParent();
         if (parent == null) throw new IllegalArgumentException("文本中转存储文件配置不合法");
         Files.createDirectories(parent);
         Path temporary = Files.createTempFile(parent, ".file-transfer-text-", ".tmp");

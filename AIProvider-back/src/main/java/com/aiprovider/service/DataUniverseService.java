@@ -31,7 +31,8 @@ public class DataUniverseService {
     }
 
     public Map<String, Object> getIndex() {
-        List<Map<String, Object>> columns = dataUniverseRepo.getAllColumns();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.DataUniverseService.getIndex", new String[] {}, new Object[] {});
+    List<Map<String, Object>> columns = dataUniverseRepo.getAllColumns();
         Map<String, List<Map<String, Object>>> byTable = columns.stream().collect(Collectors.groupingBy(
             x -> String.valueOf(x.get("TABLE_NAME")), LinkedHashMap::new, Collectors.toList()));
 
@@ -61,11 +62,12 @@ public class DataUniverseService {
         result.put("tableCount", TABLES.size());
         result.put("recordCount", grandTotal);
         result.put("groups", groups);
-        return result;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.DataUniverseService.getIndex", result);
     }
 
     public Map<String, Object> getRows(String table, int page, int size) {
-        requireTable(table);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.DataUniverseService.getRows", new String[] { "table", "page", "size" }, new Object[] { table, page, size });
+    requireTable(table);
         page = Math.max(0, page);
         size = Math.max(10, Math.min(100, size));
 
@@ -90,7 +92,7 @@ public class DataUniverseService {
         result.put("pages", Math.max(1, (total + size - 1) / size));
         result.put("columns", columns);
         result.put("rows", rows);
-        return result;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.DataUniverseService.getRows", result);
     }
 
     private void requireTable(String table) {

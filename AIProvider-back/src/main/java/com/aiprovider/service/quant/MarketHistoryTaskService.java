@@ -117,7 +117,8 @@ public class MarketHistoryTaskService {
      */
     public String createTask(String provider, String marketType, String symbol, String intervalCode,
                               Instant startTime, Instant endTime, String sourceMode) {
-        if (!MarketProviderId.BINANCE_USDM.name().equals(provider)) {
+                              com.aiprovider.logging.BusinessOperationLogger.start("service.quant.MarketHistoryTaskService.createTask", new String[] { "provider", "marketType", "symbol", "intervalCode", "startTime", "endTime", "sourceMode" }, new Object[] { provider, marketType, symbol, intervalCode, startTime, endTime, sourceMode });
+                              if (!MarketProviderId.BINANCE_USDM.name().equals(provider)) {
             throw new MarketHistoryTaskException("INVALID_PROVIDER", "不支持的行情提供方: " + provider);
         }
         if (!MarketType.USDM_PERPETUAL.name().equals(marketType)) {
@@ -127,13 +128,14 @@ public class MarketHistoryTaskService {
         ArchiveImportMode mode = parseSourceMode(sourceMode);
         MarketSyncTask task = prepareTask(symbol, intervalCode, startTime, endTime, mode);
         Runnable execution = selectExecution(mode, task);
-        return submitTask(task, execution, "sync-" + mode.name());
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.MarketHistoryTaskService.createTask", submitTask(task, execution, "sync-" + mode.name()));
     }
 
     @Deprecated
     public String createTask(String symbol, String intervalCode, Instant startTime, Instant endTime, String sourceMode) {
-        return createTask(MarketProviderId.BINANCE_USDM.name(), MarketType.USDM_PERPETUAL.name(),
-                symbol, intervalCode, startTime, endTime, sourceMode);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.quant.MarketHistoryTaskService.createTask", new String[] { "symbol", "intervalCode", "startTime", "endTime", "sourceMode" }, new Object[] { symbol, intervalCode, startTime, endTime, sourceMode });
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.MarketHistoryTaskService.createTask", createTask(MarketProviderId.BINANCE_USDM.name(), MarketType.USDM_PERPETUAL.name(),
+                symbol, intervalCode, startTime, endTime, sourceMode));
     }
 
     private ArchiveImportMode parseSourceMode(String sourceMode) {
@@ -341,7 +343,8 @@ public class MarketHistoryTaskService {
      */
     @EventListener(ApplicationReadyEvent.class)
     public void recoverInterruptedTasks() {
-        int interrupted = taskRepository.markNonTerminalAsInterrupted();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.quant.MarketHistoryTaskService.recoverInterruptedTasks", new String[] {}, new Object[] {});
+    int interrupted = taskRepository.markNonTerminalAsInterrupted();
         if (interrupted > 0) {
             log.warn("operation=recover-interrupted-tasks count={}", interrupted);
         } else {
@@ -355,22 +358,25 @@ public class MarketHistoryTaskService {
      * 根据任务 ID 查询任务。
      */
     public MarketSyncTask getTask(String taskId) {
-        return taskRepository.findByTaskId(taskId);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.quant.MarketHistoryTaskService.getTask", new String[] { "taskId" }, new Object[] { taskId });
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.MarketHistoryTaskService.getTask", taskRepository.findByTaskId(taskId));
     }
 
     /**
      * 分页查询任务列表，按排队时间倒序。
      */
     public List<MarketSyncTask> listTasks(int page, int pageSize) {
-        int offset = Math.max(0, (page - 1) * pageSize);
-        return taskRepository.findPage(pageSize, offset);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.quant.MarketHistoryTaskService.listTasks", new String[] { "page", "pageSize" }, new Object[] { page, pageSize });
+    int offset = Math.max(0, (page - 1) * pageSize);
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.MarketHistoryTaskService.listTasks", taskRepository.findPage(pageSize, offset));
     }
 
     /**
      * 查询非终态任务列表（用于前端轮询）。
      */
     public List<MarketSyncTask> listNonTerminalTasks() {
-        return taskRepository.findNonTerminal();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.quant.MarketHistoryTaskService.listNonTerminalTasks", new String[] {}, new Object[] {});
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.MarketHistoryTaskService.listNonTerminalTasks", taskRepository.findNonTerminal());
     }
 
     // ---- 内部方法 ----

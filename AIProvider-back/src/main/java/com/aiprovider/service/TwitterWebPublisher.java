@@ -32,7 +32,8 @@ public class TwitterWebPublisher {
     }
 
     public String login(String username, String password, String identity, String verificationCode) {
-        try (Playwright playwright = Playwright.create();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterWebPublisher.login", new String[] { "username", "password", "identity", "verificationCode" }, new Object[] { username, password, identity, verificationCode });
+    try (Playwright playwright = Playwright.create();
              Browser browser = launch(playwright);
              BrowserContext context = browser.newContext()) {
             context.setDefaultTimeout(timeoutMs);
@@ -75,7 +76,7 @@ public class TwitterWebPublisher {
             if (!authenticated(context)) {
                 throw new TwitterAutomationException("X 登录失败，可能是密码错误、验证码/CAPTCHA 或账号风控");
             }
-            return context.storageState();
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterWebPublisher.login", context.storageState());
         } catch (TwitterAutomationException e) {
             throw e;
         } catch (PlaywrightException e) {
@@ -84,14 +85,16 @@ public class TwitterWebPublisher {
     }
 
     public boolean validateSession(String storageState) {
-        try (Playwright playwright = Playwright.create(); Browser browser = launch(playwright); BrowserContext context = browser.newContext(new Browser.NewContextOptions().setStorageState(storageState))) {
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterWebPublisher.validateSession", new String[] { "storageState" }, new Object[] { storageState });
+    try (Playwright playwright = Playwright.create(); Browser browser = launch(playwright); BrowserContext context = browser.newContext(new Browser.NewContextOptions().setStorageState(storageState))) {
             context.setDefaultTimeout(timeoutMs); Page page=context.newPage(); page.navigate("https://x.com/home",new Page.NavigateOptions().setTimeout(timeoutMs));
-            return authenticated(context) && !page.url().contains("/i/flow/login");
-        } catch (PlaywrightException e) { return false; }
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterWebPublisher.validateSession", authenticated(context) && !page.url().contains("/i/flow/login"));
+        } catch (PlaywrightException e) { return com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterWebPublisher.validateSession", false); }
     }
 
     public String publish(String username, String storageState, String content, List<Path> images) {
-        try (Playwright playwright = Playwright.create();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterWebPublisher.publish", new String[] { "username", "storageState", "content", "images" }, new Object[] { username, storageState, content, images });
+    try (Playwright playwright = Playwright.create();
              Browser browser = launch(playwright);
              BrowserContext context = browser.newContext(new Browser.NewContextOptions().setStorageState(storageState))) {
             context.setDefaultTimeout(timeoutMs);
@@ -122,7 +125,7 @@ public class TwitterWebPublisher {
             if (tweetId.get() == null) {
                 throw new TwitterAutomationException("X 未返回发布成功结果，请在账号页面确认后再决定是否重试");
             }
-            return "https://x.com/" + normalizeUsername(username) + "/status/" + tweetId.get();
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterWebPublisher.publish", "https://x.com/" + normalizeUsername(username) + "/status/" + tweetId.get());
         } catch (TwitterAutomationException e) {
             throw e;
         } catch (PlaywrightException e) {

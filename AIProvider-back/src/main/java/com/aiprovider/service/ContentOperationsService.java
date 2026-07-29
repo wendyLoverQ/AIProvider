@@ -17,50 +17,64 @@ public class ContentOperationsService {
     public ContentOperationsService(ContentOperationsRepository repository){this.repository=repository;}
 
     public ContentOperationsOverviewVO overview(){
-        Map<String,Long> counters=new LinkedHashMap<>();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.ContentOperationsService.overview", new String[] {}, new Object[] {});
+    Map<String,Long> counters=new LinkedHashMap<>();
         counters.put("collectedToday",repository.countCollectedToday()); counters.put("readyDrafts",repository.countReadyDrafts());
         counters.put("publishedToday",repository.countPublishedToday()); counters.put("pendingComments",repository.countPendingComments());
         counters.put("failedPublications",repository.countFailedPublications());
-        return new ContentOperationsOverviewVO(settingsFrom(repository.findSettings()),counters,accounts(),collectionAccounts(),sources(),publications());
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.ContentOperationsService.overview", new ContentOperationsOverviewVO(settingsFrom(repository.findSettings()),counters,accounts(),collectionAccounts(),sources(),publications()));
     }
 
     @Transactional
     public ContentAccountVO createAccount(ContentAccountCreateDTO dto){
-        if(dto==null) throw new IllegalArgumentException("账号配置不能为空");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.ContentOperationsService.createAccount", new String[] { "dto" }, new Object[] { dto });
+    if(dto==null) throw new IllegalArgumentException("账号配置不能为空");
         ContentOperationsMapper.AccountRecord record=new ContentOperationsMapper.AccountRecord();
         record.setDisplayName(required(dto.getDisplayName(),"账号名称",100)); record.setAccountHandle(optional(dto.getAccountHandle(),120));
-        record.setPublishMode(mode(dto.getPublishMode())); long id=repository.insertAccount(record); return account(id);
+        record.setPublishMode(mode(dto.getPublishMode())); long id=repository.insertAccount(record); return com.aiprovider.logging.BusinessOperationLogger.success("service.ContentOperationsService.createAccount", account(id));
     }
 
     @Transactional
     public ContentAccountVO updateAccount(long id,ContentAccountModeDTO dto){
-        Map<String,Object> current=repository.findAccount(id); if(current==null) throw new IllegalArgumentException("小红书账号不存在");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.ContentOperationsService.updateAccount", new String[] { "id", "dto" }, new Object[] { id, dto });
+    Map<String,Object> current=repository.findAccount(id); if(current==null) throw new IllegalArgumentException("小红书账号不存在");
         String publishMode=dto!=null&&dto.getPublishMode()!=null?mode(dto.getPublishMode()):text(current.get("publishMode"));
         boolean enabled=dto!=null&&dto.getEnabled()!=null?dto.getEnabled():truth(current.get("enabled"));
-        if(!repository.updateAccountMode(id,publishMode,enabled)) throw new IllegalStateException("账号配置更新失败"); return account(id);
+        if(!repository.updateAccountMode(id,publishMode,enabled)) throw new IllegalStateException("账号配置更新失败"); return com.aiprovider.logging.BusinessOperationLogger.success("service.ContentOperationsService.updateAccount", account(id));
     }
 
     @Transactional
-    public ContentAccountVO updateAccountDetails(long id,ContentAccountUpdateDTO dto){Map<String,Object> current=repository.findAccount(id);if(current==null)throw new IllegalArgumentException("小红书账号不存在");if(dto==null)throw new IllegalArgumentException("账号配置不能为空");String name=required(dto.getDisplayName(),"账号名称",100);String handle=optional(dto.getAccountHandle(),120);String publishMode=mode(dto.getPublishMode());boolean enabled=dto.getEnabled()==null?truth(current.get("enabled")):dto.getEnabled();if(!repository.updateAccount(id,name,handle,publishMode,enabled))throw new IllegalStateException("账号配置更新失败");return account(id);}
+    public ContentAccountVO updateAccountDetails(long id,ContentAccountUpdateDTO dto){
+        com.aiprovider.logging.BusinessOperationLogger.start("service.ContentOperationsService.updateAccountDetails", new String[] { "id", "dto" }, new Object[] { id, dto });
+        Map<String,Object> current=repository.findAccount(id);if(current==null)throw new IllegalArgumentException("小红书账号不存在");if(dto==null)throw new IllegalArgumentException("账号配置不能为空");String name=required(dto.getDisplayName(),"账号名称",100);String handle=optional(dto.getAccountHandle(),120);String publishMode=mode(dto.getPublishMode());boolean enabled=dto.getEnabled()==null?truth(current.get("enabled")):dto.getEnabled();if(!repository.updateAccount(id,name,handle,publishMode,enabled))throw new IllegalStateException("账号配置更新失败");return com.aiprovider.logging.BusinessOperationLogger.success("service.ContentOperationsService.updateAccountDetails", account(id));}
 
     @Transactional
-    public void archiveAccount(long id){if(!repository.archiveAccount(id))throw new IllegalArgumentException("小红书账号不存在或已经删除");}
+    public void archiveAccount(long id){
+        com.aiprovider.logging.BusinessOperationLogger.start("service.ContentOperationsService.archiveAccount", new String[] { "id" }, new Object[] { id });
+        if(!repository.archiveAccount(id))throw new IllegalArgumentException("小红书账号不存在或已经删除");}
 
     @Transactional
     public ContentOperationSettingsVO updateSettings(ContentOperationSettingsDTO dto){
-        if(dto==null||dto.getAutomationEnabled()==null) throw new IllegalArgumentException("自动运行开关不能为空");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.ContentOperationsService.updateSettings", new String[] { "dto" }, new Object[] { dto });
+    if(dto==null||dto.getAutomationEnabled()==null) throw new IllegalArgumentException("自动运行开关不能为空");
         Map<String,Object> currentSettings=repository.findSettings();if(currentSettings==null)throw new IllegalStateException("内容运营设置不存在");
         int crawl=dto.getCrawlIntervalMinutes()==null?240:dto.getCrawlIntervalMinutes(); int comments=dto.getCommentIntervalMinutes()==null?30:dto.getCommentIntervalMinutes();
         positive(crawl,"采集周期");positive(comments,"评论周期");
         ContentOperationsMapper.SettingsRecord record=new ContentOperationsMapper.SettingsRecord(); record.setAutomationEnabled(dto.getAutomationEnabled());
         record.setDefaultPublishMode(mode(dto.getDefaultPublishMode()));record.setCrawlIntervalMinutes(crawl);record.setCommentIntervalMinutes(comments);
         String contentModel=dto.getContentModel()==null?text(currentSettings.get("contentModel")):required(dto.getContentModel(),"内容模型",100);
-        record.setContentModel(contentModel);repository.updateSettings(record);repository.updateAllSourcePollIntervals(crawl);return settingsFrom(repository.findSettings());
+        record.setContentModel(contentModel);repository.updateSettings(record);repository.updateAllSourcePollIntervals(crawl);return com.aiprovider.logging.BusinessOperationLogger.success("service.ContentOperationsService.updateSettings", settingsFrom(repository.findSettings()));
     }
 
-    public Map<String,Object> publicationDetails(long id){Map<String,Object> result=repository.findPublicationFullDetails(id);if(result==null)throw new IllegalArgumentException("发布任务不存在");return result;}
-    public List<Map<String,Object>> collectionHistory(String query,Long sourceId,int limit){String normalized=query==null||query.trim().isEmpty()?null:query.trim();return repository.searchContentItems(normalized,sourceId,bounded(limit,1,200));}
-    public List<Map<String,Object>> automationRuns(int limit){return repository.findRecentOperationRuns(bounded(limit,1,100));}
+    public Map<String,Object> publicationDetails(long id){
+        com.aiprovider.logging.BusinessOperationLogger.start("service.ContentOperationsService.publicationDetails", new String[] { "id" }, new Object[] { id });
+        Map<String,Object> result=repository.findPublicationFullDetails(id);if(result==null)throw new IllegalArgumentException("发布任务不存在");return com.aiprovider.logging.BusinessOperationLogger.success("service.ContentOperationsService.publicationDetails", result);}
+    public List<Map<String,Object>> collectionHistory(String query,Long sourceId,int limit){
+        com.aiprovider.logging.BusinessOperationLogger.start("service.ContentOperationsService.collectionHistory", new String[] { "query", "sourceId", "limit" }, new Object[] { query, sourceId, limit });
+        String normalized=query==null||query.trim().isEmpty()?null:query.trim();return com.aiprovider.logging.BusinessOperationLogger.success("service.ContentOperationsService.collectionHistory", repository.searchContentItems(normalized,sourceId,bounded(limit,1,200)));}
+    public List<Map<String,Object>> automationRuns(int limit){
+        com.aiprovider.logging.BusinessOperationLogger.start("service.ContentOperationsService.automationRuns", new String[] { "limit" }, new Object[] { limit });
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.ContentOperationsService.automationRuns", repository.findRecentOperationRuns(bounded(limit,1,100)));}
 
     private List<ContentAccountVO> accounts(){List<ContentAccountVO> result=new ArrayList<>();for(Map<String,Object> row:repository.findAccounts())result.add(accountFrom(row));return result;}
     private List<ContentCollectionAccountVO> collectionAccounts(){List<ContentCollectionAccountVO> result=new ArrayList<>();for(Map<String,Object> r:repository.findCollectionAccounts()){boolean linked=r.get("platformAccountId")!=null;result.add(new ContentCollectionAccountVO(number(r.get("id")),text(r.get("platform")),text(r.get("displayName")),text(r.get("adapterType")),linked,linked?"账号中心":"尚未绑定",truth(r.get("enabled"))));}return result;}

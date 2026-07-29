@@ -22,18 +22,22 @@ public class PromptTranslationService {
     }
 
     public PromptTranslationVO translate(PromptTranslationDTO dto) {
-        if (dto == null) throw new IllegalArgumentException("Prompt 不能为空");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.PromptTranslationService.translate", new String[] { "dto" }, new Object[] { dto });
+    if (dto == null) throw new IllegalArgumentException("Prompt 不能为空");
         String positive = validate(dto.getPositivePrompt(), "正向 Prompt");
         String negative = validate(dto.getNegativePrompt(), "反向 Prompt");
         TranslationCatalog current = catalog();
         String cachedPositive = proseTranslation.findCached(positive);
         String cachedNegative = proseTranslation.findCached(negative);
-        return new PromptTranslationVO(
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.PromptTranslationService.translate", new PromptTranslationVO(
                 cachedPositive == null ? translate(positive, current.positive) : cachedPositive,
-                cachedNegative == null ? translate(negative, current.negative) : cachedNegative);
+                cachedNegative == null ? translate(negative, current.negative) : cachedNegative));
     }
 
-    public void invalidate() { catalog = null; }
+    public void invalidate() {
+        com.aiprovider.logging.BusinessOperationLogger.start("service.PromptTranslationService.invalidate", new String[] {}, new Object[] {});
+        catalog = null; com.aiprovider.logging.BusinessOperationLogger.success("service.PromptTranslationService.invalidate", null);
+}
 
     private TranslationCatalog catalog() {
         TranslationCatalog current = catalog;

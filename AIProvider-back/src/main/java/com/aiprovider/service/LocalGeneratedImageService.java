@@ -23,7 +23,8 @@ public class LocalGeneratedImageService {
 
     @Transactional
     public LocalGeneratedImageBatchResultVO saveBatch(LocalGeneratedImageBatchDTO dto) {
-        String platform = platform(dto == null ? null : dto.getPlatform());
+    com.aiprovider.logging.BusinessOperationLogger.start("service.LocalGeneratedImageService.saveBatch", new String[] { "dto" }, new Object[] { dto });
+    String platform = platform(dto == null ? null : dto.getPlatform());
         List<LocalGeneratedImageItemDTO> items = dto == null || dto.getItems() == null ? Collections.emptyList() : dto.getItems();
         if (items.isEmpty() || items.size() > 100) throw new IllegalArgumentException("本机生成图片记录数量必须在 1 到 100 之间");
         Set<String> paths = new HashSet<>();
@@ -59,45 +60,49 @@ public class LocalGeneratedImageService {
             throw new IllegalStateException("本机图片批量保存后未返回全部数据库 ID");
         }
         log.info("local_image_batch_saved platform={} requested={} saved={} ids={}", platform, items.size(), rows.size(), recordIds(persisted));
-        return new LocalGeneratedImageBatchResultVO(rows.size(), persisted);
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.LocalGeneratedImageService.saveBatch", new LocalGeneratedImageBatchResultVO(rows.size(), persisted));
     }
 
     public GalleryRecordPageVO page(String platformValue, int page, int pageSize, String statusValue) {
-        String platform = platform(platformValue);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.LocalGeneratedImageService.page", new String[] { "platformValue", "page", "pageSize", "statusValue" }, new Object[] { platformValue, page, pageSize, statusValue });
+    String platform = platform(platformValue);
         if (page < 1) throw new IllegalArgumentException("page 必须大于等于 1");
         if (pageSize < 1 || pageSize > 100) throw new IllegalArgumentException("pageSize 必须在 1 到 100 之间");
         String status = status(statusValue);
         long total = repository.count(platform, status);
         long pages = total == 0 ? 0 : (total + pageSize - 1) / pageSize;
         int currentPage = pages == 0 ? 1 : (int)Math.min(page, pages);
-        return new GalleryRecordPageVO(repository.findPage(platform, status, pageSize, (currentPage - 1) * pageSize), total, currentPage, pageSize);
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.LocalGeneratedImageService.page", new GalleryRecordPageVO(repository.findPage(platform, status, pageSize, (currentPage - 1) * pageSize), total, currentPage, pageSize));
     }
 
     @Transactional
     public int trash(LocalGeneratedImageIdsDTO dto) {
-        String platform = platform(dto == null ? null : dto.getPlatform());
+    com.aiprovider.logging.BusinessOperationLogger.start("service.LocalGeneratedImageService.trash", new String[] { "dto" }, new Object[] { dto });
+    String platform = platform(dto == null ? null : dto.getPlatform());
         List<Long> ids = validIds(dto);
         int affected = repository.trash(platform, ids);
         logMutation("trash", platform, ids, affected);
-        return affected;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.LocalGeneratedImageService.trash", affected);
     }
 
     @Transactional
     public int restore(LocalGeneratedImageIdsDTO dto) {
-        String platform = platform(dto == null ? null : dto.getPlatform());
+    com.aiprovider.logging.BusinessOperationLogger.start("service.LocalGeneratedImageService.restore", new String[] { "dto" }, new Object[] { dto });
+    String platform = platform(dto == null ? null : dto.getPlatform());
         List<Long> ids = validIds(dto);
         int affected = repository.restore(platform, ids);
         logMutation("restore", platform, ids, affected);
-        return affected;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.LocalGeneratedImageService.restore", affected);
     }
 
     @Transactional
     public int delete(LocalGeneratedImageIdsDTO dto) {
-        String platform = platform(dto == null ? null : dto.getPlatform());
+    com.aiprovider.logging.BusinessOperationLogger.start("service.LocalGeneratedImageService.delete", new String[] { "dto" }, new Object[] { dto });
+    String platform = platform(dto == null ? null : dto.getPlatform());
         List<Long> ids = validIds(dto);
         int affected = repository.delete(platform, ids);
         logMutation("delete", platform, ids, affected);
-        return affected;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.LocalGeneratedImageService.delete", affected);
     }
 
     private static void validate(LocalGeneratedImageItemDTO item) {

@@ -36,6 +36,11 @@
             <AppenderRef ref="ApplicationFile"/>
             <AppenderRef ref="ErrorFile"/>
         </Logger>
+        <Logger name="com.aiprovider.logging.BusinessOperationLogger" level="DEBUG" additivity="false">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="ApplicationFile"/>
+            <AppenderRef ref="ErrorFile"/>
+        </Logger>
         <Logger name="com.aiprovider" level="INFO" additivity="false">
             <AppenderRef ref="Console"/>
             <AppenderRef ref="ApplicationFile"/>

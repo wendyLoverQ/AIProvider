@@ -23,17 +23,18 @@ public class TencentRemoteMonitorService {
     }
 
     public Snapshot current() {
-        try {
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TencentRemoteMonitorService.current", new String[] {}, new Object[] {});
+    try {
             JsonNode root = http.getForObject(summaryUrl, JsonNode.class);
             JsonNode data = root == null ? null : root.path("data");
-            if (data == null || data.isMissingNode() || data.isNull()) return Snapshot.unavailable("INVALID_REMOTE_RESPONSE");
-            return new Snapshot(
+            if (data == null || data.isMissingNode() || data.isNull()) return com.aiprovider.logging.BusinessOperationLogger.success("service.TencentRemoteMonitorService.current", Snapshot.unavailable("INVALID_REMOTE_RESPONSE"));
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.TencentRemoteMonitorService.current", new Snapshot(
                 text(data.path("health"), "status", "UNKNOWN"),
                 time(data.path("health").path("checkedAt")),
                 resource(data.path("memory")), resource(data.path("disk")), true, null
-            );
+            ));
         } catch (Exception exception) {
-            return Snapshot.unavailable("TENCENT_MONITOR_OFFLINE");
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.TencentRemoteMonitorService.current", Snapshot.unavailable("TENCENT_MONITOR_OFFLINE"));
         }
     }
 

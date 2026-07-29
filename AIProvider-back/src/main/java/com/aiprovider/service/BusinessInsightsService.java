@@ -15,7 +15,8 @@ public class BusinessInsightsService {
     }
 
     public Map<String, Object> getCommand() {
-        Map<String, Object> result = new LinkedHashMap<>();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.BusinessInsightsService.getCommand", new String[] {}, new Object[] {});
+    Map<String, Object> result = new LinkedHashMap<>();
         result.put("counts", getCounts());
         result.put("runtime", insightsRepo.runtimeState());
         result.put("currentRoleId", insightsRepo.currentRoleId());
@@ -32,11 +33,12 @@ public class BusinessInsightsService {
         }
         result.put("voiceRoles", roles);
         result.put("currentMaid", insightsRepo.currentMaidState());
-        return result;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.BusinessInsightsService.getCommand", result);
     }
 
     public Map<String, Object> getMaidRole(String roleId) {
-        String normalizedRoleId = roleId == null ? "" : roleId.trim();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.BusinessInsightsService.getMaidRole", new String[] { "roleId" }, new Object[] { roleId });
+    String normalizedRoleId = roleId == null ? "" : roleId.trim();
         if (!normalizedRoleId.matches("[A-Za-z0-9_-]{1,96}")) {
             throw new IllegalArgumentException("无效的角色 ID");
         }
@@ -48,7 +50,7 @@ public class BusinessInsightsService {
         result.put("daily", insightsRepo.maidRoleDaily(normalizedRoleId));
         result.put("recentCalls", insightsRepo.maidRoleRecentCalls(normalizedRoleId));
         result.put("businesses", insightsRepo.activeLlmBusinesses());
-        return result;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.BusinessInsightsService.getMaidRole", result);
     }
 
     private Map<String, Long> getCounts() {

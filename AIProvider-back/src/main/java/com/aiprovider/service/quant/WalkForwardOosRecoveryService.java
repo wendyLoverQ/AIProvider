@@ -31,8 +31,12 @@ public class WalkForwardOosRecoveryService {
   }
 
   public void recoverBatch(int limit) {
-    List<WalkForwardStudyRow> rows = studies.findTerminalMissingOosAggregate(limit);
-    if (rows.isEmpty()) return;
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.WalkForwardOosRecoveryService.recoverBatch", new String[] { "limit" }, new Object[] { limit });
+  List<WalkForwardStudyRow> rows = studies.findTerminalMissingOosAggregate(limit);
+    if (rows.isEmpty()) {
+        com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardOosRecoveryService.recoverBatch", null);
+        return;
+    }
     Map<String, WalkForwardStudySnapshot> loaded;
     try {
       loaded = snapshots.loadMany(rows, true);
@@ -40,13 +44,20 @@ public class WalkForwardOosRecoveryService {
       if (WalkForwardOosRecoveryErrorClassifier.classify(exception)
           == WalkForwardOosRecoveryErrorClassifier.Kind.RETRYABLE_BATCH_ERROR) {
         log.error("operation=walk-forward-oos-recovery result=retryable_batch", exception);
-        return;
+        {
+            com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardOosRecoveryService.recoverBatch", null);
+            return;
+        }
       }
       log.warn("operation=walk-forward-oos-recovery result=permanent_batch_fallback");
       recoverIndividually(rows);
-      return;
+      {
+          com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardOosRecoveryService.recoverBatch", null);
+          return;
+      }
     }
     recoverLoaded(rows, loaded);
+    com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardOosRecoveryService.recoverBatch", null);
   }
 
   private void recoverLoaded(List<WalkForwardStudyRow> rows, Map<String, WalkForwardStudySnapshot> loaded) {

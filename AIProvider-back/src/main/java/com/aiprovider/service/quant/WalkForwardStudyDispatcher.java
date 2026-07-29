@@ -53,23 +53,33 @@ public class WalkForwardStudyDispatcher {
 
   @Scheduled(fixedDelayString = "${quant.walk-forward.dispatcher-fixed-delay-ms:3000}")
   public void tick() {
-    Instant now = Instant.now();
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.WalkForwardStudyDispatcher.tick", new String[] {}, new Object[] {});
+  Instant now = Instant.now();
     try {
       int reset = folds.resetStaleCreatingClaims(now.minusSeconds(properties.getStaleClaimSeconds()), now);
       log.info("operation=walk-forward-reset-stale affectedRows={} result=success", reset);
     } catch (RuntimeException failure) {
       log.error("operation=walk-forward-reset-stale result=retryable", failure);
-      return;
+      {
+          com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardStudyDispatcher.tick", null);
+          return;
+      }
     }
     List<WalkForwardStudyRow> studyRows = studies.findNonTerminal();
-    if (studyRows.isEmpty()) return;
+    if (studyRows.isEmpty()) {
+        com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardStudyDispatcher.tick", null);
+        return;
+    }
     List<String> studyIds = studyRows.stream().map(row -> row.studyId).toList();
     List<WalkForwardFoldRow> foldRows;
     try {
       foldRows = folds.findAllByStudyIds(studyIds);
     } catch (RuntimeException failure) {
       log.error("operation=walk-forward-fold-batch-load result=retryable", failure);
-      return;
+      {
+          com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardStudyDispatcher.tick", null);
+          return;
+      }
     }
     Map<String, WalkForwardStudySnapshot> loaded;
     try {
@@ -78,7 +88,10 @@ public class WalkForwardStudyDispatcher {
       WalkForwardDispatchErrorClassifier.Classification classified =
           WalkForwardDispatchErrorClassifier.classify(failure);
       log.error("operation=walk-forward-batch-load result=" + classified.kind() + " errorCode=" + classified.errorCode(), failure);
-      if (classified.kind() == WalkForwardDispatchErrorClassifier.Kind.RETRYABLE) return;
+      if (classified.kind() == WalkForwardDispatchErrorClassifier.Kind.RETRYABLE) {
+          com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardStudyDispatcher.tick", null);
+          return;
+      }
       loaded = loadStudiesIndependently(studyRows, classified);
     }
 
@@ -102,7 +115,10 @@ public class WalkForwardStudyDispatcher {
         for (BacktestRunRow run : runs.findByRunIds(runIds)) validationRuns.put(run.runId, run);
       } catch (RuntimeException failure) {
         log.error("operation=walk-forward-validation-batch-load result=retryable", failure);
-        return;
+        {
+            com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardStudyDispatcher.tick", null);
+            return;
+        }
       }
       for (WaitingWork work : waiting) {
         try {
@@ -113,6 +129,7 @@ public class WalkForwardStudyDispatcher {
       }
     }
     refreshAggregatesAfterDispatch(studyRows);
+    com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardStudyDispatcher.tick", null);
   }
 
   void recoverStaleClaims(long staleClaimSeconds) {

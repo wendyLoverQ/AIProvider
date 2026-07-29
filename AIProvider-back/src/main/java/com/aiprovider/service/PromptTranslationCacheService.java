@@ -19,19 +19,21 @@ public class PromptTranslationCacheService {
     public PromptTranslationCacheService(PromptTranslationCacheRepository repository) { this.repository = repository; }
 
     public String find(String sourceText) {
-        if (sourceText == null || sourceText.isEmpty()) return null;
+    com.aiprovider.logging.BusinessOperationLogger.start("service.PromptTranslationCacheService.find", new String[] { "sourceText" }, new Object[] { sourceText });
+    if (sourceText == null || sourceText.isEmpty()) return com.aiprovider.logging.BusinessOperationLogger.success("service.PromptTranslationCacheService.find", null);
         PromptTranslationCacheRepository.CacheEntry entry = repository.find(hash(sourceText), sourceText.length(), TARGET_LANGUAGE, PROVIDER);
-        if (entry == null) return null;
+        if (entry == null) return com.aiprovider.logging.BusinessOperationLogger.success("service.PromptTranslationCacheService.find", null);
         int affectedRows = repository.recordHit(entry.getId());
         if (affectedRows != 1) {
             log.warn("prompt_translation_cache_hit_mismatch operation=recordHit cacheId={} requestedCount=1 affectedRows={}", entry.getId(), affectedRows);
             throw new IllegalStateException("翻译缓存命中计数更新失败");
         }
-        return entry.getTranslatedText();
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.PromptTranslationCacheService.find", entry.getTranslatedText());
     }
 
     public int save(String sourceText, String translatedText) {
-        if (sourceText == null || sourceText.isEmpty() || translatedText == null || translatedText.isEmpty())
+    com.aiprovider.logging.BusinessOperationLogger.start("service.PromptTranslationCacheService.save", new String[] { "sourceText", "translatedText" }, new Object[] { sourceText, translatedText });
+    if (sourceText == null || sourceText.isEmpty() || translatedText == null || translatedText.isEmpty())
             throw new IllegalArgumentException("翻译缓存内容不能为空");
         int affectedRows = repository.save(hash(sourceText), sourceText.length(), TARGET_LANGUAGE, PROVIDER, translatedText);
         if (affectedRows < 1) {
@@ -39,7 +41,7 @@ public class PromptTranslationCacheService {
                     TARGET_LANGUAGE, PROVIDER, affectedRows);
             throw new IllegalStateException("翻译缓存写入失败");
         }
-        return affectedRows;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.PromptTranslationCacheService.save", affectedRows);
     }
 
     private String hash(String value) {

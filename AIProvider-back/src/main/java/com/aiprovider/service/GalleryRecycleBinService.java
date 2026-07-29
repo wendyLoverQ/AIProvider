@@ -9,7 +9,8 @@ public class GalleryRecycleBinService {
     private final GalleryRecycleBinRepository repository;
     public GalleryRecycleBinService(GalleryRecycleBinRepository repository) { this.repository = repository; }
     public GalleryRecordPageVO page(String platformValue, int page, int pageSize) {
-        String platform;
+    com.aiprovider.logging.BusinessOperationLogger.start("service.GalleryRecycleBinService.page", new String[] { "platformValue", "page", "pageSize" }, new Object[] { platformValue, page, pageSize });
+    String platform;
         if ("windows".equalsIgnoreCase(platformValue)) platform = "Windows";
         else if ("mac".equalsIgnoreCase(platformValue) || "macos".equalsIgnoreCase(platformValue)) platform = "macOS";
         else throw new IllegalArgumentException("platform 仅支持 Windows 或 macOS");
@@ -18,6 +19,6 @@ public class GalleryRecycleBinService {
         long total = repository.count(platform);
         long pages = total == 0 ? 0 : (total + pageSize - 1) / pageSize;
         int currentPage = pages == 0 ? 1 : (int)Math.min(page, pages);
-        return new GalleryRecordPageVO(repository.findPage(platform, pageSize, (currentPage - 1) * pageSize), total, currentPage, pageSize);
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.GalleryRecycleBinService.page", new GalleryRecordPageVO(repository.findPage(platform, pageSize, (currentPage - 1) * pageSize), total, currentPage, pageSize));
     }
 }

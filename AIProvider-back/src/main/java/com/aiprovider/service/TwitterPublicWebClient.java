@@ -50,7 +50,8 @@ public class TwitterPublicWebClient {
     }
 
     public String normalizeCredential(String input) {
-        String value = input == null ? "" : input.trim();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterPublicWebClient.normalizeCredential", new String[] { "input" }, new Object[] { input });
+    String value = input == null ? "" : input.trim();
         if (value.isEmpty()) throw new ContentSourceException("TWITTER_SESSION_MISSING", "X Cookie 不能为空");
         Map<String, String> cookies = new LinkedHashMap<>();
         try {
@@ -67,11 +68,12 @@ public class TwitterPublicWebClient {
         ObjectNode normalized = json.createObjectNode();
         normalized.put("auth_token", cookies.get("auth_token"));
         normalized.put("ct0", cookies.get("ct0"));
-        return normalized.toString();
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterPublicWebClient.normalizeCredential", normalized.toString());
     }
 
     public TwitterFetchedPost fetchLatest(String handle, String credential) {
-        try (Playwright playwright = Playwright.create();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterPublicWebClient.fetchLatest", new String[] { "handle", "credential" }, new Object[] { handle, credential });
+    try (Playwright playwright = Playwright.create();
              Browser browser = launch(playwright);
              BrowserContext context = browser.newContext(new Browser.NewContextOptions()
                      .setViewportSize(1280, 720)
@@ -101,7 +103,7 @@ public class TwitterPublicWebClient {
             raw.put("id", id);
             raw.put("text", text);
             raw.put("pageUrl", page.url());
-            return new TwitterFetchedPost(id, text, "https://x.com/" + handle + "/status/" + id, publishedAt, raw);
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterPublicWebClient.fetchLatest", new TwitterFetchedPost(id, text, "https://x.com/" + handle + "/status/" + id, publishedAt, raw));
         } catch (ContentSourceException e) {
             throw e;
         } catch (PlaywrightException e) {

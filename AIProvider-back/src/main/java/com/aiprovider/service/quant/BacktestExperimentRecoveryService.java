@@ -24,8 +24,10 @@ public class BacktestExperimentRecoveryService {
 
   @EventListener(ApplicationReadyEvent.class)
   public void recover() {
-    Instant now = Instant.now();
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.BacktestExperimentRecoveryService.recover", new String[] {}, new Object[] {});
+  Instant now = Instant.now();
     candidates.resetStaleClaims(now.minusSeconds(properties.getStaleClaimSeconds()), now);
     dispatcher.tick();
+    com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestExperimentRecoveryService.recover", null);
   }
 }

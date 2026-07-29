@@ -22,7 +22,8 @@ public class AssetService {
 
     @Transactional
     public AssetBatchResultVO saveBatch(AssetBatchDTO dto) {
-        String platform = platform(dto == null ? null : dto.getPlatform());
+    com.aiprovider.logging.BusinessOperationLogger.start("service.AssetService.saveBatch", new String[] { "dto" }, new Object[] { dto });
+    String platform = platform(dto == null ? null : dto.getPlatform());
         List<AssetItemDTO> items = dto == null || dto.getItems() == null ? Collections.emptyList() : dto.getItems();
         if (items.isEmpty() || items.size() > 500) throw new IllegalArgumentException("资产数量必须在 1 到 500 之间");
         Set<String> paths = new HashSet<>();
@@ -62,11 +63,12 @@ public class AssetService {
         repository.upsertBatch(platform, rows);
         List<AssetVO> persisted = new ArrayList<>();
         for (Map<String,Object> row : repository.findByPathHashes(platform, pathHashes)) persisted.add(toVO(row));
-        return new AssetBatchResultVO(rows.size(), persisted);
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.AssetService.saveBatch", new AssetBatchResultVO(rows.size(), persisted));
     }
 
     public AssetPageVO page(String platform, int page, int pageSize, String status) {
-        String normalizedPlatform = platform(platform);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.AssetService.page", new String[] { "platform", "page", "pageSize", "status" }, new Object[] { platform, page, pageSize, status });
+    String normalizedPlatform = platform(platform);
         if (page < 1) throw new IllegalArgumentException("page 必须大于等于 1");
         if (pageSize < 1 || pageSize > 100) throw new IllegalArgumentException("pageSize 必须在 1 到 100 之间");
         String normalizedStatus = status == null || status.trim().isEmpty() ? null : status.trim().toUpperCase(Locale.ROOT);
@@ -74,39 +76,44 @@ public class AssetService {
             throw new IllegalArgumentException("status 仅支持 ACTIVE、PENDING 或 TRASHED");
         List<AssetVO> items = new ArrayList<>();
         for (Map<String,Object> row : repository.findPage(normalizedPlatform, normalizedStatus, pageSize, (page - 1) * pageSize)) items.add(toVO(row));
-        return new AssetPageVO(items, repository.count(normalizedPlatform, normalizedStatus), page, pageSize);
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.AssetService.page", new AssetPageVO(items, repository.count(normalizedPlatform, normalizedStatus), page, pageSize));
     }
 
     public List<AssetPromptVO> imagePromptPool(String platform) {
-        List<AssetPromptVO> result = new ArrayList<>();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.AssetService.imagePromptPool", new String[] { "platform" }, new Object[] { platform });
+    List<AssetPromptVO> result = new ArrayList<>();
         for (Map<String,Object> row : repository.findImagePromptPool(platform(platform)))
             result.add(new AssetPromptVO(text(row.get("prompt")), text(row.get("negativePrompt")), number(row.get("weight"))));
-        return result;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.AssetService.imagePromptPool", result);
     }
 
     @Transactional
     public int delete(AssetDeleteDTO dto) {
-        return repository.deleteByIds(platform(dto == null ? null : dto.getPlatform()), validIds(dto));
+    com.aiprovider.logging.BusinessOperationLogger.start("service.AssetService.delete", new String[] { "dto" }, new Object[] { dto });
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.AssetService.delete", repository.deleteByIds(platform(dto == null ? null : dto.getPlatform()), validIds(dto)));
     }
 
     @Transactional
     public int trash(AssetDeleteDTO dto) {
-        return repository.trashByIds(platform(dto == null ? null : dto.getPlatform()), validIds(dto));
+    com.aiprovider.logging.BusinessOperationLogger.start("service.AssetService.trash", new String[] { "dto" }, new Object[] { dto });
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.AssetService.trash", repository.trashByIds(platform(dto == null ? null : dto.getPlatform()), validIds(dto)));
     }
 
     @Transactional
     public int restore(AssetDeleteDTO dto) {
-        return repository.restoreByIds(platform(dto == null ? null : dto.getPlatform()), validIds(dto));
+    com.aiprovider.logging.BusinessOperationLogger.start("service.AssetService.restore", new String[] { "dto" }, new Object[] { dto });
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.AssetService.restore", repository.restoreByIds(platform(dto == null ? null : dto.getPlatform()), validIds(dto)));
     }
 
     @Transactional
     public int updateStatus(AssetStatusDTO dto) {
-        String platform = platform(dto == null ? null : dto.getPlatform());
+    com.aiprovider.logging.BusinessOperationLogger.start("service.AssetService.updateStatus", new String[] { "dto" }, new Object[] { dto });
+    String platform = platform(dto == null ? null : dto.getPlatform());
         List<Long> valid = validIds(dto == null ? null : dto.getIds());
         String status = dto == null || dto.getStatus() == null ? null : dto.getStatus().trim().toUpperCase(Locale.ROOT);
         if (status == null || !WRITABLE_STATUSES.contains(status))
             throw new IllegalArgumentException("status 仅支持 ACTIVE 或 PENDING");
-        return repository.updateStatus(platform, valid, status);
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.AssetService.updateStatus", repository.updateStatus(platform, valid, status));
     }
 
     private static List<Long> validIds(AssetDeleteDTO dto) {

@@ -16,12 +16,14 @@ public class BacktestExperimentCreationService {
 
   @Transactional
   public BacktestExperimentDtos.CreateResponse create(BacktestExperimentCreateRequest request) {
-    return experiments.create(request);
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.BacktestExperimentCreationService.create", new String[] { "request" }, new Object[] { request });
+  return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestExperimentCreationService.create", experiments.create(request));
   }
 
   @Transactional
   public BacktestExperimentDtos.CreateResponse createWithExperimentId(
       String experimentId, BacktestExperimentCreateRequest request) {
-    return experiments.createWithExperimentId(experimentId, request);
+      com.aiprovider.logging.BusinessOperationLogger.start("service.quant.BacktestExperimentCreationService.createWithExperimentId", new String[] { "experimentId", "request" }, new Object[] { experimentId, request });
+      return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestExperimentCreationService.createWithExperimentId", experiments.createWithExperimentId(experimentId, request));
   }
 }

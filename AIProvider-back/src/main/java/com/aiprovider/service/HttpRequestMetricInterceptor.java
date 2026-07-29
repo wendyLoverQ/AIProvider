@@ -19,15 +19,23 @@ public class HttpRequestMetricInterceptor implements HandlerInterceptor {
     public HttpRequestMetricInterceptor(MonitorRepository repository){this.repository=repository;}
 
     @Override public boolean preHandle(HttpServletRequest request,HttpServletResponse response,Object handler){
-        if(included(request))request.setAttribute(START_NANOS,System.nanoTime());
-        return true;
+    com.aiprovider.logging.BusinessOperationLogger.start("service.HttpRequestMetricInterceptor.preHandle", new String[] { "request", "response", "handler" }, new Object[] { request, response, handler });
+    if(included(request))request.setAttribute(START_NANOS,System.nanoTime());
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.HttpRequestMetricInterceptor.preHandle", true);
     }
 
     @Override public void afterCompletion(HttpServletRequest request,HttpServletResponse response,Object handler,Exception exception){
-        Object started=request.getAttribute(START_NANOS);if(!(started instanceof Long))return;
+    com.aiprovider.logging.BusinessOperationLogger.start("service.HttpRequestMetricInterceptor.afterCompletion", new String[] { "request", "response", "handler", "exception" }, new Object[] { request, response, handler, exception });
+    Object started=request.getAttribute(START_NANOS);if(!(started instanceof Long)){
+        com.aiprovider.logging.BusinessOperationLogger.success("service.HttpRequestMetricInterceptor.afterCompletion", null);
+        return;
+    }
         long durationMs=Math.max(0,(System.nanoTime()-(Long)started)/1_000_000L);
         Object matched=request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
-        if(matched==null)return;
+        if(matched==null){
+            com.aiprovider.logging.BusinessOperationLogger.success("service.HttpRequestMetricInterceptor.afterCompletion", null);
+            return;
+        }
         String route=String.valueOf(matched);
         int status=exception!=null&&response.getStatus()<400?500:response.getStatus();
         try {

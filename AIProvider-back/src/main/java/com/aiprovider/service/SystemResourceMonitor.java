@@ -16,7 +16,8 @@ public class SystemResourceMonitor implements ISystemResourceMonitor {
     public SystemResourceMonitor(@Value("${monitor.disk-path:.}") String diskPath) { this.diskPath = new File(diskPath); }
 
     @Override public MonitorSummaryVO.Resource memory() {
-        try {
+    com.aiprovider.logging.BusinessOperationLogger.start("service.SystemResourceMonitor.memory", new String[] {}, new Object[] {});
+    try {
             if (Files.isReadable(Paths.get("/proc/meminfo"))) {
                 long total = 0, available = 0;
                 List<String> lines = Files.readAllLines(Paths.get("/proc/meminfo"));
@@ -25,15 +26,15 @@ public class SystemResourceMonitor implements ISystemResourceMonitor {
                     else if (line.startsWith("MemAvailable:")) available = kibibytes(line);
                 }
                 if (total > 0 && available >= 0)
-                    return new MonitorSummaryVO.Resource(Math.max(0, total - available), total, true, null);
+                    return com.aiprovider.logging.BusinessOperationLogger.success("service.SystemResourceMonitor.memory", new MonitorSummaryVO.Resource(Math.max(0, total - available), total, true, null));
             }
             com.sun.management.OperatingSystemMXBean bean = (com.sun.management.OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
             long total = bean.getTotalPhysicalMemorySize();
             long free = bean.getFreePhysicalMemorySize();
             if (total <= 0 || free < 0) throw new IllegalStateException("memory metrics unavailable");
-            return new MonitorSummaryVO.Resource(Math.max(0, total - free), total, true, null);
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.SystemResourceMonitor.memory", new MonitorSummaryVO.Resource(Math.max(0, total - free), total, true, null));
         } catch (Exception exception) {
-            return new MonitorSummaryVO.Resource(null, null, false, "系统内存数据不可用");
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.SystemResourceMonitor.memory", new MonitorSummaryVO.Resource(null, null, false, "系统内存数据不可用"));
         }
     }
 
@@ -43,12 +44,13 @@ public class SystemResourceMonitor implements ISystemResourceMonitor {
     }
 
     @Override public MonitorSummaryVO.Resource disk() {
-        try {
+    com.aiprovider.logging.BusinessOperationLogger.start("service.SystemResourceMonitor.disk", new String[] {}, new Object[] {});
+    try {
             long total = diskPath.getTotalSpace(); long free = diskPath.getUsableSpace();
             if (total <= 0 || free < 0) throw new IllegalStateException("disk metrics unavailable");
-            return new MonitorSummaryVO.Resource(Math.max(0, total - free), total, true, null);
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.SystemResourceMonitor.disk", new MonitorSummaryVO.Resource(Math.max(0, total - free), total, true, null));
         } catch (Exception exception) {
-            return new MonitorSummaryVO.Resource(null, null, false, "磁盘数据不可用");
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.SystemResourceMonitor.disk", new MonitorSummaryVO.Resource(null, null, false, "磁盘数据不可用"));
         }
     }
 }

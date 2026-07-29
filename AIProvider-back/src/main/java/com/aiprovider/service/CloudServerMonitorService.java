@@ -33,8 +33,9 @@ public class CloudServerMonitorService {
     }
 
     public Map<String,CloudServerMonitorVO> current() {
-        Map<String,CloudServerMonitorVO> result=new LinkedHashMap<>();
-        result.put("tencent",tencent()); result.put("aws",aws()); return result;
+    com.aiprovider.logging.BusinessOperationLogger.start("service.CloudServerMonitorService.current", new String[] {}, new Object[] {});
+    Map<String,CloudServerMonitorVO> result=new LinkedHashMap<>();
+        result.put("tencent",tencent()); result.put("aws",aws()); return com.aiprovider.logging.BusinessOperationLogger.success("service.CloudServerMonitorService.current", result);
     }
 
     private CloudServerMonitorVO aws() {

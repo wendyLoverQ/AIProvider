@@ -27,14 +27,15 @@ public class WalkForwardOosCalculator {
 
   public WalkForwardOosCalculation calculate(WalkForwardStudyRow study, List<WalkForwardFoldRow> folds,
       Map<String, BacktestRunRow> runs, Map<String, List<BacktestEquityRow>> equities) {
-    if (study == null || folds == null || runs == null || equities == null) fail("WALK_FORWARD_OOS_INVALID", "OOS calculation input is incomplete");
+      com.aiprovider.logging.BusinessOperationLogger.start("service.quant.WalkForwardOosCalculator.calculate", new String[] { "study", "folds", "runs", "equities" }, new Object[] { study, folds, runs, equities });
+      if (study == null || folds == null || runs == null || equities == null) fail("WALK_FORWARD_OOS_INVALID", "OOS calculation input is incomplete");
     validateStudyAndFolds(study, folds);
     List<WalkForwardFoldRow> successful = folds.stream().filter(fold -> "COMPLETED".equals(fold.status))
         .sorted(Comparator.comparingInt(fold -> fold.foldIndex)).toList();
     int failed = folds.size() - successful.size();
     if (successful.isEmpty()) {
       if ("COMPLETED".equals(study.status) || "COMPLETED_WITH_FAILURES".equals(study.status)) fail("WALK_FORWARD_OOS_INVALID", "terminal study has no successful OOS folds");
-      return new WalkForwardOosCalculation(0, failed, true, null, null, null, null, null, List.of());
+      return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardOosCalculator.calculate", new WalkForwardOosCalculation(0, failed, true, null, null, null, null, null, List.of()));
     }
     BigDecimal previousEnd = BigDecimal.ONE, runningPeak = BigDecimal.ONE;
     BigDecimal fees = BigDecimal.ZERO, maximumDrawdown = BigDecimal.ZERO;
@@ -79,9 +80,9 @@ public class WalkForwardOosCalculator {
         .map(point -> new WalkForwardStudyDtos.OosPoint(point.pointIndex(), point.foldIndex(), point.openTime(),
             WalkForwardOosNumbers.normalize(point.indexRatio()), WalkForwardOosNumbers.normalize(point.drawdownRatio())))
         .toList();
-    return new WalkForwardOosCalculation(successful.size(), failed, failed > 0, trades,
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.quant.WalkForwardOosCalculator.calculate", new WalkForwardOosCalculation(successful.size(), failed, failed > 0, trades,
         WalkForwardOosNumbers.normalize(fees), WalkForwardOosNumbers.normalize(previousEnd.subtract(BigDecimal.ONE, MC)),
-        WalkForwardOosNumbers.normalize(maximumDrawdown), changes, normalizedPoints);
+        WalkForwardOosNumbers.normalize(maximumDrawdown), changes, normalizedPoints));
   }
 
   WalkForwardOosCalculation calculateForTerminalStatus(WalkForwardStudyRow study, String terminalStatus,

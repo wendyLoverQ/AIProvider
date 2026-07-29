@@ -49,43 +49,64 @@ public class RemoteCodexService {
         this.repository=repository;this.json=json;this.command=command;this.workingDirectory=workingDirectory;
     }
 
-    @PostConstruct public void recoverInterruptedTurns(){repository.recoverInterrupted(LocalDateTime.now());}
+    @PostConstruct public void recoverInterruptedTurns(){
+        com.aiprovider.logging.BusinessOperationLogger.start("service.RemoteCodexService.recoverInterruptedTurns", new String[] {}, new Object[] {});
+        repository.recoverInterrupted(LocalDateTime.now());com.aiprovider.logging.BusinessOperationLogger.success("service.RemoteCodexService.recoverInterruptedTurns", null);
+}
 
     public Map<String,Object> status() {
-        if(Duration.between(authCheckedAt,Instant.now()).getSeconds()>=10){loggedIn=checkLogin();authCheckedAt=Instant.now();}
+    com.aiprovider.logging.BusinessOperationLogger.start("service.RemoteCodexService.status", new String[] {}, new Object[] {});
+    if(Duration.between(authCheckedAt,Instant.now()).getSeconds()>=10){loggedIn=checkLogin();authCheckedAt=Instant.now();}
         Map<String,Object> value=new LinkedHashMap<String,Object>();value.put("available",Files.isExecutable(Paths.get(command))||"codex".equals(command));
-        value.put("loggedIn",loggedIn);value.put("loginState",loginState);value.put("loginOutput",loginOutput);value.put("workingDirectory",workingDirectory);return value;
+        value.put("loggedIn",loggedIn);value.put("loginState",loginState);value.put("loginOutput",loginOutput);value.put("workingDirectory",workingDirectory);return com.aiprovider.logging.BusinessOperationLogger.success("service.RemoteCodexService.status", value);
     }
     public Map<String,Object> startLogin() {
-        synchronized(this){if(loginProcess!=null&&loginProcess.isAlive())return status();loginOutput="";loginState="RUNNING";
-            loginWorker.submit(this::runDeviceLogin);}return status();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.RemoteCodexService.startLogin", new String[] {}, new Object[] {});
+    synchronized(this){if(loginProcess!=null&&loginProcess.isAlive())return com.aiprovider.logging.BusinessOperationLogger.success("service.RemoteCodexService.startLogin", status());loginOutput="";loginState="RUNNING";
+            loginWorker.submit(this::runDeviceLogin);}return com.aiprovider.logging.BusinessOperationLogger.success("service.RemoteCodexService.startLogin", status());
     }
-    public List<Map<String,Object>> list(){return repository.list();}
+    public List<Map<String,Object>> list(){
+        com.aiprovider.logging.BusinessOperationLogger.start("service.RemoteCodexService.list", new String[] {}, new Object[] {});
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.RemoteCodexService.list", repository.list());}
     public Map<String,Object> quota() {
-        if(!checkLogin())throw new RemoteCodexException("远程 Codex 尚未登录");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.RemoteCodexService.quota", new String[] {}, new Object[] {});
+    if(!checkLogin())throw new RemoteCodexException("远程 Codex 尚未登录");
         Process process=null;
         try {
             process=new ProcessBuilder(command,"app-server").redirectErrorStream(true).start();
             Process running=process;
             Future<Map<String,Object>> response=quotaWorker.submit(()->readQuota(running));
-            return response.get(15,TimeUnit.SECONDS);
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.RemoteCodexService.quota", response.get(15,TimeUnit.SECONDS));
         } catch(Exception exception) {
             throw new RemoteCodexException("Codex 额度读取失败："+(exception.getMessage()==null?"未知错误":exception.getMessage()));
         } finally { if(process!=null&&process.isAlive())process.destroyForcibly(); }
     }
-    public Map<String,Object> create(){String id=UUID.randomUUID().toString();repository.create(id,"新对话",LocalDateTime.now());return conversation(id);}
-    public Map<String,Object> conversation(String id){Map<String,Object> value=new LinkedHashMap<String,Object>(repository.get(id));value.put("messages",repository.messages(id));LiveTurn live=liveTurns.get(id);if(live!=null){value.put("liveMessage",live.message.toString());value.put("liveEvents",new ArrayList<Map<String,Object>>(live.events));value.put("model",live.model);value.put("turnId",live.turnId);}return value;}
+    public Map<String,Object> create(){
+        com.aiprovider.logging.BusinessOperationLogger.start("service.RemoteCodexService.create", new String[] {}, new Object[] {});
+        String id=UUID.randomUUID().toString();repository.create(id,"新对话",LocalDateTime.now());return com.aiprovider.logging.BusinessOperationLogger.success("service.RemoteCodexService.create", conversation(id));}
+    public Map<String,Object> conversation(String id){
+        com.aiprovider.logging.BusinessOperationLogger.start("service.RemoteCodexService.conversation", new String[] { "id" }, new Object[] { id });
+        Map<String,Object> value=new LinkedHashMap<String,Object>(repository.get(id));value.put("messages",repository.messages(id));LiveTurn live=liveTurns.get(id);if(live!=null){value.put("liveMessage",live.message.toString());value.put("liveEvents",new ArrayList<Map<String,Object>>(live.events));value.put("model",live.model);value.put("turnId",live.turnId);}return com.aiprovider.logging.BusinessOperationLogger.success("service.RemoteCodexService.conversation", value);}
     public Map<String,Object> send(String id,String prompt,String model) {
-        String text=prompt==null?"":prompt.trim();if(text.isEmpty())throw new IllegalArgumentException("请输入对话内容");if(text.length()>20000)throw new IllegalArgumentException("单条消息不能超过 20000 字");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.RemoteCodexService.send", new String[] { "id", "prompt", "model" }, new Object[] { id, prompt, model });
+    String text=prompt==null?"":prompt.trim();if(text.isEmpty())throw new IllegalArgumentException("请输入对话内容");if(text.length()>20000)throw new IllegalArgumentException("单条消息不能超过 20000 字");
         Map<String,Object> current=repository.get(id);if("RUNNING".equals(current.get("status")))throw new IllegalArgumentException("当前对话仍在执行，请等待回复完成");
         if(!checkLogin())throw new RemoteCodexException("远程 Codex 尚未登录");LocalDateTime now=LocalDateTime.now();repository.message(id,"user",text,now);repository.running(id,now);
-        String threadId=current.get("codexThreadId")==null?null:String.valueOf(current.get("codexThreadId"));turns.submit(()->runTurn(id,threadId,text,cleanModel(model)));return conversation(id);
+        String threadId=current.get("codexThreadId")==null?null:String.valueOf(current.get("codexThreadId"));turns.submit(()->runTurn(id,threadId,text,cleanModel(model)));return com.aiprovider.logging.BusinessOperationLogger.success("service.RemoteCodexService.send", conversation(id));
     }
 
-    public Map<String,Object> steer(String id,String prompt){String text=validatePrompt(prompt);LiveTurn live=requireLive(id);repository.message(id,"user",text,LocalDateTime.now());try{ObjectNode params=json.createObjectNode();params.put("threadId",live.threadId);params.put("expectedTurnId",live.turnId);params.set("input",input(text));live.server.request("turn/steer",params);event(live,"user_input","插话",text,"completed");publish(id);return conversation(id);}catch(Exception exception){throw new RemoteCodexException("Codex 插话失败："+message(exception));}}
-    public Map<String,Object> interrupt(String id){LiveTurn live=requireLive(id);try{ObjectNode params=json.createObjectNode();params.put("threadId",live.threadId);params.put("turnId",live.turnId);live.server.request("turn/interrupt",params);event(live,"turn","已请求停止","正在中断当前执行","inProgress");publish(id);return conversation(id);}catch(Exception exception){throw new RemoteCodexException("Codex 中断失败："+message(exception));}}
-    public Object models(){RemoteCodexAppServer server=null;try{server=new RemoteCodexAppServer(command,json,event->{},error->{});return json.convertValue(server.request("model/list",json.createObjectNode()),Map.class);}catch(Exception exception){throw new RemoteCodexException("Codex 模型读取失败："+message(exception));}finally{if(server!=null)server.close();}}
-    public SseEmitter subscribe(String id){repository.get(id);SseEmitter emitter=new SseEmitter(0L);streams.computeIfAbsent(id,key->new CopyOnWriteArrayList<SseEmitter>()).add(emitter);Runnable remove=()->streams.getOrDefault(id,new CopyOnWriteArrayList<SseEmitter>()).remove(emitter);emitter.onCompletion(remove);emitter.onTimeout(remove);emitter.onError(error->remove.run());sendEvent(id,emitter);return emitter;}
+    public Map<String,Object> steer(String id,String prompt){
+        com.aiprovider.logging.BusinessOperationLogger.start("service.RemoteCodexService.steer", new String[] { "id", "prompt" }, new Object[] { id, prompt });
+        String text=validatePrompt(prompt);LiveTurn live=requireLive(id);repository.message(id,"user",text,LocalDateTime.now());try{ObjectNode params=json.createObjectNode();params.put("threadId",live.threadId);params.put("expectedTurnId",live.turnId);params.set("input",input(text));live.server.request("turn/steer",params);event(live,"user_input","插话",text,"completed");publish(id);return com.aiprovider.logging.BusinessOperationLogger.success("service.RemoteCodexService.steer", conversation(id));}catch(Exception exception){throw new RemoteCodexException("Codex 插话失败："+message(exception));}}
+    public Map<String,Object> interrupt(String id){
+        com.aiprovider.logging.BusinessOperationLogger.start("service.RemoteCodexService.interrupt", new String[] { "id" }, new Object[] { id });
+        LiveTurn live=requireLive(id);try{ObjectNode params=json.createObjectNode();params.put("threadId",live.threadId);params.put("turnId",live.turnId);live.server.request("turn/interrupt",params);event(live,"turn","已请求停止","正在中断当前执行","inProgress");publish(id);return com.aiprovider.logging.BusinessOperationLogger.success("service.RemoteCodexService.interrupt", conversation(id));}catch(Exception exception){throw new RemoteCodexException("Codex 中断失败："+message(exception));}}
+    public Object models(){
+        com.aiprovider.logging.BusinessOperationLogger.start("service.RemoteCodexService.models", new String[] {}, new Object[] {});
+        RemoteCodexAppServer server=null;try{server=new RemoteCodexAppServer(command,json,event->{},error->{});return com.aiprovider.logging.BusinessOperationLogger.success("service.RemoteCodexService.models", json.convertValue(server.request("model/list",json.createObjectNode()),Map.class));}catch(Exception exception){throw new RemoteCodexException("Codex 模型读取失败："+message(exception));}finally{if(server!=null)server.close();}}
+    public SseEmitter subscribe(String id){
+        com.aiprovider.logging.BusinessOperationLogger.start("service.RemoteCodexService.subscribe", new String[] { "id" }, new Object[] { id });
+        repository.get(id);SseEmitter emitter=new SseEmitter(0L);streams.computeIfAbsent(id,key->new CopyOnWriteArrayList<SseEmitter>()).add(emitter);Runnable remove=()->streams.getOrDefault(id,new CopyOnWriteArrayList<SseEmitter>()).remove(emitter);emitter.onCompletion(remove);emitter.onTimeout(remove);emitter.onError(error->remove.run());sendEvent(id,emitter);return com.aiprovider.logging.BusinessOperationLogger.success("service.RemoteCodexService.subscribe", emitter);}
 
     private void runTurn(String conversationId,String existingThread,String prompt,String model) {LiveTurn live=new LiveTurn(conversationId,model);liveTurns.put(conversationId,live);try{live.server=new RemoteCodexAppServer(command,json,event->onEvent(live,event),error->fail(live,error));ObjectNode thread=json.createObjectNode();thread.put("approvalPolicy","never");thread.put("sandbox","danger-full-access");thread.put("cwd",resolveWorkingDirectory().toString());if(model!=null)thread.put("model",model);JsonNode started;if(existingThread==null||existingThread.isEmpty())started=live.server.request("thread/start",thread);else{thread.put("threadId",existingThread);started=live.server.request("thread/resume",thread);}live.threadId=started.path("thread").path("id").asText(existingThread);ObjectNode turn=json.createObjectNode();turn.put("threadId",live.threadId);turn.set("input",input(prompt));if(model!=null)turn.put("model",model);JsonNode response=live.server.request("turn/start",turn);live.turnId=response.path("turn").path("id").asText();publish(conversationId);}catch(Exception exception){fail(live,exception);}}
 
@@ -132,5 +153,7 @@ public class RemoteCodexService {
     private Path resolveWorkingDirectory(){if(workingDirectory==null||workingDirectory.trim().isEmpty())throw new RemoteCodexException("远程 Codex 工作目录尚未配置");Path path=Paths.get(workingDirectory).toAbsolutePath().normalize();if(!Files.isDirectory(path))throw new RemoteCodexException("远程 Codex 工作目录不存在");return path;}
     private String compact(String value){String clean=stripAnsi(value).trim();return clean.length()>1000?clean.substring(clean.length()-1000):clean;}
     private String stripAnsi(String value){return value==null?"":value.replaceAll("\\x1B\\[[;\\d]*[ -/]*[@-~]","");}
-    @PreDestroy public void shutdown(){for(LiveTurn live:liveTurns.values())if(live.server!=null)live.server.close();for(CopyOnWriteArrayList<SseEmitter> values:streams.values())for(SseEmitter emitter:values)emitter.complete();turns.shutdownNow();loginWorker.shutdownNow();quotaWorker.shutdownNow();Process value=loginProcess;if(value!=null&&value.isAlive())value.destroyForcibly();}
+    @PreDestroy public void shutdown(){
+        com.aiprovider.logging.BusinessOperationLogger.start("service.RemoteCodexService.shutdown", new String[] {}, new Object[] {});
+        for(LiveTurn live:liveTurns.values())if(live.server!=null)live.server.close();for(CopyOnWriteArrayList<SseEmitter> values:streams.values())for(SseEmitter emitter:values)emitter.complete();turns.shutdownNow();loginWorker.shutdownNow();quotaWorker.shutdownNow();Process value=loginProcess;if(value!=null&&value.isAlive())value.destroyForcibly();}
 }

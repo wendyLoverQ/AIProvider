@@ -48,22 +48,26 @@ public class CryptoMarketProxyService {
     }
 
     public CryptoMarketHealthVO health() {
-        long started = System.nanoTime();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.CryptoMarketProxyService.health", new String[] {}, new Object[] {});
+    long started = System.nanoTime();
         JsonNode result = fetch("/health");
-        return new CryptoMarketHealthVO(
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.CryptoMarketProxyService.health", new CryptoMarketHealthVO(
             result.path("provider").asText("CCXT"),
             result.path("available").asBoolean(false),
             Math.max(0L, (System.nanoTime() - started) / 1_000_000L),
             time(result.path("checkedAt").asText()),
             result.path("version").asText("unknown"),
             result.path("exchangeCount").asInt(0)
-        );
+        ));
     }
 
-    public JsonNode exchanges() { return fetch("/exchanges"); }
+    public JsonNode exchanges() {
+        com.aiprovider.logging.BusinessOperationLogger.start("service.CryptoMarketProxyService.exchanges", new String[] {}, new Object[] {});
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.CryptoMarketProxyService.exchanges", fetch("/exchanges")); }
 
     public List<CryptoMarketSymbolVO> symbols(String exchange, String quote, int limit) {
-        String exchangeId = requireExchange(exchange);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.CryptoMarketProxyService.symbols", new String[] { "exchange", "quote", "limit" }, new Object[] { exchange, quote, limit });
+    String exchangeId = requireExchange(exchange);
         String quoteAsset = requireQuote(quote);
         if (limit < 1 || limit > 2000) throw new IllegalArgumentException("市场数量必须在 1 到 2000 之间");
         JsonNode markets = fetch(uri("/markets").queryParam("exchange", exchangeId).queryParam("quote", quoteAsset)
@@ -73,23 +77,26 @@ public class CryptoMarketProxyService {
         for (JsonNode item : markets) {
             result.add(new CryptoMarketSymbolVO(exchangeId, item.path("symbol").asText(), item.path("baseAsset").asText(), item.path("quoteAsset").asText()));
         }
-        return result;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.CryptoMarketProxyService.symbols", result);
     }
 
     public JsonNode ticker(String exchange, String symbol) {
-        return fetch(marketUri("/ticker", exchange, symbol).build().encode().toUri());
+    com.aiprovider.logging.BusinessOperationLogger.start("service.CryptoMarketProxyService.ticker", new String[] { "exchange", "symbol" }, new Object[] { exchange, symbol });
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.CryptoMarketProxyService.ticker", fetch(marketUri("/ticker", exchange, symbol).build().encode().toUri()));
     }
 
     public JsonNode klines(String exchange, String symbol, String interval, int limit) {
-        if (!INTERVALS.contains(interval)) throw new IllegalArgumentException("不支持的 K 线周期");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.CryptoMarketProxyService.klines", new String[] { "exchange", "symbol", "interval", "limit" }, new Object[] { exchange, symbol, interval, limit });
+    if (!INTERVALS.contains(interval)) throw new IllegalArgumentException("不支持的 K 线周期");
         if (limit < 1 || limit > 1000) throw new IllegalArgumentException("K 线数量必须在 1 到 1000 之间");
-        return fetch(marketUri("/ohlcv", exchange, symbol).queryParam("timeframe", interval)
-            .queryParam("limit", limit).build().encode().toUri());
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.CryptoMarketProxyService.klines", fetch(marketUri("/ohlcv", exchange, symbol).queryParam("timeframe", interval)
+            .queryParam("limit", limit).build().encode().toUri()));
     }
 
     public JsonNode depth(String exchange, String symbol, int limit) {
-        if (limit < 1 || limit > 200) throw new IllegalArgumentException("深度档位必须在 1 到 200 之间");
-        return fetch(marketUri("/order-book", exchange, symbol).queryParam("limit", limit).build().encode().toUri());
+    com.aiprovider.logging.BusinessOperationLogger.start("service.CryptoMarketProxyService.depth", new String[] { "exchange", "symbol", "limit" }, new Object[] { exchange, symbol, limit });
+    if (limit < 1 || limit > 200) throw new IllegalArgumentException("深度档位必须在 1 到 200 之间");
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.CryptoMarketProxyService.depth", fetch(marketUri("/order-book", exchange, symbol).queryParam("limit", limit).build().encode().toUri()));
     }
 
     private UriComponentsBuilder marketUri(String path, String exchange, String symbol) {

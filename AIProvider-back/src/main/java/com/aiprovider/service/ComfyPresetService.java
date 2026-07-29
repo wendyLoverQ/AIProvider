@@ -28,28 +28,31 @@ public class ComfyPresetService {
     }
 
     public List<ComfyPresetVO> list() {
-        List<ComfyPresetVO> result = new ArrayList<>();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.ComfyPresetService.list", new String[] {}, new Object[] {});
+    List<ComfyPresetVO> result = new ArrayList<>();
         for (Map<String, Object> row : presets.findAll()) {
             result.add(new ComfyPresetVO(number(row.get("id")), text(row.get("name")), requiredMode(row.get("promptMode")), parseSelections(text(row.get("selectedOptionsJson"))),
                     textOrEmpty(row.get("positiveExtra")), textOrEmpty(row.get("negativeExtra")), textOrEmpty(row.get("positivePrompt")),
                     textOrEmpty(row.get("negativePrompt")), text(row.get("remark")), truth(row.get("isDefault"))));
         }
-        return result;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.ComfyPresetService.list", result);
     }
 
     @Transactional
     public long create(ComfyPresetDTO dto) {
-        validate(dto);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.ComfyPresetService.create", new String[] { "dto" }, new Object[] { dto });
+    validate(dto);
         if (Boolean.TRUE.equals(dto.getIsDefault())) presets.clearDefault();
         ComfyPresetMapper.PresetRecord record = record(dto);
         long id = presets.insert(record);
         log.info("prompt_scheme_created operation=create schemeId={} promptMode={} requestedCount=1 affectedRows=1", id, record.getPromptMode());
-        return id;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.ComfyPresetService.create", id);
     }
 
     @Transactional
     public void update(long id, ComfyPresetDTO dto) {
-        validate(dto);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.ComfyPresetService.update", new String[] { "id", "dto" }, new Object[] { id, dto });
+    validate(dto);
         if (Boolean.TRUE.equals(dto.getIsDefault())) presets.clearDefault();
         ComfyPresetMapper.PresetRecord record = record(dto); record.setId(id);
         if (!presets.update(record)) {
@@ -57,20 +60,26 @@ public class ComfyPresetService {
             throw new IllegalArgumentException("Prompt 方案不存在");
         }
         log.info("prompt_scheme_updated operation=update schemeId={} promptMode={} requestedCount=1 affectedRows=1", id, record.getPromptMode());
+        com.aiprovider.logging.BusinessOperationLogger.success("service.ComfyPresetService.update", null);
     }
 
     @Transactional
     public void setDefault(long id) {
-        presets.clearDefault();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.ComfyPresetService.setDefault", new String[] { "id" }, new Object[] { id });
+    presets.clearDefault();
         if (!presets.setDefault(id)) throw new IllegalArgumentException("Prompt 方案不存在");
     }
 
     @Transactional
-    public void clearDefault() { presets.clearDefault(); }
+    public void clearDefault() {
+        com.aiprovider.logging.BusinessOperationLogger.start("service.ComfyPresetService.clearDefault", new String[] {}, new Object[] {});
+        presets.clearDefault(); com.aiprovider.logging.BusinessOperationLogger.success("service.ComfyPresetService.clearDefault", null);
+}
 
     @Transactional
     public void delete(long id) {
-        if (!presets.delete(id)) throw new IllegalArgumentException("Prompt 方案不存在");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.ComfyPresetService.delete", new String[] { "id" }, new Object[] { id });
+    if (!presets.delete(id)) throw new IllegalArgumentException("Prompt 方案不存在");
     }
 
     private ComfyPresetMapper.PresetRecord record(ComfyPresetDTO dto) {

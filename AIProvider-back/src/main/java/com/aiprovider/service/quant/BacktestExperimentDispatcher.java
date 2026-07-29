@@ -68,7 +68,8 @@ public class BacktestExperimentDispatcher {
 
   @Scheduled(fixedDelayString = "${quant.experiment.dispatcher-fixed-delay-ms:2000}")
   public void tick() {
-    Instant now = Instant.now();
+  com.aiprovider.logging.BusinessOperationLogger.start("service.quant.BacktestExperimentDispatcher.tick", new String[] {}, new Object[] {});
+  Instant now = Instant.now();
     try {
       candidates.resetStaleClaims(now.minusSeconds(properties.getStaleClaimSeconds()), now);
     } catch (RuntimeException exception) {
@@ -82,6 +83,7 @@ public class BacktestExperimentDispatcher {
             "quant experiment tick failed experimentId={}", experiment.experimentId, exception);
       }
     }
+    com.aiprovider.logging.BusinessOperationLogger.success("service.quant.BacktestExperimentDispatcher.tick", null);
   }
 
   private void dispatchExperiment(BacktestExperimentRow experiment) {

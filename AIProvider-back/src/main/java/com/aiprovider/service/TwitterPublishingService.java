@@ -61,7 +61,8 @@ public class TwitterPublishingService {
     }
 
     public TwitterAccountVO connect(TwitterAccountConnectDTO dto) {
-        if (!serverPublishing) {
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterPublishingService.connect", new String[] { "dto" }, new Object[] { dto });
+    if (!serverPublishing) {
             throw new IllegalArgumentException("当前为本机发布模式，请通过本机 Agent 登录 Twitter");
         }
         if (dto == null || blank(dto.getUsername()) || blank(dto.getPassword())) {
@@ -72,18 +73,20 @@ public class TwitterPublishingService {
         cipher.ensureConfigured();
         String state = publisher.login(username, dto.getPassword(), trim(dto.getEmailOrPhone()), trim(dto.getVerificationCode()));
         long id = repository.saveConnectedAccount(username, cipher.encrypt(state));
-        return accountFrom(repository.findAccount(id));
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterPublishingService.connect", accountFrom(repository.findAccount(id)));
     }
 
     public List<TwitterAccountVO> listAccounts() {
-        List<TwitterAccountVO> result = new ArrayList<>();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterPublishingService.listAccounts", new String[] {}, new Object[] {});
+    List<TwitterAccountVO> result = new ArrayList<>();
         for (Map<String, Object> row : repository.findAccounts()) result.add(accountFrom(row));
-        return result;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterPublishingService.listAccounts", result);
     }
 
     @Transactional
     public long createPost(TwitterPostCreateDTO dto) {
-        validatePost(dto);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterPublishingService.createPost", new String[] { "dto" }, new Object[] { dto });
+    validatePost(dto);
         Map<String, Object> account = repository.findAccount(dto.getAccountId());
         if (account == null) throw new IllegalArgumentException("Twitter 账号不存在");
         if (!"CONNECTED".equals(text(account.get("sessionStatus")))) {
@@ -115,49 +118,55 @@ public class TwitterPublishingService {
             throw new IllegalStateException("保存 Twitter 图片失败", e);
         }
         if (serverPublishing && delay == 0) enqueueAfterCommit(postId);
-        return postId;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterPublishingService.createPost", postId);
     }
 
     public TwitterPostVO getPost(long id) {
-        Map<String, Object> row = repository.findPost(id);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterPublishingService.getPost", new String[] { "id" }, new Object[] { id });
+    Map<String, Object> row = repository.findPost(id);
         if (row == null) throw new IllegalArgumentException("Twitter 发布记录不存在");
-        return postFrom(row);
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterPublishingService.getPost", postFrom(row));
     }
 
     public List<TwitterPostVO> listPosts(int limit) {
-        int safeLimit = Math.max(1, Math.min(limit, 200));
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterPublishingService.listPosts", new String[] { "limit" }, new Object[] { limit });
+    int safeLimit = Math.max(1, Math.min(limit, 200));
         List<TwitterPostVO> result = new ArrayList<>();
         for (Map<String, Object> row : repository.findPosts(safeLimit)) result.add(postFrom(row));
-        return result;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterPublishingService.listPosts", result);
     }
 
     @Transactional
     public TwitterAccountVO registerClientAccount(TwitterClientAccountDTO dto) {
-        if (dto == null || blank(dto.getUsername())) throw new IllegalArgumentException("Twitter 用户名不能为空");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterPublishingService.registerClientAccount", new String[] { "dto" }, new Object[] { dto });
+    if (dto == null || blank(dto.getUsername())) throw new IllegalArgumentException("Twitter 用户名不能为空");
         String username = normalizeUsername(dto.getUsername());
         if (!username.matches("[A-Za-z0-9_]{1,50}")) throw new IllegalArgumentException("Twitter 用户名格式不合法");
         String status = "CONNECTED".equalsIgnoreCase(dto.getStatus()) ? "CONNECTED" : "DISCONNECTED";
         long id = repository.saveClientAccount(username, status);
-        return accountFrom(repository.findAccount(id));
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterPublishingService.registerClientAccount", accountFrom(repository.findAccount(id)));
     }
 
     public List<TwitterPostVO> pendingPosts(long accountId, int limit) {
-        repository.recoverStaleClientPosts();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterPublishingService.pendingPosts", new String[] { "accountId", "limit" }, new Object[] { accountId, limit });
+    repository.recoverStaleClientPosts();
         int safeLimit = Math.max(1, Math.min(limit, 20));
         List<TwitterPostVO> result = new ArrayList<>();
         for (Map<String, Object> row : repository.findPendingPosts(accountId, safeLimit)) result.add(postFrom(row));
-        return result;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterPublishingService.pendingPosts", result);
     }
 
     @Transactional
     public TwitterPostVO claimForClient(long id) {
-        if (!repository.claimPost(id)) throw new IllegalArgumentException("任务不存在、已被领取或当前不可发布");
-        return getPost(id);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterPublishingService.claimForClient", new String[] { "id" }, new Object[] { id });
+    if (!repository.claimPost(id)) throw new IllegalArgumentException("任务不存在、已被领取或当前不可发布");
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterPublishingService.claimForClient", getPost(id));
     }
 
     @Transactional
     public void completeFromClient(long id, TwitterClientResultDTO dto) {
-        if (dto == null) throw new IllegalArgumentException("发布结果不能为空");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterPublishingService.completeFromClient", new String[] { "id", "dto" }, new Object[] { id, dto });
+    if (dto == null) throw new IllegalArgumentException("发布结果不能为空");
         if (dto.isSuccess()) {
             if (!repository.markPostSent(id, limit(trim(dto.getTweetUrl()), 500)))
                 throw new IllegalArgumentException("任务不在发布中状态");
@@ -169,7 +178,8 @@ public class TwitterPublishingService {
 
     @Transactional
     public void retry(long id) {
-        Map<String, Object> post = repository.findPost(id);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterPublishingService.retry", new String[] { "id" }, new Object[] { id });
+    Map<String, Object> post = repository.findPost(id);
         if (post == null) throw new IllegalArgumentException("Twitter 发布记录不存在");
         if (!repository.retryPost(id)) throw new IllegalArgumentException("只有 FAILED 状态的记录可以重试");
         if (serverPublishing) enqueueAfterCommit(id);
@@ -177,31 +187,39 @@ public class TwitterPublishingService {
 
     @Transactional
     public void cancel(long id) {
-        if (repository.findPost(id) == null) throw new IllegalArgumentException("Twitter 发布记录不存在");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterPublishingService.cancel", new String[] { "id" }, new Object[] { id });
+    if (repository.findPost(id) == null) throw new IllegalArgumentException("Twitter 发布记录不存在");
         if (!repository.cancelPost(id)) throw new IllegalArgumentException("只有等待中或失败的任务可以取消");
     }
 
     public Resource getImage(long postId, long imageId) {
-        Map<String, Object> media = repository.findMediaItem(postId, imageId);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterPublishingService.getImage", new String[] { "postId", "imageId" }, new Object[] { postId, imageId });
+    Map<String, Object> media = repository.findMediaItem(postId, imageId);
         if (media == null) throw new IllegalArgumentException("Twitter 图片记录不存在");
         if (!blank(text(media.get("localPath")))) throw new IllegalArgumentException("本机图片必须由 Chrome 扩展从本机 Agent 读取");
         Path path = resolveStoredPath(text(media.get("storagePath")));
         Resource resource = new FileSystemResource(path.toFile());
         if (!resource.exists()) throw new IllegalArgumentException("Twitter 图片文件不存在");
-        return resource;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterPublishingService.getImage", resource);
     }
 
     public String getImageContentType(long postId, long imageId) {
-        Map<String, Object> media = repository.findMediaItem(postId, imageId);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterPublishingService.getImageContentType", new String[] { "postId", "imageId" }, new Object[] { postId, imageId });
+    Map<String, Object> media = repository.findMediaItem(postId, imageId);
         if (media == null) throw new IllegalArgumentException("Twitter 图片记录不存在");
-        return text(media.get("contentType"));
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterPublishingService.getImageContentType", text(media.get("contentType")));
     }
 
     @EventListener(ApplicationReadyEvent.class)
     public void recoverQueue() {
-        repository.recoverProcessingPosts();
-        if (!serverPublishing) return;
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterPublishingService.recoverQueue", new String[] {}, new Object[] {});
+    repository.recoverProcessingPosts();
+        if (!serverPublishing) {
+            com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterPublishingService.recoverQueue", null);
+            return;
+        }
         for (Long postId : repository.findPendingPostIds()) enqueue(postId);
+        com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterPublishingService.recoverQueue", null);
     }
 
     private void enqueueAfterCommit(long postId) {

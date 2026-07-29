@@ -20,10 +20,14 @@ public class TwitterSessionCipher {
         this.configuredKey = configuredKey == null ? "" : configuredKey.trim();
     }
 
-    public void ensureConfigured() { key(); }
+    public void ensureConfigured() {
+        com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterSessionCipher.ensureConfigured", new String[] {}, new Object[] {});
+        key(); com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterSessionCipher.ensureConfigured", null);
+}
 
     public String encrypt(String plaintext) {
-        try {
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterSessionCipher.encrypt", new String[] { "plaintext" }, new Object[] { plaintext });
+    try {
             byte[] iv = new byte[IV_LENGTH];
             random.nextBytes(iv);
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
@@ -32,7 +36,7 @@ public class TwitterSessionCipher {
             byte[] payload = new byte[iv.length + encrypted.length];
             System.arraycopy(iv, 0, payload, 0, iv.length);
             System.arraycopy(encrypted, 0, payload, iv.length, encrypted.length);
-            return Base64.getEncoder().encodeToString(payload);
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterSessionCipher.encrypt", Base64.getEncoder().encodeToString(payload));
         } catch (TwitterAutomationException e) {
             throw e;
         } catch (Exception e) {
@@ -41,14 +45,15 @@ public class TwitterSessionCipher {
     }
 
     public String decrypt(String encoded) {
-        try {
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TwitterSessionCipher.decrypt", new String[] { "encoded" }, new Object[] { encoded });
+    try {
             byte[] payload = Base64.getDecoder().decode(encoded);
             if (payload.length <= IV_LENGTH) throw new IllegalArgumentException("invalid encrypted payload");
             byte[] iv = Arrays.copyOfRange(payload, 0, IV_LENGTH);
             byte[] encrypted = Arrays.copyOfRange(payload, IV_LENGTH, payload.length);
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.DECRYPT_MODE, key(), new GCMParameterSpec(128, iv));
-            return new String(cipher.doFinal(encrypted), StandardCharsets.UTF_8);
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.TwitterSessionCipher.decrypt", new String(cipher.doFinal(encrypted), StandardCharsets.UTF_8));
         } catch (TwitterAutomationException e) {
             throw e;
         } catch (Exception e) {

@@ -34,7 +34,8 @@ public class SyncService {
     @Transactional
     public SyncResultVO processBusinessBatch(String deviceId,
                                               List<SyncBatchDTO.BusinessRecord> records) {
-        if (deviceId == null || deviceId.trim().isEmpty() || records == null || records.size() > 200) {
+                                              com.aiprovider.logging.BusinessOperationLogger.start("service.SyncService.processBusinessBatch", new String[] { "deviceId", "records" }, new Object[] { deviceId, records });
+                                              if (deviceId == null || deviceId.trim().isEmpty() || records == null || records.size() > 200) {
             throw new IllegalArgumentException("deviceId 必填，单批最多 200 条");
         }
 
@@ -52,10 +53,11 @@ public class SyncService {
         vo.setSaved(records.size());
         vo.setTables(savedByTable);
         vo.setSyncedAt(Instant.now().toString());
-        return vo;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.SyncService.processBusinessBatch", vo);
     }
 
     public Map<String, Object> getStatus() {
-        return Collections.singletonMap("recentRuns", syncRepo.recentSyncRuns());
+    com.aiprovider.logging.BusinessOperationLogger.start("service.SyncService.getStatus", new String[] {}, new Object[] {});
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.SyncService.getStatus", Collections.singletonMap("recentRuns", syncRepo.recentSyncRuns()));
     }
 }

@@ -17,11 +17,14 @@ public class ContentAiConfigService {
     private static final Pattern MODEL=Pattern.compile("^[A-Za-z0-9._-]{1,100}$");
     private final ContentAiRepository repository; private final PlatformAccountCredentialService accountCredentials;
     public ContentAiConfigService(ContentAiRepository repository,PlatformAccountCredentialService accountCredentials){this.repository=repository;this.accountCredentials=accountCredentials;}
-    public ContentAiConfigVO get(){return toVO(requiredConfig());}
+    public ContentAiConfigVO get(){
+        com.aiprovider.logging.BusinessOperationLogger.start("service.ContentAiConfigService.get", new String[] {}, new Object[] {});
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.ContentAiConfigService.get", toVO(requiredConfig()));}
 
     @Transactional
     public ContentAiConfigVO save(ContentAiConfigDTO dto){
-        if(dto==null||dto.getEnabled()==null)throw new IllegalArgumentException("Gemini 启用状态不能为空");
+    com.aiprovider.logging.BusinessOperationLogger.start("service.ContentAiConfigService.save", new String[] { "dto" }, new Object[] { dto });
+    if(dto==null||dto.getEnabled()==null)throw new IllegalArgumentException("Gemini 启用状态不能为空");
         Map<String,Object> current=requiredConfig();if(trim(dto.getApiKey())!=null)throw new IllegalArgumentException("Gemini API Key 请在账号中心维护");
         if(dto.getEnabled()&&current.get("platformAccountId")==null)throw new IllegalArgumentException("启用 Gemini 前必须绑定账号中心账号");
         ContentAiMapper.ConfigRecord record=new ContentAiMapper.ConfigRecord();record.setEnabled(dto.getEnabled());record.setApiBaseUrl(apiBaseUrl(dto.getApiBaseUrl()));
@@ -29,7 +32,7 @@ public class ContentAiConfigService {
         record.setRelevancePrompt(prompt(dto.getRelevancePrompt(),"内容相关性判断提示词"));record.setContentRewritePrompt(prompt(dto.getContentRewritePrompt(),"内容改写提示词"));record.setCommentReplyPrompt(prompt(dto.getCommentReplyPrompt(),"评论回复提示词"));
         BigDecimal temperature=dto.getTemperature()==null?new BigDecimal("0.700"):dto.getTemperature();if(temperature.compareTo(BigDecimal.ZERO)<0||temperature.compareTo(new BigDecimal("2"))>0)throw new IllegalArgumentException("生成温度必须在 0 到 2 之间");record.setTemperature(temperature);
         int maxTokens=dto.getMaxOutputTokens()==null?2048:dto.getMaxOutputTokens();if(maxTokens<128||maxTokens>65536)throw new IllegalArgumentException("最大输出 Token 必须在 128 到 65536 之间");record.setMaxOutputTokens(maxTokens);
-        repository.updateConfig(record);return get();
+        repository.updateConfig(record);return com.aiprovider.logging.BusinessOperationLogger.success("service.ContentAiConfigService.save", get());
     }
 
     GeminiRuntimeConfig runtime(){Map<String,Object> row=requiredConfig();if(!truth(row.get("enabled")))throw new ContentAiException("AI_DISABLED","Gemini 内容生成尚未启用");if(row.get("platformAccountId")==null)throw new ContentAiException("API_KEY_MISSING","Gemini 尚未绑定账号中心账号");String key=accountCredentials.requireSecret(((Number)row.get("platformAccountId")).longValue(),"GEMINI","API_KEY");return new GeminiRuntimeConfig(true,text(row.get("apiBaseUrl")),text(row.get("model")),key,text(row.get("relevancePrompt")),text(row.get("contentRewritePrompt")),text(row.get("commentReplyPrompt")),decimal(row.get("temperature")),integer(row.get("maxOutputTokens")));}

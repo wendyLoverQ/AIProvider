@@ -41,7 +41,8 @@ public class XiaohongshuWebAdapter {
     }
 
     public LoginSnapshot startLogin(long accountId) {
-        closeAccountSessions(accountId);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.XiaohongshuWebAdapter.startLogin", new String[] { "accountId" }, new Object[] { accountId });
+    closeAccountSessions(accountId);
         Playwright playwright = null;
         Browser browser = null;
         BrowserContext context = null;
@@ -61,7 +62,7 @@ public class XiaohongshuWebAdapter {
             LoginSession session = new LoginSession(id, accountId, playwright, browser, context, page, signals, context.storageState());
             sessions.put(id, session);
             log.info("XHS_QR session_started accountId={} session={} page={} cookies={}", accountId, shortSession(id), safeLocation(page.url()), cookieNames(context));
-            return new LoginSnapshot(id, "WAITING_SCAN", image, "请使用小红书 App 扫码登录");
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.XiaohongshuWebAdapter.startLogin", new LoginSnapshot(id, "WAITING_SCAN", image, "请使用小红书 App 扫码登录"));
         } catch (RuntimeException e) {
             log.error("XHS_QR session_start_failed accountId={} error={}", accountId, e.getClass().getSimpleName());
             closeResources(context, browser, playwright);
@@ -73,7 +74,8 @@ public class XiaohongshuWebAdapter {
     }
 
     public LoginSnapshot poll(long accountId, String sessionId) {
-        LoginSession session = sessions.get(sessionId);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.XiaohongshuWebAdapter.poll", new String[] { "accountId", "sessionId" }, new Object[] { accountId, sessionId });
+    LoginSession session = sessions.get(sessionId);
         if (session == null || session.accountId != accountId)
             throw new IllegalArgumentException("扫码登录会话不存在或已过期");
         synchronized (session) {
@@ -81,7 +83,7 @@ public class XiaohongshuWebAdapter {
                 log.info("XHS_QR session_expired accountId={} session={} reason=ttl", accountId, shortSession(sessionId));
                 sessions.remove(sessionId);
                 session.close();
-                return new LoginSnapshot(sessionId, "EXPIRED", null, "扫码登录会话已过期，请重新发起");
+                return com.aiprovider.logging.BusinessOperationLogger.success("service.XiaohongshuWebAdapter.poll", new LoginSnapshot(sessionId, "EXPIRED", null, "扫码登录会话已过期，请重新发起"));
             }
             try {
                 String state = session.context.storageState();
@@ -97,16 +99,16 @@ public class XiaohongshuWebAdapter {
                             cookieAuthenticated ? "cookie" : creatorHome ? "creator_home" : "protocol_and_storage", cookieNames(session.context));
                     sessions.remove(sessionId);
                     session.close();
-                    return new LoginSnapshot(sessionId, "CONNECTED", null, "小红书扫码登录成功", state);
+                    return com.aiprovider.logging.BusinessOperationLogger.success("service.XiaohongshuWebAdapter.poll", new LoginSnapshot(sessionId, "CONNECTED", null, "小红书扫码登录成功", state));
                 }
                 if (session.signals.codeStatus == 3) {
                     log.info("XHS_QR session_expired accountId={} session={} reason=protocol", accountId, shortSession(sessionId));
                     sessions.remove(sessionId);
                     session.close();
-                    return new LoginSnapshot(sessionId, "EXPIRED", null, "二维码已失效，请重新发起扫码");
+                    return com.aiprovider.logging.BusinessOperationLogger.success("service.XiaohongshuWebAdapter.poll", new LoginSnapshot(sessionId, "EXPIRED", null, "二维码已失效，请重新发起扫码"));
                 }
                 String message = session.signals.codeStatus == 1 ? "二维码已扫描，请在手机上确认登录" : session.signals.codeStatus == 2 ? "手机已确认，等待创作中心完成登录" : "等待扫码确认";
-                return new LoginSnapshot(sessionId, "WAITING_SCAN", null, message);
+                return com.aiprovider.logging.BusinessOperationLogger.success("service.XiaohongshuWebAdapter.poll", new LoginSnapshot(sessionId, "WAITING_SCAN", null, message));
             } catch (PlaywrightException e) {
                 log.error("XHS_QR poll_failed accountId={} session={} error={}", accountId, shortSession(sessionId), e.getClass().getSimpleName());
                 sessions.remove(sessionId);
@@ -117,7 +119,8 @@ public class XiaohongshuWebAdapter {
     }
 
     public String publish(String storageState, String title, String body, List<String> tags, Path card) {
-        String stage = "加载小红书官方接口运行时";
+    com.aiprovider.logging.BusinessOperationLogger.start("service.XiaohongshuWebAdapter.publish", new String[] { "storageState", "title", "body", "tags", "card" }, new Object[] { storageState, title, body, tags, card });
+    String stage = "加载小红书官方接口运行时";
         String pageLocation = "not-opened";
         try (Playwright playwright = Playwright.create(); Browser browser = launch(playwright); BrowserContext context = browser.newContext(new Browser.NewContextOptions().setStorageState(storageState).setViewportSize(1280, 720))) {
             context.setDefaultTimeout(timeoutMs);
@@ -149,8 +152,8 @@ public class XiaohongshuWebAdapter {
             String noteId = valueText(post.get("noteId"));
             String shareLink = valueText(post.get("shareLink"));
             log.info("XHS_DIRECT_POST success page={} noteIdPresent={} shareLinkPresent={} responseKeys={}", pageLocation, noteId != null, shareLink != null, post.get("keys"));
-            if (shareLink != null) return shareLink;
-            return noteId == null ? "https://creator.xiaohongshu.com/publish/success" : "https://www.xiaohongshu.com/explore/" + noteId;
+            if (shareLink != null) return com.aiprovider.logging.BusinessOperationLogger.success("service.XiaohongshuWebAdapter.publish", shareLink);
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.XiaohongshuWebAdapter.publish", noteId == null ? "https://creator.xiaohongshu.com/publish/success" : "https://www.xiaohongshu.com/explore/" + noteId);
         } catch (XiaohongshuAutomationException e) {
             log.error("XHS_PUBLISH stopped stage={} page={} reason={}", stage, pageLocation, e.getMessage());
             throw e;
@@ -168,9 +171,10 @@ public class XiaohongshuWebAdapter {
     }
 
     public boolean validate(String storageState) {
-        try (Playwright playwright=Playwright.create();Browser browser=launch(playwright);BrowserContext context=browser.newContext(new Browser.NewContextOptions().setStorageState(storageState))) {
-            context.setDefaultTimeout(timeoutMs);Page page=context.newPage();page.navigate("https://creator.xiaohongshu.com/creator/home",new Page.NavigateOptions().setTimeout(timeoutMs));return authenticated(context)&&!isLoginUrl(page.url());
-        } catch (PlaywrightException e) { return false; }
+    com.aiprovider.logging.BusinessOperationLogger.start("service.XiaohongshuWebAdapter.validate", new String[] { "storageState" }, new Object[] { storageState });
+    try (Playwright playwright=Playwright.create();Browser browser=launch(playwright);BrowserContext context=browser.newContext(new Browser.NewContextOptions().setStorageState(storageState))) {
+            context.setDefaultTimeout(timeoutMs);Page page=context.newPage();page.navigate("https://creator.xiaohongshu.com/creator/home",new Page.NavigateOptions().setTimeout(timeoutMs));return com.aiprovider.logging.BusinessOperationLogger.success("service.XiaohongshuWebAdapter.validate", authenticated(context)&&!isLoginUrl(page.url()));
+        } catch (PlaywrightException e) { return com.aiprovider.logging.BusinessOperationLogger.success("service.XiaohongshuWebAdapter.validate", false); }
     }
 
     static Map<String,Object> buildNotePayload(String title, String body, List<String> tags, String fileId, int width, int height, long byteSize) {
@@ -383,8 +387,10 @@ public class XiaohongshuWebAdapter {
 
     @PreDestroy
     public void close() {
-        for (LoginSession session : sessions.values()) session.close();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.XiaohongshuWebAdapter.close", new String[] {}, new Object[] {});
+    for (LoginSession session : sessions.values()) session.close();
         sessions.clear();
+        com.aiprovider.logging.BusinessOperationLogger.success("service.XiaohongshuWebAdapter.close", null);
     }
 
     private boolean blank(String value) {

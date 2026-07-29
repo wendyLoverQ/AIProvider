@@ -16,7 +16,8 @@ public class TableDataService {
     }
 
     public Map<String, Object> getData(String tableName, int page, int size) {
-        if (!tableDataRepo.isValidTable(tableName)) {
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TableDataService.getData", new String[] { "tableName", "page", "size" }, new Object[] { tableName, page, size });
+    if (!tableDataRepo.isValidTable(tableName)) {
             throw new IllegalArgumentException("Invalid table name: " + tableName);
         }
 
@@ -32,16 +33,17 @@ public class TableDataService {
         result.put("page", page);
         result.put("size", size);
         result.put("rows", rows);
-        return result;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.TableDataService.getData", result);
     }
 
     public Map<String, Object> getCount(String tableName) {
-        if (!tableDataRepo.isValidTable(tableName)) {
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TableDataService.getCount", new String[] { "tableName" }, new Object[] { tableName });
+    if (!tableDataRepo.isValidTable(tableName)) {
             throw new IllegalArgumentException("Invalid table name: " + tableName);
         }
         long count = tableDataRepo.countByTable(tableName);
-        return new LinkedHashMap<String, Object>() {{
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.TableDataService.getCount", new LinkedHashMap<String, Object>() {{
             put("table", tableName); put("count", count);
-        }};
+        }});
     }
 }

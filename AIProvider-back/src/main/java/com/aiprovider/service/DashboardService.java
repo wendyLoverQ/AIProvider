@@ -15,7 +15,8 @@ public class DashboardService {
     }
 
     public Map<String, Object> getOverview() {
-        Map<String, Object> stats = new LinkedHashMap<>();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.DashboardService.getOverview", new String[] {}, new Object[] {});
+    Map<String, Object> stats = new LinkedHashMap<>();
 
         stats.put("totalChatMessages", dashboardRepo.count("maid_ChatMessages"));
         stats.put("totalLlmCalls", dashboardRepo.count("maid_LlmCallLogs"));
@@ -49,42 +50,51 @@ public class DashboardService {
 
         stats.put("maidState", dashboardRepo.latestMaidState());
 
-        return stats;
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.DashboardService.getOverview", stats);
     }
 
     public List<Map<String, Object>> getLlmUsageDaily(int days) {
-        return dashboardRepo.llmUsageDaily(days);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.DashboardService.getLlmUsageDaily", new String[] { "days" }, new Object[] { days });
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.DashboardService.getLlmUsageDaily", dashboardRepo.llmUsageDaily(days));
     }
 
     public List<Map<String, Object>> getLlmModelStats() {
-        return dashboardRepo.llmModelStats();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.DashboardService.getLlmModelStats", new String[] {}, new Object[] {});
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.DashboardService.getLlmModelStats", dashboardRepo.llmModelStats());
     }
 
     public List<Map<String, Object>> getTimeTrackingDaily(int days) {
-        return dashboardRepo.timeTrackingDaily(days);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.DashboardService.getTimeTrackingDaily", new String[] { "days" }, new Object[] { days });
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.DashboardService.getTimeTrackingDaily", dashboardRepo.timeTrackingDaily(days));
     }
 
     public List<Map<String, Object>> getAgentToolUsage() {
-        return dashboardRepo.agentToolUsage();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.DashboardService.getAgentToolUsage", new String[] {}, new Object[] {});
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.DashboardService.getAgentToolUsage", dashboardRepo.agentToolUsage());
     }
 
     public List<Map<String, Object>> getDesktopAppUsage() {
-        return dashboardRepo.desktopAppUsage();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.DashboardService.getDesktopAppUsage", new String[] {}, new Object[] {});
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.DashboardService.getDesktopAppUsage", dashboardRepo.desktopAppUsage());
     }
 
     public List<Map<String, Object>> getBroadcastStats() {
-        return dashboardRepo.broadcastStats();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.DashboardService.getBroadcastStats", new String[] {}, new Object[] {});
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.DashboardService.getBroadcastStats", dashboardRepo.broadcastStats());
     }
 
     public List<Map<String, Object>> getRecentChats(int limit) {
-        return dashboardRepo.recentChats(limit);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.DashboardService.getRecentChats", new String[] { "limit" }, new Object[] { limit });
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.DashboardService.getRecentChats", dashboardRepo.recentChats(limit));
     }
 
     public List<Map<String, Object>> getRecentLlmCalls(int limit) {
-        return dashboardRepo.recentLlmCalls(limit);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.DashboardService.getRecentLlmCalls", new String[] { "limit" }, new Object[] { limit });
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.DashboardService.getRecentLlmCalls", dashboardRepo.recentLlmCalls(limit));
     }
 
     public Map<String, Object> getChatStats() {
-        return dashboardRepo.chatStats();
+    com.aiprovider.logging.BusinessOperationLogger.start("service.DashboardService.getChatStats", new String[] {}, new Object[] {});
+    return com.aiprovider.logging.BusinessOperationLogger.success("service.DashboardService.getChatStats", dashboardRepo.chatStats());
     }
 }

@@ -12,10 +12,11 @@ public class HealthService {
     private final DataSource dataSource;
     public HealthService(DataSource dataSource) { this.dataSource = dataSource; }
     public Snapshot check() {
-        boolean database = false;
+    com.aiprovider.logging.BusinessOperationLogger.start("service.HealthService.check", new String[] {}, new Object[] {});
+    boolean database = false;
         try (Connection connection = dataSource.getConnection()) { database = connection.isValid(2); }
         catch (Exception ignored) { database = false; }
-        return new Snapshot(database ? "UP" : "DOWN", OffsetDateTime.now(), database);
+        return com.aiprovider.logging.BusinessOperationLogger.success("service.HealthService.check", new Snapshot(database ? "UP" : "DOWN", OffsetDateTime.now(), database));
     }
     public static class Snapshot {
         private final String status; private final OffsetDateTime checkedAt; private final boolean database;

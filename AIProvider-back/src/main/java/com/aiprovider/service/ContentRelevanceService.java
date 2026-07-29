@@ -27,7 +27,8 @@ public class ContentRelevanceService {
     }
 
     public ContentRelevanceVO classify(long contentItemId) {
-        Map<String,Object> item=contentRepository.findContentItem(contentItemId);
+    com.aiprovider.logging.BusinessOperationLogger.start("service.ContentRelevanceService.classify", new String[] { "contentItemId" }, new Object[] { contentItemId });
+    Map<String,Object> item=contentRepository.findContentItem(contentItemId);
         if(item==null)throw new IllegalArgumentException("待判断内容不存在");
         String sourceText=required(item.get("rawText"),"来源内容");
         GeminiRuntimeConfig config=configService.runtime();
@@ -43,7 +44,7 @@ public class ContentRelevanceService {
             Decision decision=parse(output);String status=decision.relevant?"RELEVANT":"IRRELEVANT";
             aiRepository.markSucceeded(generationId,output,elapsed(started));
             contentRepository.updateContentRelevance(contentItemId,status,decision.score,decision.reason);
-            return new ContentRelevanceVO(contentItemId,decision.relevant,decision.score,decision.reason,config.model,LocalDateTime.now());
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.ContentRelevanceService.classify", new ContentRelevanceVO(contentItemId,decision.relevant,decision.score,decision.reason,config.model,LocalDateTime.now()));
         } catch(ContentAiException e) {
             aiRepository.markFailed(generationId,e.getCode(),limit(e.getMessage(),1000),elapsed(started));
             contentRepository.updateContentRelevance(contentItemId,"FAILED",null,limit(e.getMessage(),1000));throw e;

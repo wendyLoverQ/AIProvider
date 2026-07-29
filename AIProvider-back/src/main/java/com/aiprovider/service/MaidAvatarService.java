@@ -22,8 +22,9 @@ public class MaidAvatarService {
     }
 
     public Resource find(String roleId) throws IOException {
-        if (roleId == null || !roleId.matches("[A-Za-z0-9_-]{1,96}") || !Files.isDirectory(avatarDirectory)) {
-            return null;
+    com.aiprovider.logging.BusinessOperationLogger.start("service.MaidAvatarService.find", new String[] { "roleId" }, new Object[] { roleId });
+    if (roleId == null || !roleId.matches("[A-Za-z0-9_-]{1,96}") || !Files.isDirectory(avatarDirectory)) {
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.MaidAvatarService.find", null);
         }
         String expectedStem = roleId.toLowerCase(Locale.ROOT);
         try (Stream<Path> files = Files.walk(avatarDirectory, 3)) {
@@ -31,12 +32,13 @@ public class MaidAvatarService {
                     .filter(Files::isRegularFile)
                     .filter(path -> isImage(path) && stem(path).equalsIgnoreCase(expectedStem))
                     .findFirst();
-            return match.isPresent() ? new FileSystemResource(match.get().toFile()) : null;
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.MaidAvatarService.find", match.isPresent() ? new FileSystemResource(match.get().toFile()) : null);
         }
     }
 
     public Resource save(String roleId, MultipartFile file) throws IOException {
-        if (roleId == null || !roleId.matches("[A-Za-z0-9_-]{1,96}"))
+    com.aiprovider.logging.BusinessOperationLogger.start("service.MaidAvatarService.save", new String[] { "roleId", "file" }, new Object[] { roleId, file });
+    if (roleId == null || !roleId.matches("[A-Za-z0-9_-]{1,96}"))
             throw new IllegalArgumentException("无效的角色 ID");
         if (file == null || file.isEmpty() || file.getSize() > 8L * 1024 * 1024)
             throw new IllegalArgumentException("角色头像图片为空或超过 8MB");
@@ -58,7 +60,7 @@ public class MaidAvatarService {
             catch (AtomicMoveNotSupportedException ignored) { Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING); }
             for (String other : new String[]{".png", ".jpg", ".jpeg", ".webp"})
                 if (!other.equals(extension)) Files.deleteIfExists(avatarDirectory.resolve(roleId.toLowerCase(Locale.ROOT) + other));
-            return new FileSystemResource(target.toFile());
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.MaidAvatarService.save", new FileSystemResource(target.toFile()));
         } finally {
             Files.deleteIfExists(temporary);
         }

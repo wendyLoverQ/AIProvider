@@ -31,22 +31,23 @@ public class TencentTrafficService {
     }
 
     public MonitorSummaryVO.Traffic current() {
-        Instant now = Instant.now(); Cache snapshot = cache;
-        if (snapshot != null && Duration.between(snapshot.fetchedAt, now).compareTo(CACHE_TTL) < 0) return snapshot.value;
+    com.aiprovider.logging.BusinessOperationLogger.start("service.TencentTrafficService.current", new String[] {}, new Object[] {});
+    Instant now = Instant.now(); Cache snapshot = cache;
+        if (snapshot != null && Duration.between(snapshot.fetchedAt, now).compareTo(CACHE_TTL) < 0) return com.aiprovider.logging.BusinessOperationLogger.success("service.TencentTrafficService.current", snapshot.value);
         synchronized (lock) {
             snapshot = cache; now = Instant.now();
-            if (snapshot != null && Duration.between(snapshot.fetchedAt, now).compareTo(CACHE_TTL) < 0) return snapshot.value;
-            if (secretId.trim().isEmpty() || secretKey.trim().isEmpty()) return MonitorSummaryVO.Traffic.unavailable("NOT_CONFIGURED");
+            if (snapshot != null && Duration.between(snapshot.fetchedAt, now).compareTo(CACHE_TTL) < 0) return com.aiprovider.logging.BusinessOperationLogger.success("service.TencentTrafficService.current", snapshot.value);
+            if (secretId.trim().isEmpty() || secretKey.trim().isEmpty()) return com.aiprovider.logging.BusinessOperationLogger.success("service.TencentTrafficService.current", MonitorSummaryVO.Traffic.unavailable("NOT_CONFIGURED"));
             try {
-                MonitorSummaryVO.Traffic value = fetch(); cache = new Cache(now, value); return value;
+                MonitorSummaryVO.Traffic value = fetch(); cache = new Cache(now, value); return com.aiprovider.logging.BusinessOperationLogger.success("service.TencentTrafficService.current", value);
             } catch (TencentCloudSDKException exception) {
                 log.warn("Tencent Cloud call failed action=DescribeInstancesTrafficPackages code={} requestId={} occurredAt={}",
                     exception.getErrorCode(), exception.getRequestId(), OffsetDateTime.now());
             } catch (RuntimeException exception) {
                 log.warn("Tencent Cloud call failed action=DescribeInstancesTrafficPackages code=LOCAL_RESPONSE_ERROR requestId=none occurredAt={}", OffsetDateTime.now());
             }
-            if (snapshot != null && Duration.between(snapshot.fetchedAt, now).compareTo(STALE_LIMIT) < 0) return snapshot.value.asStale();
-            return MonitorSummaryVO.Traffic.unavailable("UNAVAILABLE");
+            if (snapshot != null && Duration.between(snapshot.fetchedAt, now).compareTo(STALE_LIMIT) < 0) return com.aiprovider.logging.BusinessOperationLogger.success("service.TencentTrafficService.current", snapshot.value.asStale());
+            return com.aiprovider.logging.BusinessOperationLogger.success("service.TencentTrafficService.current", MonitorSummaryVO.Traffic.unavailable("UNAVAILABLE"));
         }
     }
 
