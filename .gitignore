@@ -30,6 +30,12 @@ AIProvider-front/*.log
 ComfyUIAgent/bin/
 ComfyUIAgent/obj/
 ComfyUIAgent/appsettings.json
+AIProvider-back/logs/
+ComfyUIAgent.Tests/bin/
+ComfyUIAgent.Tests/obj/
+.codex-audit/
+.workbuddy/
+docs/superpowers/plans/2026-07-21-image-metadata-gallery-recycle-queue-fixes.md
 .idea/
 /node_modules/
 /remote-dev/
