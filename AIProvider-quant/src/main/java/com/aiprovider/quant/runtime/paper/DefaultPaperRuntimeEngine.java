@@ -15,6 +15,7 @@ import com.aiprovider.quant.market.runtime.DefaultRuntimeMarketStateEngine;
 import com.aiprovider.quant.market.runtime.RuntimeMarketState;
 import com.aiprovider.quant.market.runtime.RuntimeMarketStateEngine;
 import com.aiprovider.quant.market.runtime.RuntimeMarketStateException;
+import com.aiprovider.quant.market.runtime.RuntimeMarketStateRestoreRequest;
 import com.aiprovider.quant.market.runtime.RuntimeMarketUpdateResult;
 import com.aiprovider.quant.market.runtime.RuntimeMarketUpdateType;
 import com.aiprovider.quant.market.runtime.RuntimeMarkPrice;
@@ -48,6 +49,103 @@ public final class DefaultPaperRuntimeEngine implements PaperRuntimeEngine {
         this.marketEngine = marketEngine;
         this.tradingEngine = tradingEngine;
         this.accountEngine = accountEngine;
+    }
+
+    @Override
+    public PaperRuntimeSnapshot restore(PaperRuntimeRestoreRequest request) {
+        if (request == null) {
+            throw restoreInvalid("request is null");
+        }
+        PaperRuntimeConfig config = request.getConfig();
+        RuntimeMarketState marketState = request.getMarketState();
+        PaperTradingSessionSnapshot session = request.getTradingSession();
+        Instant lastEventTime = request.getLastProcessedEventTime();
+        PaperRuntimeStepType lastStepType = request.getLastStepType();
+        if (config == null || marketState == null || session == null) {
+            throw restoreInvalid("config, marketState and tradingSession are required");
+        }
+        if ((lastEventTime == null) != (lastStepType == null)) {
+            throw restoreInvalid("lastProcessedEventTime and lastStepType must be present together");
+        }
+        if (!config.getMarketKey().equals(marketState.getKey())
+                || config.getMaxClosedCandles() != marketState.getMaxClosedCandles()) {
+            throw restoreContext("runtime config does not match market state");
+        }
+        if (!config.getTradingConfig().equals(session.getConfig())) {
+            throw restoreContext("runtime trading config does not match trading session");
+        }
+
+        if (lastEventTime == null) {
+            if (marketState.getLastKlineEventTime() != null
+                    || marketState.getLastBookTickerEventTime() != null
+                    || marketState.getLastMarkPriceEventTime() != null) {
+                throw restoreInvalid("initial runtime must not have realtime market watermarks");
+            }
+        } else {
+            requireStepWatermark(marketState, lastEventTime, lastStepType);
+        }
+
+        RuntimeMarketState restoredMarket;
+        try {
+            restoredMarket = marketEngine.restore(new RuntimeMarketStateRestoreRequest(
+                    marketState.getKey(), marketState.getMaxClosedCandles(), marketState.getClosedCandles(),
+                    marketState.getLatestTopOfBook(), marketState.getLatestMarkPrice(),
+                    marketState.getLastKlineEventTime(), marketState.getLastBookTickerEventTime(),
+                    marketState.getLastMarkPriceEventTime(), marketState.getLastKlineEventFingerprint(),
+                    marketState.getLastBookTickerEventFingerprint(),
+                    marketState.getLastMarkPriceEventFingerprint()));
+        } catch (RuntimeMarketStateException exception) {
+            throw new PaperRuntimeException(PaperRuntimeException.PAPER_RUNTIME_RESTORE_INVALID,
+                    "restored market state rejected: " + exception.getErrorCode(), exception);
+        } catch (RuntimeException exception) {
+            throw new PaperRuntimeException(PaperRuntimeException.PAPER_RUNTIME_RESTORE_INVALID,
+                    "restored market state construction failed", exception);
+        }
+        try {
+            return new PaperRuntimeSnapshot(config, restoredMarket, session, lastEventTime, lastStepType);
+        } catch (PaperRuntimeException exception) {
+            throw new PaperRuntimeException(PaperRuntimeException.PAPER_RUNTIME_RESTORE_INVALID,
+                    "restored paper runtime construction failed", exception);
+        } catch (RuntimeException exception) {
+            throw new PaperRuntimeException(PaperRuntimeException.PAPER_RUNTIME_RESTORE_INVALID,
+                    "restored paper runtime construction failed", exception);
+        }
+    }
+
+    private static void requireStepWatermark(RuntimeMarketState marketState, Instant eventTime,
+                                              PaperRuntimeStepType stepType) {
+        Instant expected;
+        if (stepType == PaperRuntimeStepType.OPEN_KLINE_IGNORED
+                || stepType == PaperRuntimeStepType.DUPLICATE_CLOSED_CANDLE_IGNORED
+                || stepType == PaperRuntimeStepType.CLOSED_CANDLE_PROCESSED) {
+            expected = marketState.getLastKlineEventTime();
+        } else if (stepType == PaperRuntimeStepType.DUPLICATE_TOP_OF_BOOK_IGNORED
+                || stepType == PaperRuntimeStepType.TOP_OF_BOOK_UPDATED
+                || stepType == PaperRuntimeStepType.PENDING_ORDER_EXECUTED) {
+            expected = marketState.getLastBookTickerEventTime();
+        } else if (stepType == PaperRuntimeStepType.MARK_PRICE_UPDATED
+                || stepType == PaperRuntimeStepType.DUPLICATE_MARK_PRICE_IGNORED) {
+            expected = marketState.getLastMarkPriceEventTime();
+        } else {
+            throw restoreStepMismatch("unsupported lastStepType: " + stepType);
+        }
+        if (!eventTime.equals(expected)) {
+            throw restoreStepMismatch("lastStepType does not match its market watermark");
+        }
+    }
+
+    private static PaperRuntimeException restoreInvalid(String message) {
+        return new PaperRuntimeException(PaperRuntimeException.PAPER_RUNTIME_RESTORE_INVALID, message);
+    }
+
+    private static PaperRuntimeException restoreContext(String message) {
+        return new PaperRuntimeException(
+                PaperRuntimeException.PAPER_RUNTIME_RESTORE_CONTEXT_MISMATCH, message);
+    }
+
+    private static PaperRuntimeException restoreStepMismatch(String message) {
+        return new PaperRuntimeException(
+                PaperRuntimeException.PAPER_RUNTIME_RESTORE_STEP_MISMATCH, message);
     }
 
     @Override

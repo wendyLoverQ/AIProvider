@@ -9,6 +9,11 @@ import com.aiprovider.quant.market.stream.model.StreamMarkPriceEvent;
 import java.util.List;
 
 public interface PaperRuntimeEngine {
+    default PaperRuntimeSnapshot restore(PaperRuntimeRestoreRequest request) {
+        throw new PaperRuntimeException(PaperRuntimeException.PAPER_RUNTIME_RESTORE_INVALID,
+                "restore is not implemented by this engine");
+    }
+
     PaperRuntimeSnapshot initialize(PaperRuntimeConfig config,
                                     List<HistoricalCandle> seedCandles,
                                     PaperAccountSnapshot account);

@@ -14,6 +14,9 @@ public final class PaperTradingException extends RuntimeException {
     public static final String PAPER_TRADING_EXECUTION_FAILED = "PAPER_TRADING_EXECUTION_FAILED";
     public static final String PAPER_TRADING_ACCOUNT_FAILED = "PAPER_TRADING_ACCOUNT_FAILED";
     public static final String PAPER_TRADING_STATE_INVALID = "PAPER_TRADING_STATE_INVALID";
+    public static final String PAPER_TRADING_RESTORE_INVALID = "PAPER_TRADING_RESTORE_INVALID";
+    public static final String PAPER_TRADING_RESTORE_CONTEXT_MISMATCH =
+            "PAPER_TRADING_RESTORE_CONTEXT_MISMATCH";
 
     private final String errorCode;
 

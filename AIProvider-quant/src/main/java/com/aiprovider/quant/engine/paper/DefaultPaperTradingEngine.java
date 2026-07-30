@@ -81,6 +81,148 @@ public final class DefaultPaperTradingEngine implements PaperTradingEngine {
     }
 
     @Override
+    public PaperTradingSessionSnapshot restore(PaperTradingSessionRestoreRequest request) {
+        if (request == null) {
+            throw restoreInvalid("request is null");
+        }
+        PaperTradingSessionConfig config = request.getConfig();
+        PaperAccountSnapshot account = request.getPaperAccountSnapshot();
+        Instant updatedAt = request.getLastUpdatedAt();
+        if (config == null || account == null || updatedAt == null) {
+            throw restoreInvalid("config, paperAccountSnapshot and lastUpdatedAt are required");
+        }
+        if (!updatedAt.equals(account.getLastUpdatedAt())) {
+            throw restoreInvalid("lastUpdatedAt must equal paperAccountSnapshot.lastUpdatedAt");
+        }
+        if (account.getProvider() != config.getProvider()
+                || account.getMarketType() != config.getMarketType()
+                || !config.getMarketOrderQuantityRules().quoteAsset().equals(account.getQuoteAsset())
+                || (account.getPosition().isOpen()
+                && !config.getSymbol().equals(account.getPosition().getSymbol()))) {
+            throw restoreContext("paper account context does not match session config");
+        }
+
+        ExecutionOrderSnapshot pending = request.getPendingOrderSnapshot();
+        ExecutionOrderSnapshot lastOrder = request.getLastOrderSnapshot();
+        if (pending != null && !isPendingStatus(pending.getStatus())) {
+            throw restoreInvalid("pending order must be SUBMITTED or PARTIALLY_FILLED");
+        }
+        if (pending != null && !pending.equals(lastOrder)) {
+            throw restoreInvalid("pending order must equal last order");
+        }
+        if (lastOrder != null && isPendingStatus(lastOrder.getStatus())
+                && (pending == null || !pending.equals(lastOrder))) {
+            throw restoreInvalid("pending order is required for an active last order");
+        }
+        requireOrderContext(config, pending, updatedAt, "pendingOrderSnapshot");
+        requireOrderContext(config, lastOrder, updatedAt, "lastOrderSnapshot");
+
+        PaperSignalCandleSnapshot candle = request.getLastEvaluatedCandle();
+        if (candle != null) {
+            requireRestoreCandleContext(config, candle);
+            if (candle.getCloseTime().isAfter(updatedAt)) {
+                throw restoreInvalid("lastEvaluatedCandle.closeTime must not be after lastUpdatedAt");
+            }
+        }
+
+        StrategySignalDecision signal = request.getLastSignalDecision();
+        if (signal != null) {
+            requireSignalContext(config, signal);
+            if (signal.getSignalCloseTime().isAfter(updatedAt)) {
+                throw restoreInvalid("lastSignalDecision.signalCloseTime must not be after lastUpdatedAt");
+            }
+            if (candle != null) {
+                if (signal.getSignalCloseTime().isAfter(candle.getCloseTime())) {
+                    throw restoreInvalid("signal close time must not be after last candle close time");
+                }
+                if (signal.getSignalCloseTime().equals(candle.getCloseTime())
+                        && (!signal.getSignalOpenTime().equals(candle.getOpenTime())
+                        || !signal.getSignalPrice().equals(candle.getClosePrice()))) {
+                    throw restoreInvalid("same-close signal must match candle open time and close price");
+                }
+            }
+        }
+
+        PositionSizingResult sizing = request.getLastSizingResult();
+        if (sizing != null) {
+            if (signal == null || sizing.policyType() != config.getPositionSizingPolicyType()
+                    || !sizing.quoteAsset().equals(config.getMarketOrderQuantityRules().quoteAsset())
+                    || sizing.referencePrice().compareTo(signal.getSignalPrice()) != 0) {
+                throw restoreInvalid("lastSizingResult does not match signal or session config");
+            }
+        }
+
+        PreTradeRiskDecision risk = request.getLastRiskDecision();
+        if (risk != null) {
+            if (signal == null || lastOrder == null
+                    || !risk.getClientOrderId().equals(lastOrder.getRequest().getClientOrderId())
+                    || risk.getOrderSide() != lastOrder.getRequest().getOrderSide()
+                    || risk.getOrderQuantity().compareTo(lastOrder.getRequest().getQuantity()) != 0
+                    || risk.getReferencePrice().compareTo(signal.getSignalPrice()) != 0) {
+                throw restoreInvalid("lastRiskDecision does not match signal or last order");
+            }
+        }
+        try {
+            return new PaperTradingSessionSnapshot(config, account, pending, lastOrder, signal,
+                    sizing, risk, candle, updatedAt);
+        } catch (PaperTradingException exception) {
+            throw new PaperTradingException(PaperTradingException.PAPER_TRADING_RESTORE_INVALID,
+                    "restored paper session construction failed", exception);
+        } catch (RuntimeException exception) {
+            throw new PaperTradingException(PaperTradingException.PAPER_TRADING_RESTORE_INVALID,
+                    "restored paper session construction failed", exception);
+        }
+    }
+
+    private static boolean isPendingStatus(ExecutionOrderStatus status) {
+        return status == ExecutionOrderStatus.SUBMITTED || status == ExecutionOrderStatus.PARTIALLY_FILLED;
+    }
+
+    private static void requireOrderContext(PaperTradingSessionConfig config,
+                                             ExecutionOrderSnapshot order, Instant updatedAt,
+                                             String field) {
+        if (order == null) return;
+        if (order.getRequest() == null || order.getRequest().getProvider() != config.getProvider()
+                || order.getRequest().getMarketType() != config.getMarketType()
+                || !config.getSymbol().equals(order.getRequest().getSymbol())) {
+            throw restoreContext(field + " context does not match session config");
+        }
+        if (order.getLastUpdatedAt() == null || order.getLastUpdatedAt().isAfter(updatedAt)) {
+            throw restoreInvalid(field + ".lastUpdatedAt must not be after session lastUpdatedAt");
+        }
+    }
+
+    private static void requireRestoreCandleContext(PaperTradingSessionConfig config,
+                                                    PaperSignalCandleSnapshot candle) {
+        if (candle.getProvider() != config.getProvider() || candle.getMarketType() != config.getMarketType()
+                || !config.getSymbol().equals(candle.getSymbol())
+                || candle.getInterval() != config.getKlineInterval()) {
+            throw restoreContext("lastEvaluatedCandle context does not match session config");
+        }
+    }
+
+    private static void requireSignalContext(PaperTradingSessionConfig config,
+                                              StrategySignalDecision signal) {
+        if (signal.getProvider() != config.getProvider() || signal.getMarketType() != config.getMarketType()
+                || !config.getSymbol().equals(signal.getSymbol())
+                || signal.getInterval() != config.getKlineInterval()
+                || !config.getStrategyCode().equals(signal.getStrategyCode())
+                || !config.getStrategyVersion().equals(signal.getStrategyVersion())
+                || !config.getStrategyParameters().equals(signal.getStrategyParameters())) {
+            throw restoreContext("lastSignalDecision context does not match session config");
+        }
+    }
+
+    private static PaperTradingException restoreInvalid(String message) {
+        return new PaperTradingException(PaperTradingException.PAPER_TRADING_RESTORE_INVALID, message);
+    }
+
+    private static PaperTradingException restoreContext(String message) {
+        return new PaperTradingException(
+                PaperTradingException.PAPER_TRADING_RESTORE_CONTEXT_MISMATCH, message);
+    }
+
+    @Override
     public PaperTradingSessionSnapshot createSession(
             PaperTradingSessionConfig config, PaperAccountSnapshot paperAccount) {
         if (config == null || paperAccount == null) {
