@@ -97,7 +97,8 @@ public final class DefaultPaperAccountEngine implements PaperAccountEngine {
 
     private List<PaperAppliedFill> validateAppliedFills(PaperAccountRestoreRequest request) {
         List<PaperAppliedFill> source = request.getAppliedFills();
-        if (source == null || source.isEmpty()) throw restoreFailure("appliedFills must not be empty");
+        if (source == null) throw restoreFailure("appliedFills is required");
+        if (source.isEmpty()) return List.of();
         Set<List<String>> keys = new HashSet<>();
         List<PaperAppliedFill> result = new ArrayList<>(source.size());
         for (int index = 0; index < source.size(); index++) {

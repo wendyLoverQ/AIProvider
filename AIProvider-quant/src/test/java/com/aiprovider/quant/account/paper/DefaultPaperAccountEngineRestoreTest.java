@@ -25,14 +25,12 @@ class DefaultPaperAccountEngineRestoreTest {
     private final DefaultPaperAccountEngine engine = new DefaultPaperAccountEngine();
 
     @Test
-    void restoresFlatAndOpenAccountsWithAppliedFills() {
+    void restoresZeroFillAndOpenAccountsExactly() {
         PaperAccountSnapshot flat = engine.initialize("paper-1", MarketProviderId.BINANCE_USDM,
                 MarketType.USDM_PERPETUAL, "USDT", new BigDecimal("10000"), DAY, T0);
         PaperAccountSnapshot restoredFlat = engine.restore(request(flat));
-        assertThat(restoredFlat.getAccountId()).isEqualTo(flat.getAccountId());
-        assertThat(restoredFlat.getPosition().isFlat()).isTrue();
-        assertThat(restoredFlat.getTotalEquity()).isEqualByComparingTo(flat.getTotalEquity());
-        assertThat(restoredFlat.getAppliedFills()).hasSize(1);
+        assertThat(restoredFlat).isEqualTo(flat);
+        assertThat(restoredFlat.getAppliedFills()).isEmpty();
 
         PaperAccountSnapshot open = engine.applyFill(flat, buy("open-1", "2", T0),
                 fill("fill-1", "2", "100", "1", T0.plusSeconds(1))).getAccount();
@@ -41,17 +39,31 @@ class DefaultPaperAccountEngineRestoreTest {
     }
 
     @Test
-    void restoredOpenAccountCanMarkToMarketAndAcceptANewFill() {
-        PaperAccountSnapshot open = engine.applyFill(account(), buy("open-1", "2", T0),
-                fill("fill-1", "2", "100", "1", T0.plusSeconds(1))).getAccount();
-        PaperAccountSnapshot restored = engine.restore(request(open));
+    void zeroFillAccountCanContinueValuationAndAcceptFirstRealFill() {
+        PaperAccountSnapshot restored = engine.restore(request(account()));
         PaperAccountSnapshot marked = engine.markToMarket(restored, SYMBOL, new BigDecimal("120"),
-                T0.plusSeconds(2));
-        PaperAccountSnapshot updated = engine.applyFill(marked, buy("open-1", "2", T0.plusSeconds(2)),
-                fill("fill-2", "1", "121", "0.1", T0.plusSeconds(3))).getAccount();
+                T0.plusSeconds(1));
+        ExecutionFill firstRealFill = fill("fill-1", "1", "121", "0.1", T0.plusSeconds(2));
+        PaperAccountSnapshot updated = engine.applyFill(marked, buy("open-1", "1", T0.plusSeconds(1)),
+                firstRealFill).getAccount();
 
-        assertThat(updated.getPosition().getQuantity()).isEqualByComparingTo("3");
-        assertThat(updated.getAppliedFills()).hasSize(2);
+        assertThat(updated.getAppliedFills()).hasSize(1);
+        assertThat(updated.getAppliedFills().get(0).getClientOrderId()).isEqualTo("open-1");
+        assertThat(updated.getAppliedFills().get(0).getFillId()).isEqualTo(firstRealFill.getFillId());
+    }
+
+    @Test
+    void rejectsNullAppliedFillListButAcceptsEmptyList() {
+        PaperAccountSnapshot original = account();
+        PaperAccountRestoreRequest nullList = request(original, (List<PaperAppliedFill>) null);
+        assertThatThrownBy(() -> engine.restore(nullList))
+                .isInstanceOf(PaperAccountException.class)
+                .hasMessageContaining("appliedFills is required")
+                .extracting(e -> ((PaperAccountException) e).getErrorCode())
+                .isEqualTo(PaperAccountException.PAPER_ACCOUNT_RESTORE_INVALID);
+
+        PaperAccountSnapshot restored = engine.restore(request(original));
+        assertThat(restored.getAppliedFills()).isEmpty();
     }
 
     @Test
@@ -87,6 +99,10 @@ class DefaultPaperAccountEngineRestoreTest {
         PaperAppliedFill afterLastUpdate = PaperAppliedFill.from("order-1", fill(
                 "fill-1", "1", "100", "1", T0.plusSeconds(1)));
         assertRestoreInvalid(request(flat, List.of(afterLastUpdate)));
+
+        List<PaperAppliedFill> nullElement = new ArrayList<>();
+        nullElement.add(null);
+        assertRestoreInvalid(request(flat, nullElement));
     }
 
     @Test
@@ -97,6 +113,11 @@ class DefaultPaperAccountEngineRestoreTest {
         source.clear();
         assertThat(request.getAppliedFills()).hasSize(1);
         assertThatThrownBy(() -> request.getAppliedFills().clear()).isInstanceOf(UnsupportedOperationException.class);
+
+        PaperAccountRestoreRequest emptyRequest = request(account());
+        assertThat(emptyRequest.getAppliedFills()).isEmpty();
+        assertThatThrownBy(() -> emptyRequest.getAppliedFills().clear())
+                .isInstanceOf(UnsupportedOperationException.class);
     }
 
     private PaperAccountSnapshot account() {
@@ -105,14 +126,10 @@ class DefaultPaperAccountEngineRestoreTest {
     }
 
     private PaperAccountRestoreRequest request(PaperAccountSnapshot snapshot) {
-        List<PaperAppliedFill> fills = snapshot.getAppliedFills();
-        if (fills.isEmpty()) {
-            fills = List.of(PaperAppliedFill.from("historical-order",
-                    fill("historical-fill", "1", "100", "0", snapshot.getLastUpdatedAt())));
-        }
         PaperPositionSnapshot position = snapshot.getPosition();
         return request(snapshot, position.getPositionNotional(), position.getUnrealizedPnl(),
-                snapshot.getTotalEquity(), snapshot.getAvailableCapital(), position.getQuantity(), fills);
+                snapshot.getTotalEquity(), snapshot.getAvailableCapital(), position.getQuantity(),
+                snapshot.getAppliedFills());
     }
 
     private PaperAccountRestoreRequest request(
@@ -123,10 +140,7 @@ class DefaultPaperAccountEngineRestoreTest {
             BigDecimal availableCapital,
             BigDecimal positionQuantity) {
         return request(snapshot, positionNotional, positionUnrealizedPnl, totalEquity,
-                availableCapital, positionQuantity, snapshot.getAppliedFills().isEmpty()
-                        ? List.of(PaperAppliedFill.from("historical-order",
-                        fill("historical-fill", "1", "100", "0", snapshot.getLastUpdatedAt())))
-                        : snapshot.getAppliedFills());
+                availableCapital, positionQuantity, snapshot.getAppliedFills());
     }
 
     private PaperAccountRestoreRequest request(
