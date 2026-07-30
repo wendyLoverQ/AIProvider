@@ -43,6 +43,12 @@ public final class PaperAppliedFill {
                 fill.getFilledAt());
     }
 
+    static PaperAppliedFill restore(
+            String clientOrderId, String fillId, BigDecimal quantity, BigDecimal price,
+            BigDecimal fee, String feeAsset, Instant filledAt) {
+        return new PaperAppliedFill(clientOrderId, fillId, quantity, price, fee, feeAsset, filledAt);
+    }
+
     boolean hasKey(String candidateClientOrderId, String candidateFillId) {
         return clientOrderId.equals(candidateClientOrderId) && fillId.equals(candidateFillId);
     }

@@ -11,11 +11,167 @@ import java.math.BigDecimal;
 import java.math.MathContext;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public final class DefaultPaperAccountEngine implements PaperAccountEngine {
     private static final MathContext CALCULATION_CONTEXT = MathContext.DECIMAL128;
+
+    @Override
+    public PaperAccountSnapshot restore(PaperAccountRestoreRequest request) {
+        if (request == null) throw restoreFailure("request is null");
+        requireRestoreText("accountId", request.getAccountId());
+        if (request.getProvider() == null) throw restoreFailure("provider is required");
+        if (request.getMarketType() != MarketType.USDM_PERPETUAL) {
+            throw restoreFailure("marketType must be USDM_PERPETUAL");
+        }
+        requireRestoreText("quoteAsset", request.getQuoteAsset());
+        requireAmount("initialCapital", request.getInitialCapital());
+        requireAmount("realizedPnl", request.getRealizedPnl());
+        requireAmount("unrealizedPnl", request.getUnrealizedPnl());
+        requireAmount("totalEquity", request.getTotalEquity());
+        requireAmount("availableCapital", request.getAvailableCapital());
+        if (request.getInitialCapital().signum() <= 0) {
+            throw restoreFailure("initialCapital must be positive");
+        }
+        if (request.getConsecutiveLosses() < 0) {
+            throw restoreFailure("consecutiveLosses must not be negative");
+        }
+        if (request.getTradingUtcDate() == null) throw restoreFailure("tradingUtcDate is required");
+        requireAmount("dayStartEquity", request.getDayStartEquity());
+        requireAmount("dailyRealizedPnl", request.getDailyRealizedPnl());
+        if (request.getDayStartEquity().signum() < 0) {
+            throw restoreFailure("dayStartEquity must not be negative");
+        }
+        if (request.getLastUpdatedAt() == null) throw restoreFailure("lastUpdatedAt is required");
+        LocalDate lastUpdatedUtcDate = request.getLastUpdatedAt().atZone(ZoneOffset.UTC).toLocalDate();
+        if (request.getTradingUtcDate().isAfter(lastUpdatedUtcDate)) {
+            throw restoreFailure("tradingUtcDate must not be later than lastUpdatedAt UTC date");
+        }
+
+        requireAmount("positionQuantity", request.getPositionQuantity());
+        requireAmount("averageEntryPrice", request.getAverageEntryPrice());
+        requireAmount("markPrice", request.getMarkPrice());
+        requireAmount("positionNotional", request.getPositionNotional());
+        requireAmount("positionUnrealizedPnl", request.getPositionUnrealizedPnl());
+        requireAmount("openTradeNetPnl", request.getOpenTradeNetPnl());
+        PaperPositionSnapshot position;
+        if (!request.isPositionOpen()) {
+            requireFlatPosition(request);
+            position = PaperPositionSnapshot.flat();
+        } else {
+            requireOpenPosition(request);
+            position = PaperPositionSnapshot.open(
+                    request.getPositionSymbol(), request.getPositionQuantity(),
+                    request.getAverageEntryPrice(), request.getMarkPrice(),
+                    request.getPositionNotional(), request.getPositionUnrealizedPnl(),
+                    request.getOpeningClientOrderId(), request.getOpenTradeNetPnl());
+        }
+
+        if (request.getUnrealizedPnl().compareTo(request.getPositionUnrealizedPnl()) != 0) {
+            throw restoreFailure("unrealizedPnl must equal positionUnrealizedPnl");
+        }
+        BigDecimal expectedTotal = request.getInitialCapital()
+                .add(request.getRealizedPnl()).add(request.getUnrealizedPnl());
+        if (request.getTotalEquity().compareTo(expectedTotal) != 0) {
+            throw restoreFailure("totalEquity does not equal initialCapital + realizedPnl + unrealizedPnl");
+        }
+        BigDecimal expectedAvailable = expectedTotal.subtract(request.getPositionNotional())
+                .max(BigDecimal.ZERO);
+        if (request.getAvailableCapital().compareTo(expectedAvailable) != 0) {
+            throw restoreFailure("availableCapital does not equal max(totalEquity - positionNotional, 0)");
+        }
+
+        List<PaperAppliedFill> appliedFills = validateAppliedFills(request);
+        return new PaperAccountSnapshot(
+                request.getAccountId(), request.getProvider(), request.getMarketType(),
+                request.getQuoteAsset(), request.getInitialCapital(), request.getRealizedPnl(),
+                request.getUnrealizedPnl(), request.getTotalEquity(), request.getAvailableCapital(),
+                position, new PaperTradingDayState(request.getTradingUtcDate(),
+                request.getDayStartEquity(), request.getDailyRealizedPnl()),
+                request.getConsecutiveLosses(), appliedFills, request.getLastUpdatedAt());
+    }
+
+    private List<PaperAppliedFill> validateAppliedFills(PaperAccountRestoreRequest request) {
+        List<PaperAppliedFill> source = request.getAppliedFills();
+        if (source == null || source.isEmpty()) throw restoreFailure("appliedFills must not be empty");
+        Set<List<String>> keys = new HashSet<>();
+        List<PaperAppliedFill> result = new ArrayList<>(source.size());
+        for (int index = 0; index < source.size(); index++) {
+            PaperAppliedFill fill = source.get(index);
+            if (fill == null) throw restoreFailure("appliedFills[" + index + "] is null");
+            requireRestoreText("appliedFills[" + index + "].clientOrderId", fill.getClientOrderId());
+            requireRestoreText("appliedFills[" + index + "].fillId", fill.getFillId());
+            requireAmount("appliedFills[" + index + "].quantity", fill.getQuantity());
+            requireAmount("appliedFills[" + index + "].price", fill.getPrice());
+            requireAmount("appliedFills[" + index + "].fee", fill.getFee());
+            if (fill.getQuantity().signum() <= 0) throw restoreFailure("appliedFills[" + index + "].quantity must be positive");
+            if (fill.getPrice().signum() <= 0) throw restoreFailure("appliedFills[" + index + "].price must be positive");
+            if (fill.getFee().signum() < 0) throw restoreFailure("appliedFills[" + index + "].fee must not be negative");
+            if (!request.getQuoteAsset().equals(fill.getFeeAsset())) {
+                throw restoreFailure("appliedFills[" + index + "].feeAsset must equal quoteAsset");
+            }
+            if (fill.getFilledAt() == null) throw restoreFailure("appliedFills[" + index + "].filledAt is required");
+            if (fill.getFilledAt().isAfter(request.getLastUpdatedAt())) {
+                throw restoreFailure("appliedFills[" + index + "].filledAt must not be later than lastUpdatedAt");
+            }
+            if (!keys.add(List.of(fill.getClientOrderId(), fill.getFillId()))) {
+                throw restoreFailure("appliedFills contains duplicate (clientOrderId, fillId)");
+            }
+            result.add(PaperAppliedFill.restore(fill.getClientOrderId(), fill.getFillId(),
+                    fill.getQuantity(), fill.getPrice(), fill.getFee(), fill.getFeeAsset(), fill.getFilledAt()));
+        }
+        return List.copyOf(result);
+    }
+
+    private void requireFlatPosition(PaperAccountRestoreRequest request) {
+        if (request.getPositionSymbol() != null) throw restoreFailure("flat positionSymbol must be null");
+        if (request.getOpeningClientOrderId() != null) throw restoreFailure("flat openingClientOrderId must be null");
+        requireZero("flat positionQuantity", request.getPositionQuantity());
+        requireZero("flat averageEntryPrice", request.getAverageEntryPrice());
+        requireZero("flat markPrice", request.getMarkPrice());
+        requireZero("flat positionNotional", request.getPositionNotional());
+        requireZero("flat positionUnrealizedPnl", request.getPositionUnrealizedPnl());
+        requireZero("flat openTradeNetPnl", request.getOpenTradeNetPnl());
+    }
+
+    private void requireOpenPosition(PaperAccountRestoreRequest request) {
+        requireRestoreText("positionSymbol", request.getPositionSymbol());
+        requireRestoreText("openingClientOrderId", request.getOpeningClientOrderId());
+        if (request.getPositionQuantity().signum() <= 0) throw restoreFailure("positionQuantity must be positive");
+        if (request.getAverageEntryPrice().signum() <= 0) throw restoreFailure("averageEntryPrice must be positive");
+        if (request.getMarkPrice().signum() <= 0) throw restoreFailure("markPrice must be positive");
+        if (request.getPositionNotional().signum() < 0) throw restoreFailure("positionNotional must not be negative");
+        BigDecimal expectedNotional = request.getPositionQuantity().multiply(request.getMarkPrice());
+        if (request.getPositionNotional().compareTo(expectedNotional) != 0) {
+            throw restoreFailure("positionNotional does not equal positionQuantity * markPrice");
+        }
+        BigDecimal expectedUnrealized = request.getPositionQuantity()
+                .multiply(request.getMarkPrice().subtract(request.getAverageEntryPrice()));
+        if (request.getPositionUnrealizedPnl().compareTo(expectedUnrealized) != 0) {
+            throw restoreFailure("positionUnrealizedPnl does not equal quantity * (markPrice - averageEntryPrice)");
+        }
+    }
+
+    private void requireAmount(String field, BigDecimal value) {
+        if (value == null) throw restoreFailure(field + " is required");
+    }
+
+    private void requireZero(String field, BigDecimal value) {
+        requireAmount(field, value);
+        if (value.signum() != 0) throw restoreFailure(field + " must be zero for a flat position");
+    }
+
+    private void requireRestoreText(String field, String value) {
+        if (value == null || value.isBlank()) throw restoreFailure(field + " must not be blank");
+    }
+
+    private PaperAccountException restoreFailure(String message) {
+        return new PaperAccountException(PaperAccountException.PAPER_ACCOUNT_RESTORE_INVALID, message);
+    }
 
     @Override
     public PaperAccountSnapshot initialize(

@@ -15,6 +15,127 @@ public final class DefaultRuntimeMarketStateEngine implements RuntimeMarketState
     private static final String MARK_PRICE_CONFLICT = "RUNTIME_MARKET_MARK_PRICE_CONFLICT";
 
     @Override
+    public RuntimeMarketState restore(RuntimeMarketStateRestoreRequest request) {
+        if (request == null) {
+            throw restoreFailure("request is null");
+        }
+        RuntimeMarketKey key = request.getKey();
+        List<RuntimeClosedCandle> candles = request.getClosedCandles();
+        if (key == null) throw restoreFailure("key is required");
+        if (request.getMaxClosedCandles() < 2) {
+            throw restoreFailure("maxClosedCandles must be at least 2");
+        }
+        if (candles == null || candles.isEmpty()) {
+            throw restoreFailure("closedCandles must not be empty");
+        }
+        if (candles.size() > request.getMaxClosedCandles()) {
+            throw restoreFailure("closedCandles.size must not exceed maxClosedCandles");
+        }
+
+        RuntimeClosedCandle previous = null;
+        for (int index = 0; index < candles.size(); index++) {
+            RuntimeClosedCandle current = candles.get(index);
+            if (current == null) throw restoreFailure("closedCandles[" + index + "] is null");
+            requireRestoreCandleContext(key, current, index);
+            if (previous != null) {
+                int order = current.getOpenTime().compareTo(previous.getOpenTime());
+                if (order <= 0) {
+                    throw restoreFailure("closedCandles must be strictly ordered by openTime");
+                }
+                Instant expected = previous.getOpenTime()
+                        .plusMillis(key.getInterval().durationMillis());
+                if (!current.getOpenTime().equals(expected)) {
+                    throw restoreFailure("closedCandles contain a time gap at index " + index);
+                }
+            }
+            previous = current;
+        }
+
+        requireWatermarkPair("lastKlineEventTime", request.getLastKlineEventTime(),
+                request.getLastKlineEventFingerprint());
+        requireWatermarkPair("lastBookTickerEventTime", request.getLastBookTickerEventTime(),
+                request.getLastBookTickerEventFingerprint());
+        requireWatermarkPair("lastMarkPriceEventTime", request.getLastMarkPriceEventTime(),
+                request.getLastMarkPriceEventFingerprint());
+        if (request.getLastKlineEventTime() != null
+                && request.getLastKlineEventTime().isBefore(previous.getEventTime())) {
+            throw restoreFailure("lastKlineEventTime must not precede the last closed candle eventTime");
+        }
+
+        requireBookRestore(key, request.getLatestTopOfBook(), request.getLastBookTickerEventTime());
+        requireMarkRestore(key, request.getLatestMarkPrice(), request.getLastMarkPriceEventTime());
+        try {
+            return new RuntimeMarketState(key, request.getMaxClosedCandles(), candles,
+                    request.getLatestTopOfBook(), request.getLatestMarkPrice(),
+                    request.getLastKlineEventTime(), request.getLastBookTickerEventTime(),
+                    request.getLastMarkPriceEventTime(), request.getLastKlineEventFingerprint(),
+                    request.getLastBookTickerEventFingerprint(), request.getLastMarkPriceEventFingerprint());
+        } catch (RuntimeMarketStateException exception) {
+            throw new RuntimeMarketStateException(RuntimeMarketStateException.RESTORE_INVALID,
+                    "restored runtime market state construction failed", exception);
+        }
+    }
+
+    private static void requireRestoreCandleContext(
+            RuntimeMarketKey key, RuntimeClosedCandle candle, int index) {
+        if (candle.getProvider() != key.getProvider()
+                || candle.getMarketType() != key.getMarketType()
+                || !key.getSymbol().equals(candle.getSymbol())
+                || candle.getInterval() != key.getInterval()) {
+            throw restoreFailure("closedCandles[" + index + "] does not match key context");
+        }
+    }
+
+    private static void requireWatermarkPair(String field, Instant watermark, String fingerprint) {
+        if ((watermark == null) != (fingerprint == null)) {
+            throw restoreFailure(field + " and its fingerprint must be present together");
+        }
+        if (fingerprint != null && fingerprint.isEmpty()) {
+            throw restoreFailure(field + " fingerprint must not be empty");
+        }
+    }
+
+    private static void requireBookRestore(
+            RuntimeMarketKey key, RuntimeTopOfBook topOfBook, Instant watermark) {
+        if ((topOfBook == null) != (watermark == null)) {
+            throw restoreFailure("latestTopOfBook and lastBookTickerEventTime must be present together");
+        }
+        if (topOfBook != null) {
+            requireRestoreContext(key, topOfBook.getProvider(), topOfBook.getMarketType(),
+                    topOfBook.getSymbol(), "latestTopOfBook");
+            if (!topOfBook.getEventTime().equals(watermark)) {
+                throw restoreFailure("latestTopOfBook.eventTime must equal lastBookTickerEventTime");
+            }
+        }
+    }
+
+    private static void requireMarkRestore(
+            RuntimeMarketKey key, RuntimeMarkPrice markPrice, Instant watermark) {
+        if ((markPrice == null) != (watermark == null)) {
+            throw restoreFailure("latestMarkPrice and lastMarkPriceEventTime must be present together");
+        }
+        if (markPrice != null) {
+            requireRestoreContext(key, markPrice.getProvider(), markPrice.getMarketType(),
+                    markPrice.getSymbol(), "latestMarkPrice");
+            if (!markPrice.getEventTime().equals(watermark)) {
+                throw restoreFailure("latestMarkPrice.eventTime must equal lastMarkPriceEventTime");
+            }
+        }
+    }
+
+    private static void requireRestoreContext(
+            RuntimeMarketKey key, Object provider, Object marketType, String symbol, String field) {
+        if (provider != key.getProvider() || marketType != key.getMarketType()
+                || !key.getSymbol().equals(symbol)) {
+            throw restoreFailure(field + " does not match key context");
+        }
+    }
+
+    private static RuntimeMarketStateException restoreFailure(String message) {
+        return new RuntimeMarketStateException(RuntimeMarketStateException.RESTORE_INVALID, message);
+    }
+
+    @Override
     public RuntimeMarketState initialize(RuntimeMarketKey key, int maxClosedCandles,
                                          List<HistoricalCandle> seedCandles) {
         if (key == null || seedCandles == null || maxClosedCandles < 2) {

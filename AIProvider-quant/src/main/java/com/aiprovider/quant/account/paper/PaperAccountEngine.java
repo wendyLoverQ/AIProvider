@@ -10,6 +10,10 @@ import java.time.Instant;
 import java.time.LocalDate;
 
 public interface PaperAccountEngine {
+    default PaperAccountSnapshot restore(PaperAccountRestoreRequest request) {
+        throw new UnsupportedOperationException("restore is not implemented by this engine");
+    }
+
     PaperAccountSnapshot initialize(
             String accountId,
             MarketProviderId provider,

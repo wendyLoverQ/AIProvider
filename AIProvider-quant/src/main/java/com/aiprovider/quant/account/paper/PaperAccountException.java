@@ -12,6 +12,7 @@ public final class PaperAccountException extends RuntimeException {
     public static final String PAPER_ACCOUNT_DUPLICATE_FILL_CONFLICT = "PAPER_ACCOUNT_DUPLICATE_FILL_CONFLICT";
     public static final String PAPER_ACCOUNT_TIME_INVALID = "PAPER_ACCOUNT_TIME_INVALID";
     public static final String PAPER_ACCOUNT_CALCULATION_FAILED = "PAPER_ACCOUNT_CALCULATION_FAILED";
+    public static final String PAPER_ACCOUNT_RESTORE_INVALID = "PAPER_ACCOUNT_RESTORE_INVALID";
 
     private final String errorCode;
 

@@ -8,6 +8,10 @@ import com.aiprovider.quant.market.stream.model.StreamMarkPriceEvent;
 import java.util.List;
 
 public interface RuntimeMarketStateEngine {
+    default RuntimeMarketState restore(RuntimeMarketStateRestoreRequest request) {
+        throw new UnsupportedOperationException("restore is not implemented by this engine");
+    }
+
     RuntimeMarketState initialize(RuntimeMarketKey key, int maxClosedCandles,
                                   List<HistoricalCandle> seedCandles);
 

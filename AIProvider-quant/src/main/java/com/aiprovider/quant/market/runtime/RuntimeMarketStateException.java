@@ -14,11 +14,20 @@ public final class RuntimeMarketStateException extends RuntimeException {
     public static final String BOOK_CONFLICT = "RUNTIME_MARKET_BOOK_CONFLICT";
     public static final String EVENT_TIME_INVALID = "RUNTIME_MARKET_EVENT_TIME_INVALID";
     public static final String STATE_INVALID = "RUNTIME_MARKET_STATE_INVALID";
+    public static final String RESTORE_INVALID = "RUNTIME_MARKET_RESTORE_INVALID";
 
     private final String errorCode;
 
     public RuntimeMarketStateException(String errorCode, String message) {
         super(message);
+        if (errorCode == null || errorCode.isBlank()) {
+            throw new IllegalArgumentException("errorCode must not be blank");
+        }
+        this.errorCode = errorCode;
+    }
+
+    public RuntimeMarketStateException(String errorCode, String message, Throwable cause) {
+        super(message, cause);
         if (errorCode == null || errorCode.isBlank()) {
             throw new IllegalArgumentException("errorCode must not be blank");
         }
